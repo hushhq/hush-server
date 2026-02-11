@@ -32,7 +32,7 @@ export function registerSocketHandlers(io) {
         const peer = room.peers.get(peerId);
         if (!peer) return callback({ error: 'Peer not found' });
 
-        const { transport, params } = await mediasoupManager.createWebRtcTransport(room.router);
+        const { transport, params } = await mediasoupManager.createWebRtcTransport(room.router, direction);
 
         // Store transport on peer
         peer.transports.set(transport.id, transport);

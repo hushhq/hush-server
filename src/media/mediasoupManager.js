@@ -45,10 +45,11 @@ class MediasoupManager {
     return router;
   }
 
-  async createWebRtcTransport(router) {
-    const transport = await router.createWebRtcTransport(
-      config.mediasoup.webRtcTransport
-    );
+  async createWebRtcTransport(router, direction) {
+    const transport = await router.createWebRtcTransport({
+      ...config.mediasoup.webRtcTransport,
+      appData: { direction },
+    });
 
     // Set max incoming bitrate if configured
     if (config.mediasoup.webRtcTransport.maxIncomingBitrate) {
