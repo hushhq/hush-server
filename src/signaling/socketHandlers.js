@@ -38,9 +38,14 @@ export function registerSocketHandlers(io) {
         peer.transports.set(transport.id, transport);
 
         transport.on('dtlsstatechange', (dtlsState) => {
+          console.log(`[transport] ${peerId} ${direction} DTLS: ${dtlsState}`);
           if (dtlsState === 'closed') {
             transport.close();
           }
+        });
+
+        transport.on('icestatechange', (iceState) => {
+          console.log(`[transport] ${peerId} ${direction} ICE: ${iceState}`);
         });
 
         transport.on('close', () => {
@@ -131,6 +136,16 @@ export function registerSocketHandlers(io) {
 
         if (!recvTransport) return callback({ error: 'No receive transport' });
 
+        // Look up the producer to relay its appData (source type, etc.)
+        let producerAppData = {};
+        for (const p of room.peers.values()) {
+          const prod = p.producers.get(producerId);
+          if (prod) {
+            producerAppData = prod.appData;
+            break;
+          }
+        }
+
         const consumer = await recvTransport.consume({
           producerId,
           rtpCapabilities,
@@ -153,7 +168,7 @@ export function registerSocketHandlers(io) {
           producerId,
           kind: consumer.kind,
           rtpParameters: consumer.rtpParameters,
-          appData: consumer.appData,
+          appData: producerAppData,
         });
       } catch (err) {
         callback({ error: err.message });
@@ -169,6 +184,7 @@ export function registerSocketHandlers(io) {
         if (!consumer) return callback({ error: 'Consumer not found' });
 
         await consumer.resume();
+        console.log(`[mediasoup] Consumer ${consumerId} resumed (peer: ${peerId})`);
         callback({});
       } catch (err) {
         callback({ error: err.message });
