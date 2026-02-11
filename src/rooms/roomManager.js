@@ -77,7 +77,7 @@ class RoomManager {
     }));
   }
 
-  addPeer(roomName, peerId, displayName) {
+  addPeer(roomName, peerId, displayName, socketId = null) {
     const room = this.rooms.get(roomName);
     if (!room) throw new Error('Room not found');
     if (room.peers.size >= room.limits.maxParticipants) {
@@ -87,6 +87,7 @@ class RoomManager {
     const peer = {
       id: peerId,
       displayName,
+      socketId,
       joinedAt: Date.now(),
       // mediasoup transports and producers/consumers
       transports: new Map(),  // Map<transportId, Transport>
@@ -96,6 +97,30 @@ class RoomManager {
 
     room.peers.set(peerId, peer);
     console.log(`[room] "${roomName}": ${displayName} joined (${room.peers.size}/${config.maxParticipantsPerRoom})`);
+    return peer;
+  }
+
+  /**
+   * Reset a peer's mediasoup state on reconnection (new socket for same peerId).
+   * Closes old transports and clears producers/consumers, then updates socketId.
+   */
+  resetPeer(roomName, peerId, newSocketId) {
+    const room = this.rooms.get(roomName);
+    if (!room) return null;
+
+    const peer = room.peers.get(peerId);
+    if (!peer) return null;
+
+    // Close stale transports (also closes their producers/consumers)
+    for (const transport of peer.transports.values()) {
+      transport.close();
+    }
+    peer.transports.clear();
+    peer.producers.clear();
+    peer.consumers.clear();
+    peer.socketId = newSocketId;
+
+    console.log(`[room] "${roomName}": ${peer.displayName} reconnected (socket: ${newSocketId})`);
     return peer;
   }
 

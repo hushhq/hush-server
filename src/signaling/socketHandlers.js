@@ -5,10 +5,30 @@ import mediasoupManager from '../media/mediasoupManager.js';
 export function registerSocketHandlers(io) {
   io.on('connection', (socket) => {
     const { peerId, roomName, displayName } = socket;
-    console.log(`[socket] ${displayName} connected (${peerId})`);
+    console.log(`[socket] ${displayName} connected (${peerId}, socket: ${socket.id})`);
 
     // Join the socket.io room for broadcasting
     socket.join(roomName);
+
+    // ─── Ensure peer exists in room (handles reconnect after disconnect) ───
+    const room = roomManager.getRoom(roomName);
+    if (room) {
+      const existingPeer = room.peers.get(peerId);
+      if (existingPeer) {
+        // Peer already exists — reconnection. Reset stale mediasoup state.
+        roomManager.resetPeer(roomName, peerId, socket.id);
+      } else {
+        // Peer was removed (disconnect fired before reconnect). Re-add.
+        try {
+          roomManager.addPeer(roomName, peerId, displayName, socket.id);
+        } catch (err) {
+          console.error(`[socket] Failed to re-register peer: ${err.message}`);
+          socket.emit('error', { message: err.message });
+          socket.disconnect(true);
+          return;
+        }
+      }
+    }
 
     // ─── Get Router RTP Capabilities ─────────────────────
     // Client needs these to initialize mediasoup-client Device
@@ -262,9 +282,16 @@ export function registerSocketHandlers(io) {
 
     // ─── Disconnect ──────────────────────────────────────
     socket.on('disconnect', () => {
-      console.log(`[socket] ${displayName} disconnected (${peerId})`);
-      roomManager.removePeer(roomName, peerId);
-      socket.to(roomName).emit('peerLeft', { peerId, displayName });
+      console.log(`[socket] ${displayName} disconnected (${peerId}, socket: ${socket.id})`);
+
+      // Only remove peer if this socket is still the active one.
+      // On page reload, a new socket may have already re-registered the peer.
+      const currentRoom = roomManager.getRoom(roomName);
+      const currentPeer = currentRoom?.peers.get(peerId);
+      if (currentPeer && currentPeer.socketId === socket.id) {
+        roomManager.removePeer(roomName, peerId);
+        socket.to(roomName).emit('peerLeft', { peerId, displayName });
+      }
     });
 
     // ─── Notify others that this peer joined ─────────────
