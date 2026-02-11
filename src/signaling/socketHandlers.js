@@ -122,13 +122,15 @@ export function registerSocketHandlers(io) {
           peer.producers.delete(producer.id);
         });
 
-        // Notify all other peers in the room
-        socket.to(roomName).emit('newProducer', {
-          producerId: producer.id,
-          peerId,
-          kind: producer.kind,
-          appData: producer.appData,
-        });
+        // Notify all other peers (skip internal warmup producers)
+        if (appData?.source !== '_warmup') {
+          socket.to(roomName).emit('newProducer', {
+            producerId: producer.id,
+            peerId,
+            kind: producer.kind,
+            appData: producer.appData,
+          });
+        }
 
         callback({ producerId: producer.id });
       } catch (err) {
