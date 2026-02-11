@@ -23,14 +23,14 @@ const config = {
     free: {
       maxParticipants: parseInt(process.env.FREE_MAX_PARTICIPANTS || '4'),
       maxScreenShares: parseInt(process.env.FREE_MAX_SCREEN_SHARES || '1'),
-      maxBitrate: parseInt(process.env.FREE_MAX_BITRATE || '4500000'), // 1080p
-      maxQuality: '1080p',
+      maxBitrate: parseInt(process.env.FREE_MAX_BITRATE || '2500000'), // lite
+      maxQuality: 'lite',
     },
     supporter: {
       maxParticipants: parseInt(process.env.SUPPORTER_MAX_PARTICIPANTS || '10'),
       maxScreenShares: parseInt(process.env.SUPPORTER_MAX_SCREEN_SHARES || '3'),
-      maxBitrate: parseInt(process.env.SUPPORTER_MAX_BITRATE || '15000000'), // 4K
-      maxQuality: '4K',
+      maxBitrate: parseInt(process.env.SUPPORTER_MAX_BITRATE || '12000000'), // source
+      maxQuality: 'source',
     },
   },
 
