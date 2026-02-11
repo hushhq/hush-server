@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  hush:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+      - "40000-40100:40000-40100/udp"
+      - "40000-40100:40000-40100/tcp"
+    environment:
+      - PORT=3001
+      - HOST=0.0.0.0
+      - JWT_SECRET=${JWT_SECRET:-please-change-this-secret}
+      - CORS_ORIGIN=*
+      - MAX_PARTICIPANTS=${MAX_PARTICIPANTS:-10}
+      - MAX_SCREEN_SHARES=${MAX_SCREEN_SHARES:-3}
+      - RTC_MIN_PORT=40000
+      - RTC_MAX_PORT=40100
+      - ANNOUNCED_IP=${ANNOUNCED_IP:-}
+    restart: unless-stopped
+    # mediasoup needs host network for best WebRTC performance
+    # Uncomment below for production (and remove ports above):
+    # network_mode: host
