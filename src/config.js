@@ -95,12 +95,12 @@ const config = {
         {
           protocol: 'udp',
           ip: '0.0.0.0',
-          announcedAddress: process.env.ANNOUNCED_IP || null,
+          announcedAddress: process.env.ANNOUNCED_IP || '127.0.0.1',
         },
         {
           protocol: 'tcp',
           ip: '0.0.0.0',
-          announcedAddress: process.env.ANNOUNCED_IP || null,
+          announcedAddress: process.env.ANNOUNCED_IP || '127.0.0.1',
         },
       ],
       initialAvailableOutgoingBitrate: 1000000,

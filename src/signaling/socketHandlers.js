@@ -125,15 +125,9 @@ export function registerSocketHandlers(io) {
         const peer = room.peers.get(peerId);
         if (!peer) return callback({ error: 'Peer not found' });
 
-        // Find the receive transport
-        let recvTransport = null;
-        for (const t of peer.transports.values()) {
-          // The second transport created is typically the recv transport
-          // We identify by checking if it has no producers
-          if (t.appData?.direction === 'recv' || !recvTransport) {
-            recvTransport = t;
-          }
-        }
+        // Find the receive transport by direction stored in appData
+        const recvTransport = Array.from(peer.transports.values())
+          .find((t) => t.appData?.direction === 'recv');
 
         if (!recvTransport) return callback({ error: 'No receive transport' });
 
