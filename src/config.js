@@ -19,16 +19,18 @@ const config = {
   maxScreenSharesPerRoom: parseInt(process.env.MAX_SCREEN_SHARES || '3'),
 
   // Tier-specific limits
+  // Note: Both tiers have same per-room capabilities.
+  // Tier distinction is only about pool access (30 free rooms vs guaranteed supporter access).
   tiers: {
     free: {
-      maxParticipants: parseInt(process.env.FREE_MAX_PARTICIPANTS || '4'),
-      maxScreenShares: parseInt(process.env.FREE_MAX_SCREEN_SHARES || '1'),
-      maxBitrate: parseInt(process.env.FREE_MAX_BITRATE || '2500000'), // lite
-      maxQuality: 'lite',
+      maxParticipants: parseInt(process.env.FREE_MAX_PARTICIPANTS || '8'),
+      maxScreenShares: parseInt(process.env.FREE_MAX_SCREEN_SHARES || '8'),
+      maxBitrate: parseInt(process.env.FREE_MAX_BITRATE || '12000000'), // source
+      maxQuality: 'source',
     },
     supporter: {
-      maxParticipants: parseInt(process.env.SUPPORTER_MAX_PARTICIPANTS || '10'),
-      maxScreenShares: parseInt(process.env.SUPPORTER_MAX_SCREEN_SHARES || '3'),
+      maxParticipants: parseInt(process.env.SUPPORTER_MAX_PARTICIPANTS || '8'),
+      maxScreenShares: parseInt(process.env.SUPPORTER_MAX_SCREEN_SHARES || '8'),
       maxBitrate: parseInt(process.env.SUPPORTER_MAX_BITRATE || '12000000'), // source
       maxQuality: 'source',
     },
