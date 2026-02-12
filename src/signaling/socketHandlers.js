@@ -267,6 +267,41 @@ export function registerSocketHandlers(io) {
       }
     });
 
+    // ─── Chat Message ────────────────────────────────────
+    socket.on('sendMessage', ({ text }, callback) => {
+      try {
+        // Validate input
+        if (!text || typeof text !== 'string') {
+          return callback({ error: 'Message text required' });
+        }
+
+        const trimmedText = text.trim();
+
+        if (trimmedText.length === 0) {
+          return callback({ error: 'Message cannot be empty' });
+        }
+        if (trimmedText.length > 2000) {
+          return callback({ error: 'Message too long (max 2000 characters)' });
+        }
+
+        // Construct and broadcast message
+        const message = {
+          messageId: `msg_${peerId}_${Date.now()}`,
+          peerId,
+          displayName,
+          text: trimmedText,
+          timestamp: Date.now(),
+        };
+
+        // Broadcast to all peers in room (including sender)
+        io.in(roomName).emit('messageReceived', message);
+
+        callback({});
+      } catch (err) {
+        callback({ error: err.message });
+      }
+    });
+
     // ─── E2E Key Exchange ────────────────────────────────
     // The server relays the encrypted key material without reading it
     socket.on('e2eKeyExchange', ({ targetPeerId, keyMaterial }) => {
