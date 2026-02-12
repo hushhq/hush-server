@@ -2,6 +2,10 @@ import config from '../config.js';
 import roomManager from '../rooms/roomManager.js';
 import mediasoupManager from '../media/mediasoupManager.js';
 
+// Rate limiting: track recent message timestamps per peer
+// Map<peerId, timestamp[]>
+const messageTimestamps = new Map();
+
 export function registerSocketHandlers(io) {
   io.on('connection', (socket) => {
     const { peerId, roomName, displayName } = socket;
@@ -284,6 +288,21 @@ export function registerSocketHandlers(io) {
           return callback({ error: 'Message too long (max 2000 characters)' });
         }
 
+        // Rate limiting: max 5 messages per 5 seconds
+        const now = Date.now();
+        const timestamps = messageTimestamps.get(peerId) || [];
+
+        // Remove timestamps older than 5 seconds
+        const recentTimestamps = timestamps.filter(t => now - t < 5000);
+
+        if (recentTimestamps.length >= 5) {
+          return callback({ error: 'Too many messages. Please slow down.' });
+        }
+
+        // Add current timestamp
+        recentTimestamps.push(now);
+        messageTimestamps.set(peerId, recentTimestamps);
+
         // Construct and broadcast message
         const message = {
           messageId: `msg_${peerId}_${Date.now()}`,
@@ -328,6 +347,9 @@ export function registerSocketHandlers(io) {
       if (currentPeer && currentPeer.socketId === socket.id) {
         roomManager.removePeer(roomName, peerId);
         socket.to(roomName).emit('peerLeft', { peerId, displayName });
+
+        // Clean up rate limit tracking
+        messageTimestamps.delete(peerId);
       }
     });
 
