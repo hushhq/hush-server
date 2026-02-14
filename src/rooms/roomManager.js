@@ -1,6 +1,5 @@
 import bcrypt from 'bcrypt';
 import config from '../config.js';
-import mediasoupManager from '../media/mediasoupManager.js';
 import resourcePool from './resourcePool.js';
 
 class RoomManager {
@@ -28,7 +27,6 @@ class RoomManager {
     }
 
     const hashedPassword = await bcrypt.hash(password, config.bcryptRounds);
-    const router = await mediasoupManager.createRouter();
     const tierConfig = config.tiers[tier] || config.tiers.free;
 
     const room = {
@@ -36,7 +34,6 @@ class RoomManager {
       passwordHash: hashedPassword,
       creatorId,
       tier,
-      router,
       // Tier-specific limits applied to this room
       limits: {
         maxParticipants: tierConfig.maxParticipants,
@@ -47,7 +44,6 @@ class RoomManager {
       // Map<peerId, Peer>
       peers: new Map(),
       createdAt: Date.now(),
-      e2eEnabled: false,
     };
 
     this.rooms.set(roomName, room);
@@ -89,10 +85,6 @@ class RoomManager {
       displayName,
       socketId,
       joinedAt: Date.now(),
-      // mediasoup transports and producers/consumers
-      transports: new Map(),  // Map<transportId, Transport>
-      producers: new Map(),   // Map<producerId, Producer>
-      consumers: new Map(),   // Map<consumerId, Consumer>
     };
 
     room.peers.set(peerId, peer);
@@ -101,8 +93,8 @@ class RoomManager {
   }
 
   /**
-   * Reset a peer's mediasoup state on reconnection (new socket for same peerId).
-   * Closes old transports and clears producers/consumers, then updates socketId.
+   * Reset a peer's state on reconnection (new socket for same peerId).
+   * Updates socketId for the peer.
    */
   resetPeer(roomName, peerId, newSocketId) {
     const room = this.rooms.get(roomName);
@@ -111,13 +103,6 @@ class RoomManager {
     const peer = room.peers.get(peerId);
     if (!peer) return null;
 
-    // Close stale transports (also closes their producers/consumers)
-    for (const transport of peer.transports.values()) {
-      transport.close();
-    }
-    peer.transports.clear();
-    peer.producers.clear();
-    peer.consumers.clear();
     peer.socketId = newSocketId;
 
     console.log(`[room] "${roomName}": ${peer.displayName} reconnected (socket: ${newSocketId})`);
@@ -131,17 +116,11 @@ class RoomManager {
     const peer = room.peers.get(peerId);
     if (!peer) return;
 
-    // Close all mediasoup transports (this also closes producers/consumers)
-    for (const transport of peer.transports.values()) {
-      transport.close();
-    }
-
     room.peers.delete(peerId);
     console.log(`[room] "${roomName}": ${peer.displayName} left (${room.peers.size}/${config.maxParticipantsPerRoom})`);
 
     // Auto-delete empty rooms
     if (room.peers.size === 0) {
-      room.router.close();
       resourcePool.removeRoom(room.tier);
       this.rooms.delete(roomName);
       console.log(`[room] "${roomName}" [${room.tier}] deleted (empty)`);
@@ -154,24 +133,15 @@ class RoomManager {
     return Array.from(room.peers.values()).map((peer) => ({
       id: peer.id,
       displayName: peer.displayName,
-      producers: Array.from(peer.producers.values()).map((p) => ({
-        id: p.id,
-        kind: p.kind,
-        appData: p.appData,
-      })),
     }));
   }
 
   getActiveScreenShares(roomName) {
     const room = this.rooms.get(roomName);
     if (!room) return 0;
-    let count = 0;
-    for (const peer of room.peers.values()) {
-      for (const producer of peer.producers.values()) {
-        if (producer.appData?.source === 'screen') count++;
-      }
-    }
-    return count;
+    // Screen shares are now tracked by LiveKit, not in roomManager
+    // This method is preserved for API compatibility but returns 0
+    return 0;
   }
 }
 

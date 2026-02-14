@@ -1,16 +1,14 @@
 import express from 'express';
 import { createServer } from 'http';
-import { Server as SocketIO } from 'socket.io';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 import config from './config.js';
-import mediasoupManager from './media/mediasoupManager.js';
 import roomManager from './rooms/roomManager.js';
 import resourcePool from './rooms/resourcePool.js';
-import { generateToken, socketAuthMiddleware } from './auth/auth.js';
-import { registerSocketHandlers } from './signaling/socketHandlers.js';
+import { generateToken } from './auth/auth.js';
+import { generateToken as generateLiveKitToken } from './livekit/tokenService.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -157,6 +155,34 @@ app.post('/api/rooms/join', async (req, res) => {
   }
 });
 
+// Generate LiveKit token
+app.post('/api/livekit/token', async (req, res) => {
+  try {
+    const { roomName, participantIdentity, participantName } = req.body;
+
+    // Validate required parameters
+    if (!roomName || !participantIdentity || !participantName) {
+      return res.status(400).json({
+        error: 'roomName, participantIdentity, and participantName are required',
+      });
+    }
+
+    // Verify room exists (temporary validation - will be Matrix-only in Milestone B3)
+    const room = roomManager.getRoom(roomName);
+    if (!room) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+
+    // Generate LiveKit JWT (async in livekit-server-sdk v2.x)
+    const token = await generateLiveKitToken(roomName, participantIdentity, participantName);
+
+    res.json({ token });
+  } catch (err) {
+    console.error('[api] LiveKit token error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Static files (production) ───────────────────────────
 const clientBuild = path.join(__dirname, '../../client/dist');
 app.use(express.static(clientBuild));
@@ -166,36 +192,16 @@ app.get('*', (req, res, next) => {
   res.sendFile(path.join(clientBuild, 'index.html'));
 });
 
-// ─── Socket.io ───────────────────────────────────────────
-const io = new SocketIO(httpServer, {
-  cors: {
-    origin: config.corsOrigin,
-    methods: ['GET', 'POST'],
-  },
-  // Optimize for media signaling
-  pingTimeout: 30000,
-  pingInterval: 10000,
-});
-
-// Auth middleware — verify JWT before allowing socket connection
-io.use(socketAuthMiddleware);
-
-// Register all signaling handlers
-registerSocketHandlers(io);
-
 // ─── Start ───────────────────────────────────────────────
 async function start() {
   try {
-    // Initialize mediasoup workers
-    await mediasoupManager.init();
-
     httpServer.listen(config.port, config.host, () => {
       console.log(`
 ╔══════════════════════════════════════╗
 ║             HUSH SERVER              ║
 ║──────────────────────────────────────║
 ║  http://${config.host}:${config.port}              ║
-║  mediasoup workers: ${config.mediasoup.numWorkers}               ║
+║  LiveKit + Matrix                    ║
 ║  max per room: ${config.maxParticipantsPerRoom}                  ║
 ╚══════════════════════════════════════╝
       `);
@@ -209,7 +215,6 @@ async function start() {
 // Graceful shutdown
 process.on('SIGINT', () => {
   console.log('\n[server] Shutting down...');
-  mediasoupManager.close();
   httpServer.close();
   process.exit(0);
 });
