@@ -1,0 +1,71 @@
+# Caddy reverse proxy configuration for Hush
+# Routes Matrix API calls to Synapse and everything else to the Hush app
+
+{
+  # Disable automatic HTTPS for localhost development
+  auto_https off
+}
+
+# Main site configuration
+http://localhost {
+  # Matrix homeserver API routes
+  handle /_matrix/* {
+    reverse_proxy synapse:8008 {
+      # Preserve WebSocket upgrade headers
+      header_up Connection {http.request.header.Connection}
+      header_up Upgrade {http.request.header.Upgrade}
+
+      # Set X-Forwarded-* headers for Synapse
+      header_up X-Forwarded-For {remote_host}
+      header_up X-Forwarded-Proto {scheme}
+      header_up X-Forwarded-Host {host}
+    }
+
+    # CORS headers for Matrix client access
+    header Access-Control-Allow-Origin "*"
+    header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+    header Access-Control-Allow-Headers "Origin, X-Requested-With, Content-Type, Accept, Authorization"
+
+    # Handle preflight requests
+    @options {
+      method OPTIONS
+    }
+    handle @options {
+      respond 204
+    }
+  }
+
+  # LiveKit WebSocket signaling routes
+  handle /livekit/* {
+    reverse_proxy livekit:7880 {
+      # Preserve WebSocket upgrade headers
+      header_up Connection {http.request.header.Connection}
+      header_up Upgrade {http.request.header.Upgrade}
+
+      # Set X-Forwarded-* headers for LiveKit
+      header_up X-Forwarded-For {remote_host}
+      header_up X-Forwarded-Proto {scheme}
+      header_up X-Forwarded-Host {host}
+    }
+  }
+
+  # All other traffic goes to Hush app
+  handle /* {
+    reverse_proxy hush:3001 {
+      # Preserve WebSocket upgrade headers for Socket.io
+      header_up Connection {http.request.header.Connection}
+      header_up Upgrade {http.request.header.Upgrade}
+
+      # Set X-Forwarded-* headers
+      header_up X-Forwarded-For {remote_host}
+      header_up X-Forwarded-Proto {scheme}
+      header_up X-Forwarded-Host {host}
+    }
+  }
+
+  # Enable access logging
+  log {
+    output stdout
+    format console
+  }
+}
