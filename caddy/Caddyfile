@@ -8,6 +8,10 @@
 
 # Main site configuration
 http://localhost {
+  # Required for SharedArrayBuffer (LiveKit E2EE worker)
+  header Cross-Origin-Opener-Policy "same-origin"
+  header Cross-Origin-Embedder-Policy "require-corp"
+
   # Matrix homeserver API routes
   handle /_matrix/* {
     reverse_proxy synapse:8008 {
