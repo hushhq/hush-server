@@ -1,0 +1,27 @@
+# docker-compose.prod.yml — gethush.live hosted deployment
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Differences from docker-compose.yml:
+#   - Removes livekit and redis services (using LiveKit Cloud instead)
+#   - Sets NODE_ENV=production on the hush server
+#   - Reads LIVEKIT_* vars from environment (set in hosting platform, not docker-compose)
+
+version: "3.8"
+
+services:
+  # Override hush server to production mode
+  hush:
+    environment:
+      - NODE_ENV=production
+      # LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_URL must be set
+      # in the hosting platform env — not here. Never hardcode keys.
+
+  # Disable self-hosted LiveKit (using LiveKit Cloud)
+  livekit:
+    profiles:
+      - self-hosted-only  # This effectively disables it in prod compose
+
+  # Disable Redis (only needed for self-hosted LiveKit)
+  redis:
+    profiles:
+      - self-hosted-only
