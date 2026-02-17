@@ -1,13 +1,9 @@
 import express from 'express';
 import { createServer } from 'http';
-import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 import config from './config.js';
-import roomManager from './rooms/roomManager.js';
-import resourcePool from './rooms/resourcePool.js';
-import { generateToken } from './auth/auth.js';
 import { generateToken as generateLiveKitToken } from './livekit/tokenService.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -17,7 +13,6 @@ const httpServer = createServer(app);
 // ─── Middleware ───────────────────────────────────────────
 app.use(express.json());
 
-// CORS for development
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', config.corsOrigin);
   res.header('Access-Control-Allow-Methods', 'GET, POST');
@@ -27,159 +22,34 @@ app.use((req, res, next) => {
 
 // ─── REST API ────────────────────────────────────────────
 
-// Health check
 app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    rooms: roomManager.getRoomList().length,
-    uptime: process.uptime(),
-  });
+  res.json({ status: 'ok', uptime: process.uptime() });
 });
 
-// Public server status — fully transparent resource allocation
-// Anyone can verify these numbers match the source code
-app.get('/api/status', (req, res) => {
-  res.json({
-    status: 'ok',
-    pools: resourcePool.getPublicStatus(),
-    system: resourcePool.getSystemInfo(),
-    rooms: roomManager.getRoomList(),
-  });
-});
-
-// List rooms (names and participant counts only)
-app.get('/api/rooms', (req, res) => {
-  res.json({
-    rooms: roomManager.getRoomList(),
-    pools: resourcePool.getPublicStatus(),
-  });
-});
-
-// Create room
-app.post('/api/rooms/create', async (req, res) => {
-  try {
-    const { roomName, password, displayName, tier } = req.body;
-
-    if (!roomName || !password || !displayName) {
-      return res.status(400).json({ error: 'roomName, password, and displayName required' });
-    }
-
-    if (roomName.length > 50 || password.length < 4) {
-      return res.status(400).json({ error: 'Room name max 50 chars, password min 4 chars' });
-    }
-
-    const existingRoom = roomManager.getRoom(roomName);
-    if (existingRoom) {
-      return res.status(409).json({ error: 'Room already exists' });
-    }
-
-    // Determine tier (default: free)
-    // TODO: validate supporter tier against actual payment/auth
-    const roomTier = tier === 'supporter' ? 'supporter' : 'free';
-
-    const peerId = uuidv4();
-    const room = await roomManager.createRoom(roomName, password, peerId, roomTier);
-    roomManager.addPeer(roomName, peerId, displayName);
-
-    const token = generateToken(peerId, roomName, displayName);
-
-    res.json({
-      token,
-      peerId,
-      roomName,
-      tier: roomTier,
-      limits: room.limits,
-    });
-  } catch (err) {
-    // Handle pool-full errors with transparent messaging
-    if (err.code === 'free_pool_full') {
-      return res.status(503).json({
-        error: 'FREE_POOL_FULL',
-        message: 'I posti gratuiti sono esauriti in questo momento.',
-        pools: err.pool,
-        options: [
-          { action: 'retry', label: 'Riprova tra qualche minuto' },
-          { action: 'support', label: 'Accesso dedicato con supporto' },
-          { action: 'selfhost', label: 'Self-hosting (gratis, illimitato)' },
-        ],
-      });
-    }
-    if (err.code === 'supporter_pool_full') {
-      return res.status(503).json({
-        error: 'SUPPORTER_POOL_FULL',
-        message: 'Anche i posti supporter sono temporaneamente esauriti.',
-        pools: err.pool,
-      });
-    }
-
-    console.error('[api] Create room error:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Join room
-app.post('/api/rooms/join', async (req, res) => {
-  try {
-    const { roomName, password, displayName } = req.body;
-
-    if (!roomName || !password || !displayName) {
-      return res.status(400).json({ error: 'roomName, password, and displayName required' });
-    }
-
-    const room = roomManager.getRoom(roomName);
-    if (!room) {
-      return res.status(404).json({ error: 'Room not found' });
-    }
-
-    const valid = await roomManager.verifyPassword(roomName, password);
-    if (!valid) {
-      return res.status(401).json({ error: 'Incorrect password' });
-    }
-
-    const peerId = uuidv4();
-    roomManager.addPeer(roomName, peerId, displayName);
-
-    const token = generateToken(peerId, roomName, displayName);
-
-    res.json({
-      token,
-      peerId,
-      roomName,
-    });
-  } catch (err) {
-    if (err.message === 'Room is full') {
-      return res.status(403).json({ error: err.message });
-    }
-    console.error('[api] Join room error:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Generate LiveKit token
+// LiveKit token (validates Matrix token via whoami; identity from Matrix)
 app.post('/api/livekit/token', async (req, res) => {
   try {
-    const { roomName, participantIdentity, participantName } = req.body;
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.startsWith('Bearer ')
+      ? authHeader.slice(7)
+      : null;
+    const { roomName, participantName } = req.body;
 
-    // Validate required parameters
-    if (!roomName || !participantIdentity || !participantName) {
-      return res.status(400).json({
-        error: 'roomName, participantIdentity, and participantName are required',
-      });
+    if (!roomName) {
+      return res.status(400).json({ error: 'roomName is required' });
     }
 
-    // Verify room exists (temporary validation - will be Matrix-only in Milestone B3)
-    const room = roomManager.getRoom(roomName);
-    if (!room) {
-      return res.status(404).json({ error: 'Room not found' });
-    }
+    const livekitToken = await generateLiveKitToken(
+      token,
+      roomName,
+      participantName || 'Participant',
+    );
 
-    // Generate LiveKit JWT (async in livekit-server-sdk v2.x)
-    const token = await generateLiveKitToken(roomName, participantIdentity, participantName);
-
-    res.json({ token });
+    res.json({ token: livekitToken });
   } catch (err) {
-    console.error('[api] LiveKit token error:', err);
-    res.status(500).json({ error: err.message });
+    const status = err.statusCode || 500;
+    console.error('[api] LiveKit token error:', err.message);
+    res.status(status).json({ error: err.message || 'Token generation failed' });
   }
 });
 
@@ -187,7 +57,6 @@ app.post('/api/livekit/token', async (req, res) => {
 const clientBuild = path.join(__dirname, '../../client/dist');
 app.use(express.static(clientBuild));
 app.get('*', (req, res, next) => {
-  // Don't catch API routes
   if (req.path.startsWith('/api')) return next();
   res.sendFile(path.join(clientBuild, 'index.html'));
 });
@@ -202,7 +71,6 @@ async function start() {
 ║──────────────────────────────────────║
 ║  http://${config.host}:${config.port}              ║
 ║  LiveKit + Matrix                    ║
-║  max per room: ${config.maxParticipantsPerRoom}                  ║
 ╚══════════════════════════════════════╝
       `);
     });
@@ -212,7 +80,6 @@ async function start() {
   }
 }
 
-// Graceful shutdown
 process.on('SIGINT', () => {
   console.log('\n[server] Shutting down...');
   httpServer.close();
