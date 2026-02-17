@@ -1,8 +1,4 @@
 import 'dotenv/config';
-import os from 'os';
-
-// Detect number of CPU cores for mediasoup workers
-const numWorkers = Math.min(os.cpus().length, 4);
 
 const config = {
   // Server
@@ -19,98 +15,23 @@ const config = {
   maxScreenSharesPerRoom: parseInt(process.env.MAX_SCREEN_SHARES || '3'),
 
   // Tier-specific limits
-  // Note: Both tiers have same per-room capabilities.
-  // Tier distinction is only about pool access (30 free rooms vs guaranteed supporter access).
   tiers: {
     free: {
       maxParticipants: parseInt(process.env.FREE_MAX_PARTICIPANTS || '8'),
       maxScreenShares: parseInt(process.env.FREE_MAX_SCREEN_SHARES || '8'),
-      maxBitrate: parseInt(process.env.FREE_MAX_BITRATE || '12000000'), // source
+      maxBitrate: parseInt(process.env.FREE_MAX_BITRATE || '12000000'),
       maxQuality: 'source',
     },
     supporter: {
       maxParticipants: parseInt(process.env.SUPPORTER_MAX_PARTICIPANTS || '8'),
       maxScreenShares: parseInt(process.env.SUPPORTER_MAX_SCREEN_SHARES || '8'),
-      maxBitrate: parseInt(process.env.SUPPORTER_MAX_BITRATE || '12000000'), // source
+      maxBitrate: parseInt(process.env.SUPPORTER_MAX_BITRATE || '12000000'),
       maxQuality: 'source',
     },
   },
 
   // CORS
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
-
-  // mediasoup
-  mediasoup: {
-    numWorkers,
-
-    worker: {
-      rtcMinPort: parseInt(process.env.RTC_MIN_PORT || '40000'),
-      rtcMaxPort: parseInt(process.env.RTC_MAX_PORT || '40100'),
-      logLevel: 'warn',
-      logTags: ['info', 'ice', 'dtls', 'rtp', 'srtp', 'rtcp'],
-    },
-
-    router: {
-      mediaCodecs: [
-        {
-          kind: 'audio',
-          mimeType: 'audio/opus',
-          clockRate: 48000,
-          channels: 2,
-        },
-        // H.264 first — mandatory for Safari/iOS compatibility.
-        // mediasoup prefers the first codec; all browsers support H.264.
-        {
-          kind: 'video',
-          mimeType: 'video/H264',
-          clockRate: 90000,
-          parameters: {
-            'packetization-mode': 1,
-            'profile-level-id': '4d0032',
-            'level-asymmetry-allowed': 1,
-            'x-google-start-bitrate': 1000,
-          },
-        },
-        {
-          kind: 'video',
-          mimeType: 'video/VP8',
-          clockRate: 90000,
-          parameters: {
-            'x-google-start-bitrate': 1000,
-          },
-        },
-        {
-          kind: 'video',
-          mimeType: 'video/VP9',
-          clockRate: 90000,
-          parameters: {
-            'profile-id': 2,
-            'x-google-start-bitrate': 1000,
-          },
-        },
-      ],
-    },
-
-    // WebRTC transport settings
-    webRtcTransport: {
-      listenInfos: [
-        {
-          protocol: 'udp',
-          ip: '0.0.0.0',
-          announcedAddress: process.env.ANNOUNCED_IP || '127.0.0.1',
-        },
-        {
-          protocol: 'tcp',
-          ip: '0.0.0.0',
-          announcedAddress: process.env.ANNOUNCED_IP || '127.0.0.1',
-        },
-      ],
-      initialAvailableOutgoingBitrate: 1000000,
-      minimumAvailableOutgoingBitrate: 600000,
-      maxSctpMessageSize: 262144,
-      maxIncomingBitrate: 15000000, // 15 Mbps — generous for 1080p+
-    },
-  },
 };
 
 export default config;
