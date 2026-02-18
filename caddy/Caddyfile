@@ -39,14 +39,14 @@ http://localhost {
     }
   }
 
-  # LiveKit WebSocket signaling routes
-  handle /livekit/* {
+  # LiveKit WebSocket signaling routes.
+  # When behind Caddy, set VITE_LIVEKIT_URL to the public URL with /livekit (e.g. ws://localhost/livekit
+  # or wss://your-domain/livekit). uri strip_prefix sends requests to LiveKit at / so the server accepts them.
+  handle /livekit* {
+    uri strip_prefix /livekit
     reverse_proxy livekit:7880 {
-      # Preserve WebSocket upgrade headers
       header_up Connection {http.request.header.Connection}
       header_up Upgrade {http.request.header.Upgrade}
-
-      # Set X-Forwarded-* headers for LiveKit
       header_up X-Forwarded-For {remote_host}
       header_up X-Forwarded-Proto {scheme}
       header_up X-Forwarded-Host {host}

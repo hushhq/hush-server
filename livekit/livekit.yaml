@@ -19,6 +19,11 @@ keys:
 room:
   auto_create: true
   empty_timeout: 0
+  enabled_codecs:
+    - mime: audio/opus
+    - mime: video/h264
+    - mime: video/vp8
+    - mime: video/vp9
 
 logging:
   level: info
