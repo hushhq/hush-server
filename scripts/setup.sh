@@ -25,8 +25,6 @@ if [ -f .env ]; then
 fi
 
 # 3. Generate secrets
-LIVEKIT_API_KEY="$(openssl rand -hex 16)"
-LIVEKIT_API_SECRET="$(openssl rand -hex 32)"
 SYNAPSE_REGISTRATION_SHARED_SECRET="$(openssl rand -hex 32)"
 SYNAPSE_MACAROON_SECRET_KEY="$(openssl rand -hex 32)"
 POSTGRES_PASSWORD="$(openssl rand -hex 16)"
@@ -38,8 +36,12 @@ if [ -z "$domain" ]; then domain=localhost; fi
 MATRIX_SERVER_NAME="$domain"
 if [ "$domain" = "localhost" ]; then
   LIVEKIT_URL="ws://localhost:7880"
+  LIVEKIT_API_KEY=devkey
+  LIVEKIT_API_SECRET=devsecret
 else
   LIVEKIT_URL="ws://${domain}:7880"
+  LIVEKIT_API_KEY="$(openssl rand -hex 16)"
+  LIVEKIT_API_SECRET="$(openssl rand -hex 32)"
 fi
 
 # 5. Write .env from .env.example with substitutions
@@ -77,7 +79,15 @@ echo "  MATRIX_SERVER_NAME  = $MATRIX_SERVER_NAME"
 echo ""
 echo "Next steps:"
 echo "  1. docker-compose up -d"
-echo "  2. Open http://$domain (or http://localhost:5173 for dev)"
+echo "  2. Wait until Synapse is ready (first start: 1–2 min). Check:"
+echo "       curl -s http://localhost:80/_matrix/client/versions"
+echo "     When it returns JSON (not 502), open the app."
+echo "  3. Open http://$domain (or http://localhost:5173 for dev)"
+echo ""
+echo "If Synapse keeps restarting (password authentication failed for user synapse):"
+echo "  You re-ran setup or changed POSTGRES_PASSWORD; the existing Postgres volume"
+echo "  was created with the old password. Reset it:"
+echo "    docker-compose down && docker volume rm hush-app_postgres_data && docker-compose up -d"
 echo ""
 echo "For production (gethush.live / custom domain):"
 echo "  - Set LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET from LiveKit Cloud"

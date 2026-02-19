@@ -25,13 +25,21 @@ async function validateMatrixToken(matrixAccessToken) {
   }
 
   const url = `${MATRIX_HOMESERVER_URL.replace(/\/$/, '')}/_matrix/client/v3/account/whoami`;
-  const res = await fetch(url, {
-    method: 'GET',
-    headers: {
-      Authorization: `Bearer ${matrixAccessToken.trim()}`,
-      'Content-Type': 'application/json',
-    },
-  });
+  let res;
+  try {
+    res = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${matrixAccessToken.trim()}`,
+        'Content-Type': 'application/json',
+      },
+    });
+  } catch (fetchErr) {
+    console.error('[tokenService] Synapse whoami request failed:', fetchErr.message);
+    const err = new Error('Cannot reach Matrix server. Is Synapse running?');
+    err.statusCode = 502;
+    throw err;
+  }
 
   if (!res.ok) {
     const err = new Error(res.status === 401 ? 'Invalid Matrix token' : 'Matrix whoami failed');
@@ -39,7 +47,16 @@ async function validateMatrixToken(matrixAccessToken) {
     throw err;
   }
 
-  const data = await res.json();
+  let data;
+  try {
+    data = await res.json();
+  } catch (parseErr) {
+    console.error('[tokenService] Invalid whoami response body:', parseErr.message);
+    const err = new Error('Invalid Matrix server response');
+    err.statusCode = 502;
+    throw err;
+  }
+
   if (!data?.user_id) {
     const err = new Error('Invalid whoami response');
     err.statusCode = 502;
@@ -60,13 +77,17 @@ async function validateMatrixToken(matrixAccessToken) {
  * @throws {Error} If token invalid or env missing
  */
 export async function generateToken(matrixAccessToken, roomName, participantName) {
-  const { userId } = await validateMatrixToken(matrixAccessToken);
   const apiKey = process.env.LIVEKIT_API_KEY;
   const apiSecret = process.env.LIVEKIT_API_SECRET;
 
   if (!apiKey || !apiSecret) {
-    throw new Error('LIVEKIT_API_KEY and LIVEKIT_API_SECRET must be set');
+    console.error('[tokenService] LIVEKIT_API_KEY or LIVEKIT_API_SECRET not set');
+    const err = new Error('Server misconfiguration: LiveKit keys missing');
+    err.statusCode = 500;
+    throw err;
   }
+
+  const { userId } = await validateMatrixToken(matrixAccessToken);
 
   const token = new AccessToken(apiKey, apiSecret, {
     identity: userId,

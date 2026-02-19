@@ -5,16 +5,20 @@
 port: 7880
 
 rtc:
-  port_range_start: 50000
+  # Must match docker-compose published range so host browser can reach ICE candidates
+  port_range_start: 50020
   port_range_end: 50100
+  tcp_port: 7881
   use_external_ip: false
-  # For local Docker development, advertise localhost so browser can connect via port mappings
+  # For local Docker dev: server advertises 127.0.0.1, host browser uses same via port mapping
   node_ip: 127.0.0.1
   stun_servers:
     - stun.l.google.com:19302
 
+# Must match LIVEKIT_API_KEY / LIVEKIT_API_SECRET in .env so token service and server agree.
+# For localhost dev, use devkey/devsecret (setup.sh keeps these when domain is localhost).
 keys:
-  devkey: secret
+  devkey: devsecret
 
 room:
   auto_create: true
