@@ -11,12 +11,21 @@ TEMPLATE_FILE="$SYNAPSE_DIR/homeserver.yaml.template"
 DATA_DIR="$SYNAPSE_DIR/data"
 OUTPUT_FILE="$DATA_DIR/homeserver.yaml"
 
+# Load .env if present (for SYNAPSE_REGISTRATION_SHARED_SECRET etc.)
+if [ -f "$PROJECT_ROOT/.env" ]; then
+  set -a
+  # shellcheck source=/dev/null
+  source "$PROJECT_ROOT/.env"
+  set +a
+fi
+
 # Default values (can be overridden by environment variables)
 MATRIX_SERVER_NAME="${MATRIX_SERVER_NAME:-localhost}"
 MATRIX_PUBLIC_BASEURL="${MATRIX_PUBLIC_BASEURL:-http://localhost:8008}"
 POSTGRES_USER="${POSTGRES_USER:-synapse}"
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-synapse_password}"
 POSTGRES_DB="${POSTGRES_DB:-synapse}"
+REGISTRATION_SHARED_SECRET="${SYNAPSE_REGISTRATION_SHARED_SECRET:-changeme}"
 
 echo "==================================="
 echo "Synapse Configuration Generator"
@@ -68,6 +77,7 @@ sed -e "s|MATRIX_SERVER_NAME|$MATRIX_SERVER_NAME|g" \
     -e "s|POSTGRES_DB|$POSTGRES_DB|g" \
     -e "s|MACAROON_SECRET|$MACAROON_SECRET|g" \
     -e "s|FORM_SECRET|$FORM_SECRET|g" \
+    -e "s|REGISTRATION_SHARED_SECRET|$REGISTRATION_SHARED_SECRET|g" \
     "$TEMPLATE_FILE" > "$OUTPUT_FILE"
 
 echo "✓ Configuration generated: $OUTPUT_FILE"
