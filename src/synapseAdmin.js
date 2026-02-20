@@ -36,6 +36,29 @@ export async function getTotalRoomCount() {
 }
 
 /**
+ * List all rooms on the Synapse server.
+ * @returns {Promise<Array<{ room_id: string, name: string, canonical_alias: string, joined_members: number }>>}
+ */
+export async function listAllRooms() {
+  if (!SYNAPSE_ADMIN_TOKEN) return [];
+  const url = `${BASE}/_synapse/admin/v1/rooms?limit=500`;
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${SYNAPSE_ADMIN_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.rooms || [];
+  } catch {
+    return [];
+  }
+}
+
+/**
  * @param {string} roomId - Matrix room ID (!xxx:server)
  * @returns {Promise<{ joined_members: number } | null>} Room details or null if not found/error
  */
@@ -69,7 +92,7 @@ export async function deleteRoom(roomId) {
   if (!SYNAPSE_ADMIN_TOKEN) {
     return { ok: false, error: 'SYNAPSE_ADMIN_TOKEN not configured' };
   }
-  const url = `${BASE}/_synapse/admin/v1/rooms/${encodeURIComponent(roomId)}`;
+  const url = `${BASE}/_synapse/admin/v2/rooms/${encodeURIComponent(roomId)}`;
   try {
     const res = await fetch(url, {
       method: 'DELETE',
@@ -77,7 +100,7 @@ export async function deleteRoom(roomId) {
         Authorization: `Bearer ${SYNAPSE_ADMIN_TOKEN}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ purge: true, block: false }),
+      body: JSON.stringify({ purge: true }),
     });
     if (!res.ok) {
       const text = await res.text();

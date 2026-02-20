@@ -1,12 +1,13 @@
 import express from 'express';
 import { createServer } from 'http';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 import config from './config.js';
 import { generateToken as generateLiveKitToken } from './livekit/tokenService.js';
-import { listParticipants, removeParticipant } from './livekit/roomService.js';
-import { getTotalRoomCount, deleteRoom, deleteRoomIfEmpty } from './synapseAdmin.js';
+import { listParticipants, listRooms, removeParticipant } from './livekit/roomService.js';
+import { getTotalRoomCount, listAllRooms, deleteRoom, deleteRoomIfEmpty } from './synapseAdmin.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -14,7 +15,7 @@ const httpServer = createServer(app);
 
 // In-memory map for guest room expiry: roomId -> { roomName, createdAt (ms) }
 const guestRoomsCreatedAt = new Map();
-const GUEST_ROOM_EXPIRY_INTERVAL_MS = 60_000; // 1 min
+const GUEST_ROOM_EXPIRY_INTERVAL_MS = 5_000; // 5 sec
 
 // ─── Middleware ───────────────────────────────────────────
 app.use(express.json());
@@ -128,13 +129,38 @@ app.post('/api/rooms/delete-if-empty', async (req, res) => {
 
 // ─── Static files (production) ───────────────────────────
 const clientBuild = path.join(__dirname, '../../client/dist');
+const indexHtml = fs.readFileSync(path.join(clientBuild, 'index.html'), 'utf-8');
 app.use(express.static(clientBuild));
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api')) return next();
+
+  // Inject dynamic OG meta tags for room links so social previews show room info
+  const roomMatch = req.path.match(/^\/room\/([^/]+)/);
+  if (roomMatch) {
+    const rawName = decodeURIComponent(roomMatch[1]);
+    // Strip the 8-hex suffix to get the display name: "my-room-a1b2c3d4" → "my-room"
+    const displayName = rawName.replace(/-[a-f0-9]{8}$/, '') || rawName;
+    const safeDisplay = displayName.replace(/[<>"&]/g, '');
+    const html = indexHtml
+      .replace(
+        /<meta property="og:title"[^>]*>/,
+        `<meta property="og:title" content="join ${safeDisplay} on hush">`,
+      )
+      .replace(
+        /<meta property="og:description"[^>]*>/,
+        `<meta property="og:description" content="You've been invited to a private screen-sharing room. Tap to join.">`,
+      )
+      .replace(
+        /<title>[^<]*<\/title>/,
+        `<title>${safeDisplay} — hush</title>`,
+      );
+    return res.send(html);
+  }
+
   res.sendFile(path.join(clientBuild, 'index.html'));
 });
 
-// ─── Guest room expiry job ───────────────────────────────
+// ─── Guest room expiry (max duration) ────────────────────
 function runGuestRoomExpiry() {
   const now = Date.now();
   const maxDuration = config.guestRoomMaxDurationMs;
@@ -153,6 +179,8 @@ function runGuestRoomExpiry() {
         const result = await deleteRoom(roomId);
         if (!result.ok) {
           console.error('[expiry] deleteRoom:', result.error);
+        } else {
+          console.log('[expiry] Deleted expired room:', roomName);
         }
       } catch (err) {
         console.error('[expiry]', roomId, err.message);
@@ -160,6 +188,50 @@ function runGuestRoomExpiry() {
         guestRoomsCreatedAt.delete(roomId);
       }
     })();
+  }
+}
+
+// ─── Orphan room cleanup ─────────────────────────────────
+// Deletes Matrix rooms that have no active LiveKit participants AND no Matrix members.
+// A room is only an orphan if both conditions are true — this prevents deleting rooms
+// where users are connected via Matrix but haven't joined LiveKit yet (e.g. link-join flow).
+async function runOrphanRoomCleanup() {
+  try {
+    const [synapseRooms, livekitRooms] = await Promise.all([
+      listAllRooms(),
+      listRooms(),
+    ]);
+    if (synapseRooms.length === 0) return;
+
+    // Build set of LiveKit room names that have active participants
+    const activeRoomNames = new Set(
+      livekitRooms
+        .filter((r) => r.numParticipants > 0)
+        .map((r) => r.name),
+    );
+
+    for (const room of synapseRooms) {
+      // Derive LiveKit room name from alias: "#roomname:server" → "roomname"
+      const alias = room.canonical_alias || '';
+      const roomName = alias.replace(/^#/, '').replace(/:.*$/, '');
+      if (!roomName) continue;
+
+      // Skip rooms that have active LiveKit participants
+      if (activeRoomNames.has(roomName)) continue;
+
+      // Skip rooms that still have Matrix members (e.g. user joined Matrix but not yet on LiveKit)
+      if (room.joined_members > 0) continue;
+
+      const result = await deleteRoom(room.room_id);
+      if (result.ok) {
+        console.log('[cleanup] Deleted orphan room:', roomName, room.room_id);
+        guestRoomsCreatedAt.delete(room.room_id);
+      } else {
+        console.error('[cleanup] Failed to delete:', roomName, result.error);
+      }
+    }
+  } catch (err) {
+    console.error('[cleanup] Orphan room cleanup error:', err.message);
   }
 }
 
@@ -176,6 +248,7 @@ async function start() {
 ╚══════════════════════════════════════╝
       `);
       setInterval(runGuestRoomExpiry, GUEST_ROOM_EXPIRY_INTERVAL_MS);
+      setInterval(runOrphanRoomCleanup, GUEST_ROOM_EXPIRY_INTERVAL_MS);
     });
   } catch (err) {
     console.error('[server] Failed to start:', err);

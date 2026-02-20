@@ -39,6 +39,17 @@ function getRoomServiceClient() {
 }
 
 /**
+ * List all active LiveKit rooms.
+ * @returns {Promise<Array<{ name: string, numParticipants: number }>>}
+ */
+export async function listRooms() {
+  const client = getRoomServiceClient();
+  if (!client) return [];
+  const rooms = await client.listRooms();
+  return rooms.map((r) => ({ name: r.name, numParticipants: r.numParticipants }));
+}
+
+/**
  * List participants in a LiveKit room.
  *
  * @param {string} roomName - LiveKit room name
