@@ -4,10 +4,8 @@
 # With docker-compose.prod.yml: override volumes to use this file and set CORS_ORIGIN in .env.
 
 https://gethush.live {
-  # Security headers (SafeToShip + E2EE)
-  header X-Content-Type-Options "nosniff"
-  header X-Frame-Options "DENY"
-  header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+  # Security headers: nosniff, X-Frame-Options, HSTS handled by Cloudflare.
+  # Required for SharedArrayBuffer (LiveKit E2EE worker)
   header Cross-Origin-Opener-Policy "same-origin"
   header Cross-Origin-Embedder-Policy "require-corp"
 

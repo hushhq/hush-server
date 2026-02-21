@@ -7,10 +7,8 @@
 }
 
 # Main site configuration (localhost dev; for production HTTPS see Caddyfile.prod)
-http://localhost {
-  # Security headers (SafeToShip + E2EE). HSTS only on HTTPS — see Caddyfile.prod.
-  header X-Content-Type-Options "nosniff"
-  header X-Frame-Options "DENY"
+:80 {
+  # Security headers: nosniff, X-Frame-Options, HSTS handled by Cloudflare.
   # Required for SharedArrayBuffer (LiveKit E2EE worker)
   header Cross-Origin-Opener-Policy "same-origin"
   header Cross-Origin-Embedder-Policy "require-corp"
