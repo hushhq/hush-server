@@ -4,7 +4,9 @@
 # With docker-compose.prod.yml: override volumes to use this file and set CORS_ORIGIN in .env.
 
 :80 {
-  # Security headers: nosniff, X-Frame-Options, HSTS handled by Cloudflare.
+  # Security headers at origin so scanners and clients always see them (Cloudflare may also set; duplicate is fine).
+  header X-Content-Type-Options "nosniff"
+  header X-Frame-Options "DENY"
   # Required for SharedArrayBuffer (LiveKit E2EE worker)
   header Cross-Origin-Opener-Policy "same-origin"
   header Cross-Origin-Embedder-Policy "require-corp"
