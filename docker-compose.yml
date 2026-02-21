@@ -112,8 +112,7 @@ services:
       # CORS for /_matrix/*. Dev: * (default). Production: set CORS_ORIGIN in .env or override (e.g. https://gethush.live).
       - CORS_ORIGIN=${CORS_ORIGIN:-*}
     ports:
-      - "80:80"
-      - "443:443"
+      - "8081:80"
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

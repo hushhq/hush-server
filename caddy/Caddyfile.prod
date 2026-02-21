@@ -3,7 +3,7 @@
 # Example: docker run -e CORS_ORIGIN=https://gethush.live -v $(pwd)/caddy/Caddyfile.prod:/etc/caddy/Caddyfile ...
 # With docker-compose.prod.yml: override volumes to use this file and set CORS_ORIGIN in .env.
 
-https://gethush.live {
+:80 {
   # Security headers: nosniff, X-Frame-Options, HSTS handled by Cloudflare.
   # Required for SharedArrayBuffer (LiveKit E2EE worker)
   header Cross-Origin-Opener-Policy "same-origin"
