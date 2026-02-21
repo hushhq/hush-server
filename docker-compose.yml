@@ -56,7 +56,8 @@ services:
     environment:
       - PORT=3001
       - HOST=0.0.0.0
-      - CORS_ORIGIN=*
+      # CORS: dev default *; in production set CORS_ORIGIN to frontend origin (e.g. https://gethush.live) via .env or override
+      - CORS_ORIGIN=${CORS_ORIGIN:-*}
       - MATRIX_HOMESERVER_URL=${MATRIX_HOMESERVER_URL:-http://synapse:8008}
       - SYNAPSE_ADMIN_TOKEN=${SYNAPSE_ADMIN_TOKEN}
       - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
@@ -107,6 +108,9 @@ services:
   caddy:
     image: caddy:2-alpine
     container_name: hush-caddy
+    environment:
+      # CORS for /_matrix/*. Dev: * (default). Production: set CORS_ORIGIN in .env or override (e.g. https://gethush.live).
+      - CORS_ORIGIN=${CORS_ORIGIN:-*}
     ports:
       - "80:80"
       - "443:443"

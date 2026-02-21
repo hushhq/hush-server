@@ -8,6 +8,12 @@ import config from './config.js';
 import { generateToken as generateLiveKitToken } from './livekit/tokenService.js';
 import { listParticipants, listRooms, removeParticipant } from './livekit/roomService.js';
 import { getTotalRoomCount, listAllRooms, deleteRoom, deleteRoomIfEmpty } from './synapseAdmin.js';
+import {
+  validateRoomName,
+  validateParticipantName,
+  validateMatrixRoomId,
+  validateCreatedAt,
+} from './validation.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -67,10 +73,22 @@ app.get('/api/rooms/limits', (req, res) => {
 // Register a newly created guest room for expiry tracking
 app.post('/api/rooms/created', (req, res) => {
   const { roomId, roomName, createdAt } = req.body;
-  if (!roomId || !roomName || typeof createdAt !== 'number') {
-    return res.status(400).json({ error: 'roomId, roomName, and createdAt (ms) required' });
+  const roomIdResult = validateMatrixRoomId(roomId);
+  if (!roomIdResult.valid) {
+    return res.status(400).json({ error: roomIdResult.error });
   }
-  guestRoomsCreatedAt.set(roomId, { roomName, createdAt });
+  const roomNameResult = validateRoomName(roomName);
+  if (!roomNameResult.valid) {
+    return res.status(400).json({ error: roomNameResult.error });
+  }
+  const createdAtResult = validateCreatedAt(createdAt);
+  if (!createdAtResult.valid) {
+    return res.status(400).json({ error: createdAtResult.error });
+  }
+  guestRoomsCreatedAt.set(roomIdResult.value, {
+    roomName: roomNameResult.value,
+    createdAt: createdAtResult.value,
+  });
   return res.json({ ok: true });
 });
 
@@ -83,13 +101,18 @@ app.post('/api/livekit/token', async (req, res) => {
       : null;
     const { roomName, participantName } = req.body;
 
-    if (!roomName) {
-      return res.status(400).json({ error: 'roomName is required' });
+    const roomNameResult = validateRoomName(roomName);
+    if (!roomNameResult.valid) {
+      return res.status(400).json({ error: roomNameResult.error });
+    }
+    const participantNameResult = validateParticipantName(participantName);
+    if (!participantNameResult.valid) {
+      return res.status(400).json({ error: participantNameResult.error });
     }
 
     let participants;
     try {
-      participants = await listParticipants(roomName);
+      participants = await listParticipants(roomNameResult.value);
     } catch (listErr) {
       console.error('[api] listParticipants error:', listErr.message);
       return res.status(502).json({ error: 'Cannot check room. Try again.' });
@@ -100,8 +123,8 @@ app.post('/api/livekit/token', async (req, res) => {
 
     const livekitToken = await generateLiveKitToken(
       token,
-      roomName,
-      participantName || 'Participant',
+      roomNameResult.value,
+      participantNameResult.value,
     );
 
     res.json({ token: livekitToken });
@@ -116,10 +139,11 @@ app.post('/api/livekit/token', async (req, res) => {
 app.post('/api/rooms/delete-if-empty', async (req, res) => {
   try {
     const { roomId } = req.body;
-    if (!roomId) {
-      return res.status(400).json({ error: 'roomId is required' });
+    const roomIdResult = validateMatrixRoomId(roomId);
+    if (!roomIdResult.valid) {
+      return res.status(400).json({ error: roomIdResult.error });
     }
-    const result = await deleteRoomIfEmpty(roomId);
+    const result = await deleteRoomIfEmpty(roomIdResult.value);
     return res.json(result);
   } catch (err) {
     console.error('[api] delete-if-empty error:', err.message);
