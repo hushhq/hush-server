@@ -15,8 +15,13 @@
       header_up X-Forwarded-For {remote_host}
       header_up X-Forwarded-Proto {scheme}
       header_up X-Forwarded-Host {host}
+      # Strip upstream CORS headers so Caddy is the single source of truth
+      header_down -Access-Control-Allow-Origin
+      header_down -Access-Control-Allow-Methods
+      header_down -Access-Control-Allow-Headers
+      header_down -Access-Control-Expose-Headers
     }
-    header Access-Control-Allow-Origin "{env.CORS_ORIGIN:*}"
+    header Access-Control-Allow-Origin "{$CORS_ORIGIN:*}"
     header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
     header Access-Control-Allow-Headers "Origin, X-Requested-With, Content-Type, Accept, Authorization"
     @options {
@@ -50,6 +55,7 @@
       header_up X-Forwarded-For {remote_host}
       header_up X-Forwarded-Proto {scheme}
       header_up X-Forwarded-Host {host}
+      header_down -Access-Control-Allow-Origin
     }
   }
 
