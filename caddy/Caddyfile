@@ -8,15 +8,12 @@
 
 # Main site configuration (localhost dev; for production HTTPS see Caddyfile.prod)
 :80 {
-  # Security headers at origin so scanners and clients always see them (Cloudflare may also set; duplicate is fine).
-  header X-Content-Type-Options "nosniff"
-  header X-Frame-Options "DENY"
-  # Required for SharedArrayBuffer (LiveKit E2EE worker)
-  header Cross-Origin-Opener-Policy "same-origin"
-  header Cross-Origin-Embedder-Policy "require-corp"
-
   # Matrix homeserver API routes
   handle /_matrix/* {
+    header X-Content-Type-Options "nosniff"
+    header X-Frame-Options "DENY"
+    header Cross-Origin-Opener-Policy "same-origin"
+    header Cross-Origin-Embedder-Policy "require-corp"
     reverse_proxy synapse:8008 {
       # Preserve WebSocket upgrade headers
       header_up Connection {http.request.header.Connection}
@@ -42,7 +39,7 @@
     }
   }
 
-  # LiveKit WebSocket signaling routes.
+  # LiveKit WebSocket signaling (no security headers here to avoid breaking the upgrade handshake).
   # When behind Caddy, set VITE_LIVEKIT_URL to the public URL with /livekit (e.g. ws://localhost/livekit
   # or wss://your-domain/livekit). uri strip_prefix sends requests to LiveKit at / so the server accepts them.
   handle /livekit* {
@@ -56,8 +53,12 @@
     }
   }
 
-  # All other traffic goes to Hush app
+  # All other traffic goes to Hush app (security headers for HTML/E2EE worker).
   handle /* {
+    header X-Content-Type-Options "nosniff"
+    header X-Frame-Options "DENY"
+    header Cross-Origin-Opener-Policy "same-origin"
+    header Cross-Origin-Embedder-Policy "require-corp"
     reverse_proxy hush:3001 {
       # Preserve WebSocket upgrade headers for Socket.io
       header_up Connection {http.request.header.Connection}

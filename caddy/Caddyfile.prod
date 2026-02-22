@@ -4,14 +4,11 @@
 # With docker-compose.prod.yml: override volumes to use this file and set CORS_ORIGIN in .env.
 
 :80 {
-  # Security headers at origin so scanners and clients always see them (Cloudflare may also set; duplicate is fine).
-  header X-Content-Type-Options "nosniff"
-  header X-Frame-Options "DENY"
-  # Required for SharedArrayBuffer (LiveKit E2EE worker)
-  header Cross-Origin-Opener-Policy "same-origin"
-  header Cross-Origin-Embedder-Policy "require-corp"
-
   handle /_matrix/* {
+    header X-Content-Type-Options "nosniff"
+    header X-Frame-Options "DENY"
+    header Cross-Origin-Opener-Policy "same-origin"
+    header Cross-Origin-Embedder-Policy "require-corp"
     reverse_proxy synapse:8008 {
       header_up Connection {http.request.header.Connection}
       header_up Upgrade {http.request.header.Upgrade}
@@ -30,6 +27,7 @@
     }
   }
 
+  # LiveKit WebSocket: no security headers on this path (they can break the upgrade handshake).
   handle /livekit* {
     uri strip_prefix /livekit
     reverse_proxy livekit:7880 {
@@ -42,6 +40,10 @@
   }
 
   handle /* {
+    header X-Content-Type-Options "nosniff"
+    header X-Frame-Options "DENY"
+    header Cross-Origin-Opener-Policy "same-origin"
+    header Cross-Origin-Embedder-Policy "require-corp"
     reverse_proxy hush:3001 {
       header_up Connection {http.request.header.Connection}
       header_up Upgrade {http.request.header.Upgrade}
