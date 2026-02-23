@@ -8,6 +8,11 @@
 
 # Main site configuration (localhost dev; for production HTTPS see Caddyfile.prod)
 :80 {
+  # Synapse Admin API routes (used by Hush server for room management)
+  handle /_synapse/* {
+    reverse_proxy synapse:8008
+  }
+
   # Matrix homeserver API routes
   handle /_matrix/* {
     header X-Content-Type-Options "nosniff"
