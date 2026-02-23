@@ -23,6 +23,13 @@ const httpServer = createServer(app);
 const guestRoomsCreatedAt = new Map();
 const GUEST_ROOM_EXPIRY_INTERVAL_MS = 5_000; // 5 sec
 
+// Tracks when each room first appeared with 0 LiveKit participants.
+// After ORPHAN_GRACE_MS with no LK activity the room is considered abandoned
+// and will be force-deleted even if Matrix members are still listed (they
+// never sent a clean leave — tab crash, network drop, etc.)
+const lkEmptySince = new Map(); // room_id -> timestamp (ms)
+const ORPHAN_GRACE_MS = 2 * 60 * 1000; // 2 minutes
+
 // ─── Middleware ───────────────────────────────────────────
 app.use(express.json());
 
@@ -216,16 +223,24 @@ function runGuestRoomExpiry() {
 }
 
 // ─── Orphan room cleanup ─────────────────────────────────
-// Deletes Matrix rooms that have no active LiveKit participants AND no Matrix members.
-// A room is only an orphan if both conditions are true — this prevents deleting rooms
-// where users are connected via Matrix but haven't joined LiveKit yet (e.g. link-join flow).
+// Deletes rooms that have had 0 active LiveKit participants for longer than
+// ORPHAN_GRACE_MS. The grace period covers the link-join flow (Matrix join
+// happens before LiveKit connect, which takes only a few seconds).
+//
+// Rooms with Matrix members that never sent a clean leave (tab crash, network
+// drop, etc.) are handled by force-kicking them after the grace period expires,
+// then deleting the room. Without this, joined_members stays > 0 forever and
+// the room is never reclaimed.
 async function runOrphanRoomCleanup() {
   try {
     const [synapseRooms, livekitRooms] = await Promise.all([
       listAllRooms(),
       listRooms(),
     ]);
-    if (synapseRooms.length === 0) return;
+    if (synapseRooms.length === 0) {
+      lkEmptySince.clear();
+      return;
+    }
 
     // Build set of LiveKit room names that have active participants
     const activeRoomNames = new Set(
@@ -234,25 +249,47 @@ async function runOrphanRoomCleanup() {
         .map((r) => r.name),
     );
 
+    const now = Date.now();
+    const seenRoomIds = new Set();
+
     for (const room of synapseRooms) {
+      seenRoomIds.add(room.room_id);
+
       // Derive LiveKit room name from alias: "#roomname:server" → "roomname"
       const alias = room.canonical_alias || '';
       const roomName = alias.replace(/^#/, '').replace(/:.*$/, '');
       if (!roomName) continue;
 
-      // Skip rooms that have active LiveKit participants
-      if (activeRoomNames.has(roomName)) continue;
+      if (activeRoomNames.has(roomName)) {
+        // Room is active — reset its empty-since timer
+        lkEmptySince.delete(room.room_id);
+        continue;
+      }
 
-      // Skip rooms that still have Matrix members (e.g. user joined Matrix but not yet on LiveKit)
-      if (room.joined_members > 0) continue;
+      // Room has no active LiveKit participants — start or check grace period
+      if (!lkEmptySince.has(room.room_id)) {
+        lkEmptySince.set(room.room_id, now);
+        continue;
+      }
 
+      const emptyFor = now - lkEmptySince.get(room.room_id);
+      if (emptyFor < ORPHAN_GRACE_MS) continue; // still within grace period
+
+      // Grace period expired — deleteRoom (v2 + purge:true) kicks all members
+      // and purges the room from Synapse in one call.
       const result = await deleteRoom(room.room_id);
       if (result.ok) {
-        console.log('[cleanup] Deleted orphan room:', roomName, room.room_id);
+        console.log('[cleanup] Deleted abandoned room:', roomName, room.room_id);
+        lkEmptySince.delete(room.room_id);
         guestRoomsCreatedAt.delete(room.room_id);
       } else {
         console.error('[cleanup] Failed to delete:', roomName, result.error);
       }
+    }
+
+    // Remove stale lkEmptySince entries for rooms no longer in Synapse
+    for (const roomId of lkEmptySince.keys()) {
+      if (!seenRoomIds.has(roomId)) lkEmptySince.delete(roomId);
     }
   } catch (err) {
     console.error('[cleanup] Orphan room cleanup error:', err.message);
