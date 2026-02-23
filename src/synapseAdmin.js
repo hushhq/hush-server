@@ -59,31 +59,7 @@ export async function listAllRooms() {
 }
 
 /**
- * @param {string} roomId - Matrix room ID (!xxx:server)
- * @returns {Promise<{ joined_members: number } | null>} Room details or null if not found/error
- */
-export async function getRoomDetails(roomId) {
-  if (!SYNAPSE_ADMIN_TOKEN) return null;
-  const url = `${BASE}/_synapse/admin/v1/rooms/${encodeURIComponent(roomId)}`;
-  try {
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${SYNAPSE_ADMIN_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return { joined_members: data.joined_members ?? 0 };
-  } catch {
-    return null;
-  }
-}
-
-/**
  * Delete a room via Synapse Admin API (purge from DB).
- * Only safe when room has 0 members; use getRoomDetails first.
  *
  * @param {string} roomId - Matrix room ID
  * @returns {Promise<{ ok: boolean, error?: string }>}
@@ -110,28 +86,4 @@ export async function deleteRoom(roomId) {
   } catch (err) {
     return { ok: false, error: err.message };
   }
-}
-
-/**
- * If the room has 0 members, delete it from Synapse.
- *
- * @param {string} roomId - Matrix room ID
- * @returns {Promise<{ deleted: boolean, reason?: string }>}
- */
-export async function deleteRoomIfEmpty(roomId) {
-  if (!roomId || typeof roomId !== 'string' || !roomId.startsWith('!')) {
-    return { deleted: false, reason: 'invalid room id' };
-  }
-  const details = await getRoomDetails(roomId);
-  if (!details) {
-    return { deleted: false, reason: 'room not found or admin API unavailable' };
-  }
-  if (details.joined_members > 0) {
-    return { deleted: false, reason: 'room still has members' };
-  }
-  const result = await deleteRoom(roomId);
-  if (!result.ok) {
-    return { deleted: false, reason: result.error || 'delete failed' };
-  }
-  return { deleted: true };
 }

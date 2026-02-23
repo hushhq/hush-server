@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 import config from './config.js';
 import { generateToken as generateLiveKitToken } from './livekit/tokenService.js';
 import { listParticipants, listRooms, removeParticipant } from './livekit/roomService.js';
-import { getTotalRoomCount, listAllRooms, deleteRoom, deleteRoomIfEmpty } from './synapseAdmin.js';
+import { getTotalRoomCount, listAllRooms, deleteRoom } from './synapseAdmin.js';
 import {
   validateRoomName,
   validateParticipantName,
@@ -139,22 +139,6 @@ app.post('/api/livekit/token', async (req, res) => {
     const status = err.statusCode || 500;
     console.error('[api] LiveKit token error:', err.message);
     res.status(status).json({ error: err.message || 'Token generation failed' });
-  }
-});
-
-// Delete Matrix room from Synapse when empty (after last participant leaves)
-app.post('/api/rooms/delete-if-empty', async (req, res) => {
-  try {
-    const { roomId } = req.body;
-    const roomIdResult = validateMatrixRoomId(roomId);
-    if (!roomIdResult.valid) {
-      return res.status(400).json({ error: roomIdResult.error });
-    }
-    const result = await deleteRoomIfEmpty(roomIdResult.value);
-    return res.json(result);
-  } catch (err) {
-    console.error('[api] delete-if-empty error:', err.message);
-    return res.status(500).json({ error: err.message || 'Delete check failed' });
   }
 });
 
