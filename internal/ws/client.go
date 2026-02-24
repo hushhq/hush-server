@@ -1,0 +1,107 @@
+package ws
+
+import (
+	"encoding/json"
+	"log/slog"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
+)
+
+const (
+	writeWait      = 10 * time.Second
+	pongWait       = 60 * time.Second
+	pingPeriod     = (pongWait * 9) / 10
+	maxMessageSize = 512 * 1024
+)
+
+// Client is a single WebSocket connection.
+type Client struct {
+	id     string
+	userID string
+	hub    *Hub
+	conn   *websocket.Conn
+	send   chan []byte
+}
+
+// Run runs the read and write pumps. Call after Register. Blocks until connection closes.
+func (c *Client) Run() {
+	defer func() {
+		c.hub.Unregister(c)
+		_ = c.conn.Close()
+	}()
+	go c.writePump()
+	c.readPump()
+}
+
+func (c *Client) readPump() {
+	defer close(c.send)
+	c.conn.SetReadLimit(maxMessageSize)
+	_ = c.conn.SetReadDeadline(time.Now().Add(pongWait))
+	c.conn.SetPongHandler(func(string) error {
+		_ = c.conn.SetReadDeadline(time.Now().Add(pongWait))
+		return nil
+	})
+	for {
+		_, raw, err := c.conn.ReadMessage()
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				slog.Debug("ws read error", "err", err)
+			}
+			return
+		}
+		var msg struct {
+			Type      string `json:"type"`
+			ChannelID string `json:"channel_id"`
+			Token     string `json:"token"`
+		}
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			continue
+		}
+		switch msg.Type {
+		case "subscribe":
+			if msg.ChannelID != "" {
+				c.hub.Subscribe(c, msg.ChannelID)
+			}
+		case "unsubscribe":
+			if msg.ChannelID != "" {
+				c.hub.Unsubscribe(c, msg.ChannelID)
+			}
+		}
+	}
+}
+
+func (c *Client) writePump() {
+	ticker := time.NewTicker(pingPeriod)
+	defer ticker.Stop()
+	for {
+		select {
+		case data, ok := <-c.send:
+			_ = c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if !ok {
+				_ = c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				return
+			}
+			if err := c.conn.WriteMessage(websocket.TextMessage, data); err != nil {
+				return
+			}
+		case <-ticker.C:
+			_ = c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
+		}
+	}
+}
+
+// NewClient creates a client. id and userID must be set by the handler after auth.
+func NewClient(conn *websocket.Conn, hub *Hub, userID string) *Client {
+	return &Client{
+		id:     uuid.New().String(),
+		userID: userID,
+		hub:    hub,
+		conn:   conn,
+		send:   make(chan []byte, 256),
+	}
+}

@@ -1,0 +1,11 @@
+DROP TABLE IF EXISTS invite_codes;
+DROP TABLE IF EXISTS devices;
+DROP TABLE IF EXISTS signal_one_time_pre_keys;
+DROP TABLE IF EXISTS signal_identity_keys;
+DROP TABLE IF EXISTS messages;
+DROP TABLE IF EXISTS server_members;
+DROP TABLE IF EXISTS channel_config;
+DROP TABLE IF EXISTS channels;
+DROP TABLE IF EXISTS servers;
+DROP TABLE IF EXISTS sessions;
+DROP TABLE IF EXISTS users;

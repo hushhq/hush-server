@@ -15,6 +15,7 @@ services:
       - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-hush-db.sql:/docker-entrypoint-initdb.d/02-hush.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-synapse}"]
       interval: 10s
@@ -45,6 +46,26 @@ services:
       timeout: 10s
       retries: 5
       start_period: 60s
+    restart: unless-stopped
+    networks:
+      - hush-network
+
+  hush-api:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: hush-api
+    environment:
+      - PORT=8080
+      - DATABASE_URL=postgres://hush:hush@postgres:5432/hush?sslmode=disable
+      - JWT_SECRET=${JWT_SECRET:-dev-jwt-secret-change-in-production}
+      - CORS_ORIGIN=${CORS_ORIGIN:-*}
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
+      - LIVEKIT_URL=${LIVEKIT_URL:-ws://livekit:7880}
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - hush-network
@@ -120,6 +141,7 @@ services:
     depends_on:
       - synapse
       - hush
+      - hush-api
     restart: unless-stopped
     networks:
       - hush-network

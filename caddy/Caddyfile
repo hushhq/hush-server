@@ -64,6 +64,24 @@
     }
   }
 
+  # Go API and WebSocket (Phase A backend)
+  handle /api/* {
+    reverse_proxy hush-api:8080 {
+      header_up X-Forwarded-For {remote_host}
+      header_up X-Forwarded-Proto {scheme}
+      header_up X-Forwarded-Host {host}
+    }
+  }
+  handle /ws {
+    reverse_proxy hush-api:8080 {
+      header_up Connection {http.request.header.Connection}
+      header_up Upgrade {http.request.header.Upgrade}
+      header_up X-Forwarded-For {remote_host}
+      header_up X-Forwarded-Proto {scheme}
+      header_up X-Forwarded-Host {host}
+    }
+  }
+
   # All other traffic goes to Hush app (security headers for HTML/E2EE worker).
   handle /* {
     header X-Content-Type-Options "nosniff"
