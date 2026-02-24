@@ -85,7 +85,7 @@ func (h *channelsHandler) getMessages(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "not a channel member"})
 		return
 	}
-	messages, err := h.store.GetMessages(ctx, channelID, before, limit)
+	messages, err := h.store.GetMessages(ctx, channelID, userID, before, limit)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load messages"})
 		return

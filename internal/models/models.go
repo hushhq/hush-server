@@ -65,10 +65,12 @@ type PreKeyBundle struct {
 }
 
 // Message is a stored encrypted message. Ciphertext is opaque to the server.
+// RecipientID is nil for broadcast/single-ciphertext; set for fan-out per recipient.
 type Message struct {
 	ID         string    `json:"id"`
 	ChannelID  string    `json:"channelId"`
 	SenderID   string    `json:"senderId"`
+	RecipientID *string  `json:"recipientId,omitempty"`
 	Ciphertext []byte    `json:"ciphertext"` // base64-encoded in JSON
 	Timestamp  time.Time `json:"timestamp"`
 }

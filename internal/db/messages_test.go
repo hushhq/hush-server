@@ -51,7 +51,7 @@ func TestPool_InsertMessage_GetMessages_IsChannelMember_Integration(t *testing.T
 	assert.False(t, ok)
 
 	ciphertext := []byte("encrypted-payload")
-	msg, err := pool.InsertMessage(ctx, channelID, u1.ID, ciphertext)
+	msg, err := pool.InsertMessage(ctx, channelID, u1.ID, nil, ciphertext)
 	require.NoError(t, err)
 	require.NotNil(t, msg)
 	assert.NotEmpty(t, msg.ID)
@@ -60,20 +60,20 @@ func TestPool_InsertMessage_GetMessages_IsChannelMember_Integration(t *testing.T
 	assert.Equal(t, ciphertext, msg.Ciphertext)
 	assert.False(t, msg.Timestamp.IsZero())
 
-	list, err := pool.GetMessages(ctx, channelID, time.Time{}, 10)
+	list, err := pool.GetMessages(ctx, channelID, u1.ID, time.Time{}, 10)
 	require.NoError(t, err)
 	require.Len(t, list, 1)
 	assert.Equal(t, msg.ID, list[0].ID)
 
-	_, err = pool.InsertMessage(ctx, channelID, u2.ID, []byte("second"))
+	_, err = pool.InsertMessage(ctx, channelID, u2.ID, nil, []byte("second"))
 	require.NoError(t, err)
-	list, err = pool.GetMessages(ctx, channelID, time.Time{}, 10)
+	list, err = pool.GetMessages(ctx, channelID, u1.ID, time.Time{}, 10)
 	require.NoError(t, err)
 	require.Len(t, list, 2)
 	assert.Equal(t, u2.ID, list[0].SenderID)
 	assert.Equal(t, u1.ID, list[1].SenderID)
 
-	list, err = pool.GetMessages(ctx, channelID, list[1].Timestamp, 10)
+	list, err = pool.GetMessages(ctx, channelID, u1.ID, list[1].Timestamp, 10)
 	require.NoError(t, err)
 	require.Len(t, list, 0)
 }

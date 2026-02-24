@@ -14,8 +14,8 @@ import (
 
 // messageStoreMock implements db.Store for message handler tests. Only message methods are used.
 type messageStoreMock struct {
-	insertMessageFn   func(ctx context.Context, channelID, senderID string, ciphertext []byte) (*models.Message, error)
-	getMessagesFn     func(ctx context.Context, channelID string, before time.Time, limit int) ([]models.Message, error)
+	insertMessageFn   func(ctx context.Context, channelID, senderID string, recipientID *string, ciphertext []byte) (*models.Message, error)
+	getMessagesFn     func(ctx context.Context, channelID, recipientID string, before time.Time, limit int) ([]models.Message, error)
 	isChannelMemberFn func(ctx context.Context, channelID, userID string) (bool, error)
 }
 
@@ -35,15 +35,15 @@ func (m *messageStoreMock) CountUnusedOneTimePreKeys(context.Context, string, st
 func (m *messageStoreMock) ListDeviceIDsForUser(context.Context, string) ([]string, error)                 { return nil, nil }
 func (m *messageStoreMock) UpsertDevice(context.Context, string, string, string) error                     { return nil }
 
-func (m *messageStoreMock) InsertMessage(ctx context.Context, channelID, senderID string, ciphertext []byte) (*models.Message, error) {
+func (m *messageStoreMock) InsertMessage(ctx context.Context, channelID, senderID string, recipientID *string, ciphertext []byte) (*models.Message, error) {
 	if m.insertMessageFn != nil {
-		return m.insertMessageFn(ctx, channelID, senderID, ciphertext)
+		return m.insertMessageFn(ctx, channelID, senderID, recipientID, ciphertext)
 	}
 	return nil, nil
 }
-func (m *messageStoreMock) GetMessages(ctx context.Context, channelID string, before time.Time, limit int) ([]models.Message, error) {
+func (m *messageStoreMock) GetMessages(ctx context.Context, channelID, recipientID string, before time.Time, limit int) ([]models.Message, error) {
 	if m.getMessagesFn != nil {
-		return m.getMessagesFn(ctx, channelID, before, limit)
+		return m.getMessagesFn(ctx, channelID, recipientID, before, limit)
 	}
 	return nil, nil
 }
@@ -106,7 +106,7 @@ func TestMessageHandler_HandleMessageSend_StoresAndBroadcasts(t *testing.T) {
 	var inserted *models.Message
 	store := &messageStoreMock{
 		isChannelMemberFn: func(ctx context.Context, channelID, userID string) (bool, error) { return true, nil },
-		insertMessageFn: func(ctx context.Context, channelID, senderID string, ciphertext []byte) (*models.Message, error) {
+		insertMessageFn: func(ctx context.Context, channelID, senderID string, recipientID *string, ciphertext []byte) (*models.Message, error) {
 			inserted = &models.Message{
 				ID:         "msg-1",
 				ChannelID:  channelID,
@@ -181,7 +181,7 @@ func TestMessageHandler_HandleMessageHistory_ReturnsMessages(t *testing.T) {
 	}
 	store := &messageStoreMock{
 		isChannelMemberFn: func(ctx context.Context, channelID, userID string) (bool, error) { return true, nil },
-		getMessagesFn:     func(ctx context.Context, channelID string, before time.Time, limit int) ([]models.Message, error) { return msgs, nil },
+		getMessagesFn:     func(ctx context.Context, channelID, recipientID string, before time.Time, limit int) ([]models.Message, error) { return msgs, nil },
 	}
 	h := NewMessageHandler(store, hub)
 	c := NewClient(nil, hub, "user1", h)
@@ -202,6 +202,55 @@ func TestMessageHandler_HandleMessageHistory_ReturnsMessages(t *testing.T) {
 	assert.Equal(t, "message.history.response", resp.Type)
 	require.Len(t, resp.Messages, 1)
 	assert.Equal(t, "m1", resp.Messages[0].ID)
+}
+
+func TestMessageHandler_HandleMessageSend_FanoutStoresAndBroadcasts(t *testing.T) {
+	hub := NewHub()
+	var insertCount int
+	var lastRecipientID *string
+	store := &messageStoreMock{
+		isChannelMemberFn: func(context.Context, string, string) (bool, error) { return true, nil },
+		insertMessageFn: func(ctx context.Context, channelID, senderID string, recipientID *string, ciphertext []byte) (*models.Message, error) {
+			insertCount++
+			lastRecipientID = recipientID
+			return &models.Message{ID: "msg-1", ChannelID: channelID, SenderID: senderID, Timestamp: time.Now()}, nil
+		},
+	}
+	h := NewMessageHandler(store, hub)
+	sender := NewClient(nil, hub, "user1", h)
+	hub.Register(sender)
+	recv := NewClient(nil, hub, "user2", nil)
+	hub.Register(recv)
+	hub.Subscribe(sender, "ch1")
+	hub.Subscribe(recv, "ch1")
+	defer func() {
+		hub.Unregister(sender)
+		hub.Unregister(recv)
+		close(sender.send)
+		close(recv.send)
+	}()
+
+	raw, _ := json.Marshal(map[string]interface{}{
+		"channel_id":             "ch1",
+		"ciphertext_by_recipient": map[string]string{"user2": "YWVz", "user3": "eHl6"},
+	})
+	h.Handle(sender, "message.send", raw)
+
+	assert.Equal(t, 2, insertCount)
+	assert.NotNil(t, lastRecipientID)
+	msg := drainUntilType(t, recv, "message.new", time.Second)
+	var out struct {
+		Type                  string            `json:"type"`
+		ChannelID             string            `json:"channel_id"`
+		SenderID              string            `json:"sender_id"`
+		CiphertextByRecipient map[string]string `json:"ciphertext_by_recipient"`
+	}
+	require.NoError(t, json.Unmarshal(msg, &out))
+	assert.Equal(t, "message.new", out.Type)
+	assert.Equal(t, "ch1", out.ChannelID)
+	assert.Equal(t, "user1", out.SenderID)
+	assert.Len(t, out.CiphertextByRecipient, 2)
+	assert.Equal(t, "YWVz", out.CiphertextByRecipient["user2"])
 }
 
 func TestMessageHandler_HandleTyping_BroadcastsToChannel(t *testing.T) {

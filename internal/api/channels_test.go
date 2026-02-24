@@ -64,7 +64,7 @@ func TestChannelsGetMessages_ValidRequest_Returns200(t *testing.T) {
 		isChannelMemberFn: func(_ context.Context, chID, uID string) (bool, error) {
 			return chID == channelID && uID == userID, nil
 		},
-		getMessagesFn: func(_ context.Context, chID string, before time.Time, limit int) ([]models.Message, error) {
+		getMessagesFn: func(_ context.Context, chID, recID string, before time.Time, limit int) ([]models.Message, error) {
 			if chID != channelID {
 				return nil, nil
 			}

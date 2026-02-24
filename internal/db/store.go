@@ -25,7 +25,7 @@ type Store interface {
 	ListDeviceIDsForUser(ctx context.Context, userID string) ([]string, error)
 	UpsertDevice(ctx context.Context, userID, deviceID, label string) error
 
-	InsertMessage(ctx context.Context, channelID, senderID string, ciphertext []byte) (*models.Message, error)
-	GetMessages(ctx context.Context, channelID string, before time.Time, limit int) ([]models.Message, error)
+	InsertMessage(ctx context.Context, channelID, senderID string, recipientID *string, ciphertext []byte) (*models.Message, error)
+	GetMessages(ctx context.Context, channelID, recipientID string, before time.Time, limit int) ([]models.Message, error)
 	IsChannelMember(ctx context.Context, channelID, userID string) (bool, error)
 }

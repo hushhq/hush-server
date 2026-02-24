@@ -48,11 +48,12 @@ func (h *MessageHandler) handleMessageSend(c *Client, raw []byte) {
 		return
 	}
 	var payload struct {
-		ChannelID  string `json:"channel_id"`
-		Ciphertext  string `json:"ciphertext"`
+		ChannelID             string            `json:"channel_id"`
+		Ciphertext            string            `json:"ciphertext"`
+		CiphertextByRecipient map[string]string `json:"ciphertext_by_recipient"`
 	}
-	if err := json.Unmarshal(raw, &payload); err != nil || payload.ChannelID == "" || payload.Ciphertext == "" {
-		sendError(c, "bad_request", "channel_id and ciphertext required")
+	if err := json.Unmarshal(raw, &payload); err != nil || payload.ChannelID == "" {
+		sendError(c, "bad_request", "channel_id required")
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
@@ -67,12 +68,20 @@ func (h *MessageHandler) handleMessageSend(c *Client, raw []byte) {
 		sendError(c, "forbidden", "not a channel member")
 		return
 	}
+	if len(payload.CiphertextByRecipient) > 0 {
+		h.handleMessageSendFanout(c, payload.ChannelID, payload.CiphertextByRecipient, ctx)
+		return
+	}
+	if payload.Ciphertext == "" {
+		sendError(c, "bad_request", "ciphertext or ciphertext_by_recipient required")
+		return
+	}
 	ciphertext, err := base64.StdEncoding.DecodeString(payload.Ciphertext)
 	if err != nil {
 		sendError(c, "bad_request", "invalid ciphertext base64")
 		return
 	}
-	msg, err := h.store.InsertMessage(ctx, payload.ChannelID, c.userID, ciphertext)
+	msg, err := h.store.InsertMessage(ctx, payload.ChannelID, c.userID, nil, ciphertext)
 	if err != nil {
 		slog.Warn("ws InsertMessage failed", "err", err)
 		sendError(c, "internal", "failed to store message")
@@ -88,6 +97,33 @@ func (h *MessageHandler) handleMessageSend(c *Client, raw []byte) {
 	}
 	b, _ := json.Marshal(out)
 	h.hub.Broadcast(payload.ChannelID, b, c.id)
+}
+
+func (h *MessageHandler) handleMessageSendFanout(c *Client, channelID string, ciphertextByRecipient map[string]string, ctx context.Context) {
+	// Store one row per recipient; broadcast one message.new with full map.
+	for recipientID, b64 := range ciphertextByRecipient {
+		if recipientID == "" || b64 == "" {
+			continue
+		}
+		ct, err := base64.StdEncoding.DecodeString(b64)
+		if err != nil {
+			slog.Warn("ws fan-out invalid base64", "recipientID", recipientID)
+			continue
+		}
+		_, err = h.store.InsertMessage(ctx, channelID, c.userID, &recipientID, ct)
+		if err != nil {
+			slog.Warn("ws InsertMessage fan-out failed", "err", err, "recipientID", recipientID)
+		}
+	}
+	out := map[string]interface{}{
+		"type":                  "message.new",
+		"channel_id":            channelID,
+		"sender_id":             c.userID,
+		"ciphertext_by_recipient": ciphertextByRecipient,
+		"timestamp":             time.Now().Format(time.RFC3339Nano),
+	}
+	b, _ := json.Marshal(out)
+	h.hub.Broadcast(channelID, b, c.id)
 }
 
 func (h *MessageHandler) handleMessageHistory(c *Client, raw []byte) {
@@ -132,7 +168,7 @@ func (h *MessageHandler) handleMessageHistory(c *Client, raw []byte) {
 		sendError(c, "forbidden", "not a channel member")
 		return
 	}
-	messages, err := h.store.GetMessages(ctx, payload.ChannelID, before, limit)
+	messages, err := h.store.GetMessages(ctx, payload.ChannelID, c.userID, before, limit)
 	if err != nil {
 		slog.Warn("ws GetMessages failed", "err", err)
 		sendError(c, "internal", "failed to load history")
