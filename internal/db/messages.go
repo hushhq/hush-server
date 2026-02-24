@@ -74,7 +74,6 @@ func scanMessage(row pgx.Row) (*models.Message, error) {
 }
 
 func scanMessages(rows pgx.Rows) ([]models.Message, error) {
-	defer rows.Close()
 	var out []models.Message
 	for rows.Next() {
 		var m models.Message

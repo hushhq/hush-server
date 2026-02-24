@@ -204,7 +204,7 @@ func TestMessageHandler_HandleMessageHistory_ReturnsMessages(t *testing.T) {
 	assert.Equal(t, "m1", resp.Messages[0].ID)
 }
 
-func TestMessageHandler_HandleMessageSend_FanoutStoresAndBroadcasts(t *testing.T) {
+func TestMessageHandler_HandleMessageSend_FanoutStoresAndBroadcastsPerRecipient(t *testing.T) {
 	hub := NewHub()
 	var insertCount int
 	var lastRecipientID *string
@@ -213,7 +213,7 @@ func TestMessageHandler_HandleMessageSend_FanoutStoresAndBroadcasts(t *testing.T
 		insertMessageFn: func(ctx context.Context, channelID, senderID string, recipientID *string, ciphertext []byte) (*models.Message, error) {
 			insertCount++
 			lastRecipientID = recipientID
-			return &models.Message{ID: "msg-1", ChannelID: channelID, SenderID: senderID, Timestamp: time.Now()}, nil
+			return &models.Message{ID: "msg-" + *recipientID, ChannelID: channelID, SenderID: senderID, Ciphertext: ciphertext, Timestamp: time.Now()}, nil
 		},
 	}
 	h := NewMessageHandler(store, hub)
@@ -231,26 +231,29 @@ func TestMessageHandler_HandleMessageSend_FanoutStoresAndBroadcasts(t *testing.T
 	}()
 
 	raw, _ := json.Marshal(map[string]interface{}{
-		"channel_id":             "ch1",
+		"channel_id":              "ch1",
 		"ciphertext_by_recipient": map[string]string{"user2": "YWVz", "user3": "eHl6"},
 	})
 	h.Handle(sender, "message.send", raw)
 
 	assert.Equal(t, 2, insertCount)
 	assert.NotNil(t, lastRecipientID)
+
+	// user2 should receive only their own ciphertext, not user3's
 	msg := drainUntilType(t, recv, "message.new", time.Second)
 	var out struct {
-		Type                  string            `json:"type"`
-		ChannelID             string            `json:"channel_id"`
-		SenderID              string            `json:"sender_id"`
-		CiphertextByRecipient map[string]string `json:"ciphertext_by_recipient"`
+		Type       string `json:"type"`
+		ID         string `json:"id"`
+		ChannelID  string `json:"channel_id"`
+		SenderID   string `json:"sender_id"`
+		Ciphertext string `json:"ciphertext"`
 	}
 	require.NoError(t, json.Unmarshal(msg, &out))
 	assert.Equal(t, "message.new", out.Type)
 	assert.Equal(t, "ch1", out.ChannelID)
 	assert.Equal(t, "user1", out.SenderID)
-	assert.Len(t, out.CiphertextByRecipient, 2)
-	assert.Equal(t, "YWVz", out.CiphertextByRecipient["user2"])
+	assert.Equal(t, "YWVz", out.Ciphertext)
+	assert.NotEmpty(t, out.ID)
 }
 
 func TestMessageHandler_HandleTyping_BroadcastsToChannel(t *testing.T) {

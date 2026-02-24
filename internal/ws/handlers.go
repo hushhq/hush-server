@@ -12,8 +12,10 @@ import (
 )
 
 const (
-	messageHistoryLimitMax = 50
-	handlerTimeout         = 10 * time.Second
+	messageHistoryLimitMax  = 50
+	handlerTimeout          = 10 * time.Second
+	maxFanoutRecipients     = 200
+	maxCiphertextBytes      = 64 * 1024 // 64 KiB per ciphertext blob
 )
 
 // MessageHandler handles application WebSocket message types (message.send, message.history, typing.*).
@@ -69,6 +71,10 @@ func (h *MessageHandler) handleMessageSend(c *Client, raw []byte) {
 		return
 	}
 	if len(payload.CiphertextByRecipient) > 0 {
+		if len(payload.CiphertextByRecipient) > maxFanoutRecipients {
+			sendError(c, "bad_request", "too many fan-out recipients")
+			return
+		}
 		h.handleMessageSendFanout(c, payload.ChannelID, payload.CiphertextByRecipient, ctx)
 		return
 	}
@@ -79,6 +85,10 @@ func (h *MessageHandler) handleMessageSend(c *Client, raw []byte) {
 	ciphertext, err := base64.StdEncoding.DecodeString(payload.Ciphertext)
 	if err != nil {
 		sendError(c, "bad_request", "invalid ciphertext base64")
+		return
+	}
+	if len(ciphertext) > maxCiphertextBytes {
+		sendError(c, "bad_request", "ciphertext too large")
 		return
 	}
 	msg, err := h.store.InsertMessage(ctx, payload.ChannelID, c.userID, nil, ciphertext)
@@ -100,7 +110,6 @@ func (h *MessageHandler) handleMessageSend(c *Client, raw []byte) {
 }
 
 func (h *MessageHandler) handleMessageSendFanout(c *Client, channelID string, ciphertextByRecipient map[string]string, ctx context.Context) {
-	// Store one row per recipient; broadcast one message.new with full map.
 	for recipientID, b64 := range ciphertextByRecipient {
 		if recipientID == "" || b64 == "" {
 			continue
@@ -110,20 +119,26 @@ func (h *MessageHandler) handleMessageSendFanout(c *Client, channelID string, ci
 			slog.Warn("ws fan-out invalid base64", "recipientID", recipientID)
 			continue
 		}
-		_, err = h.store.InsertMessage(ctx, channelID, c.userID, &recipientID, ct)
+		if len(ct) > maxCiphertextBytes {
+			slog.Warn("ws fan-out ciphertext too large", "recipientID", recipientID, "size", len(ct))
+			continue
+		}
+		msg, err := h.store.InsertMessage(ctx, channelID, c.userID, &recipientID, ct)
 		if err != nil {
 			slog.Warn("ws InsertMessage fan-out failed", "err", err, "recipientID", recipientID)
+			continue
 		}
+		out := map[string]interface{}{
+			"type":       "message.new",
+			"id":         msg.ID,
+			"channel_id": msg.ChannelID,
+			"sender_id":  msg.SenderID,
+			"ciphertext": b64,
+			"timestamp":  msg.Timestamp.Format(time.RFC3339Nano),
+		}
+		b, _ := json.Marshal(out)
+		h.hub.BroadcastToUserInChannel(channelID, recipientID, b)
 	}
-	out := map[string]interface{}{
-		"type":                  "message.new",
-		"channel_id":            channelID,
-		"sender_id":             c.userID,
-		"ciphertext_by_recipient": ciphertextByRecipient,
-		"timestamp":             time.Now().Format(time.RFC3339Nano),
-	}
-	b, _ := json.Marshal(out)
-	h.hub.Broadcast(channelID, b, c.id)
 }
 
 func (h *MessageHandler) handleMessageHistory(c *Client, raw []byte) {
@@ -153,7 +168,11 @@ func (h *MessageHandler) handleMessageHistory(c *Client, raw []byte) {
 		var err error
 		before, err = time.Parse(time.RFC3339Nano, payload.Before)
 		if err != nil {
-			before, _ = time.Parse(time.RFC3339, payload.Before)
+			before, err = time.Parse(time.RFC3339, payload.Before)
+		}
+		if err != nil {
+			sendError(c, "bad_request", "invalid before timestamp")
+			return
 		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
