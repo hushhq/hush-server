@@ -12,7 +12,7 @@ import (
 
 // newTestClient creates a Client suitable for hub-only tests (no real WebSocket).
 func newTestClient(hub *Hub, userID string) *Client {
-	return NewClient(nil, hub, userID)
+	return NewClient(nil, hub, userID, nil)
 }
 
 // drainPresence reads from the client's send channel and returns the user_ids

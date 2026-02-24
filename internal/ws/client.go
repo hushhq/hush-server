@@ -18,11 +18,12 @@ const (
 
 // Client is a single WebSocket connection.
 type Client struct {
-	id     string
-	userID string
-	hub    *Hub
-	conn   *websocket.Conn
-	send   chan []byte
+	id      string
+	userID  string
+	hub     *Hub
+	conn    *websocket.Conn
+	send    chan []byte
+	handler *MessageHandler
 }
 
 // Run runs the read and write pumps. Call after Register. Blocks until connection closes.
@@ -68,6 +69,10 @@ func (c *Client) readPump() {
 			if msg.ChannelID != "" {
 				c.hub.Unsubscribe(c, msg.ChannelID)
 			}
+		case "message.send", "message.history", "typing.start", "typing.stop":
+			if c.handler != nil {
+				c.handler.Handle(c, msg.Type, raw)
+			}
 		}
 	}
 }
@@ -95,13 +100,15 @@ func (c *Client) writePump() {
 	}
 }
 
-// NewClient creates a client. id and userID must be set by the handler after auth.
-func NewClient(conn *websocket.Conn, hub *Hub, userID string) *Client {
+// NewClient creates a client. id and userID are set by the handler after auth.
+// msgHandler may be nil; when set, it handles message.send, message.history, typing.*.
+func NewClient(conn *websocket.Conn, hub *Hub, userID string, msgHandler *MessageHandler) *Client {
 	return &Client{
-		id:     uuid.New().String(),
-		userID: userID,
-		hub:    hub,
-		conn:   conn,
-		send:   make(chan []byte, 256),
+		id:      uuid.New().String(),
+		userID:  userID,
+		hub:     hub,
+		conn:    conn,
+		send:    make(chan []byte, 256),
+		handler: msgHandler,
 	}
 }

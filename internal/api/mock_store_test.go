@@ -22,6 +22,9 @@ type mockStore struct {
 	countUnusedOneTimePreKeysFn   func(ctx context.Context, userID, deviceID string) (int, error)
 	listDeviceIDsForUserFn        func(ctx context.Context, userID string) ([]string, error)
 	upsertDeviceFn                func(ctx context.Context, userID, deviceID, label string) error
+	insertMessageFn               func(ctx context.Context, channelID, senderID string, ciphertext []byte) (*models.Message, error)
+	getMessagesFn                 func(ctx context.Context, channelID string, before time.Time, limit int) ([]models.Message, error)
+	isChannelMemberFn             func(ctx context.Context, channelID, userID string) (bool, error)
 }
 
 func (m *mockStore) CreateUser(ctx context.Context, username, displayName string, passwordHash *string) (*models.User, error) {
@@ -118,4 +121,25 @@ func (m *mockStore) UpsertDevice(ctx context.Context, userID, deviceID, label st
 		return m.upsertDeviceFn(ctx, userID, deviceID, label)
 	}
 	return nil
+}
+
+func (m *mockStore) InsertMessage(ctx context.Context, channelID, senderID string, ciphertext []byte) (*models.Message, error) {
+	if m.insertMessageFn != nil {
+		return m.insertMessageFn(ctx, channelID, senderID, ciphertext)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) GetMessages(ctx context.Context, channelID string, before time.Time, limit int) ([]models.Message, error) {
+	if m.getMessagesFn != nil {
+		return m.getMessagesFn(ctx, channelID, before, limit)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) IsChannelMember(ctx context.Context, channelID, userID string) (bool, error) {
+	if m.isChannelMemberFn != nil {
+		return m.isChannelMemberFn(ctx, channelID, userID)
+	}
+	return false, nil
 }

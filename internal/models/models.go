@@ -63,3 +63,12 @@ type PreKeyBundle struct {
 	OneTimePreKeyID       *int   `json:"oneTimePreKeyId,omitempty"`
 	OneTimePreKey         []byte `json:"oneTimePreKey,omitempty"`
 }
+
+// Message is a stored encrypted message. Ciphertext is opaque to the server.
+type Message struct {
+	ID         string    `json:"id"`
+	ChannelID  string    `json:"channelId"`
+	SenderID   string    `json:"senderId"`
+	Ciphertext []byte    `json:"ciphertext"` // base64-encoded in JSON
+	Timestamp  time.Time `json:"timestamp"`
+}

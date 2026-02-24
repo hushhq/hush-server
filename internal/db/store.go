@@ -24,4 +24,8 @@ type Store interface {
 	CountUnusedOneTimePreKeys(ctx context.Context, userID, deviceID string) (int, error)
 	ListDeviceIDsForUser(ctx context.Context, userID string) ([]string, error)
 	UpsertDevice(ctx context.Context, userID, deviceID, label string) error
+
+	InsertMessage(ctx context.Context, channelID, senderID string, ciphertext []byte) (*models.Message, error)
+	GetMessages(ctx context.Context, channelID string, before time.Time, limit int) ([]models.Message, error)
+	IsChannelMember(ctx context.Context, channelID, userID string) (bool, error)
 }

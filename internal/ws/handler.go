@@ -34,12 +34,13 @@ func Handler(hub *Hub, jwtSecret string, store db.Store, corsOrigin string) http
 				return
 			}
 			userID, err := authFromFirstMessage(conn, jwtSecret, store, r)
-			if err != nil {
-				_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "auth required"))
+		if err != nil {
+			_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "auth required"))
 				_ = conn.Close()
 				return
 			}
-			client := NewClient(conn, hub, userID)
+			msgHandler := NewMessageHandler(store, hub)
+			client := NewClient(conn, hub, userID, msgHandler)
 			hub.Register(client)
 			client.Run()
 			return
@@ -61,7 +62,8 @@ func Handler(hub *Hub, jwtSecret string, store db.Store, corsOrigin string) http
 		if err != nil {
 			return
 		}
-		client := NewClient(conn, hub, userID)
+		msgHandler := NewMessageHandler(store, hub)
+		client := NewClient(conn, hub, userID, msgHandler)
 		hub.Register(client)
 		client.Run()
 	}
