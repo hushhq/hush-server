@@ -91,6 +91,7 @@ func main() {
 	wsHub := ws.NewHub()
 	if pool != nil && cfg.JWTSecret != "" {
 		r.Mount("/api/auth", api.AuthRoutes(pool, cfg.JWTSecret, cfg.JWTExpiry))
+		r.Mount("/api/keys", api.KeysRoutes(pool, wsHub, cfg.JWTSecret))
 		r.Get("/ws", ws.Handler(wsHub, cfg.JWTSecret, pool, cfg.CORSOrigin))
 		r.Mount("/api/livekit", api.LiveKitRoutes(pool, cfg.JWTSecret, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret))
 	}

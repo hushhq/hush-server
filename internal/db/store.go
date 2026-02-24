@@ -16,4 +16,12 @@ type Store interface {
 	CreateSession(ctx context.Context, sessionID, userID, tokenHash string, expiresAt time.Time) (*models.Session, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash string) (*models.Session, error)
 	DeleteSessionByID(ctx context.Context, sessionID string) error
+
+	UpsertIdentityKeys(ctx context.Context, userID, deviceID string, identityKey, signedPreKey, signedPreKeySignature []byte, registrationID int) error
+	InsertOneTimePreKeys(ctx context.Context, userID, deviceID string, keys []models.OneTimePreKeyRow) error
+	GetIdentityAndSignedPreKey(ctx context.Context, userID, deviceID string) (identityKey, signedPreKey, signedPreKeySignature []byte, registrationID int, err error)
+	ConsumeOneTimePreKey(ctx context.Context, userID, deviceID string) (keyID int, publicKey []byte, err error)
+	CountUnusedOneTimePreKeys(ctx context.Context, userID, deviceID string) (int, error)
+	ListDeviceIDsForUser(ctx context.Context, userID string) ([]string, error)
+	UpsertDevice(ctx context.Context, userID, deviceID, label string) error
 }

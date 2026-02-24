@@ -37,3 +37,29 @@ type AuthResponse struct {
 	Token string `json:"token"`
 	User  User   `json:"user"`
 }
+
+// OneTimePreKeyRow is one entry in a batch of one-time pre-keys for upload.
+type OneTimePreKeyRow struct {
+	KeyID     int    `json:"keyId"`
+	PublicKey []byte `json:"publicKey"`
+}
+
+// PreKeyUploadRequest is the body for POST /api/keys/upload.
+type PreKeyUploadRequest struct {
+	DeviceID               string             `json:"deviceId"`
+	IdentityKey             []byte             `json:"identityKey"`
+	SignedPreKey            []byte             `json:"signedPreKey"`
+	SignedPreKeySignature   []byte             `json:"signedPreKeySignature"`
+	RegistrationID          int                `json:"registrationId"`
+	OneTimePreKeys          []OneTimePreKeyRow `json:"oneTimePreKeys"`
+}
+
+// PreKeyBundle is returned by GET /api/keys/:userId and GET /api/keys/:userId/:deviceId.
+type PreKeyBundle struct {
+	IdentityKey           []byte `json:"identityKey"`
+	SignedPreKey          []byte `json:"signedPreKey"`
+	SignedPreKeySignature []byte `json:"signedPreKeySignature"`
+	RegistrationID        int    `json:"registrationId"`
+	OneTimePreKeyID       *int   `json:"oneTimePreKeyId,omitempty"`
+	OneTimePreKey         []byte `json:"oneTimePreKey,omitempty"`
+}

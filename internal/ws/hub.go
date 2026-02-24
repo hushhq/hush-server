@@ -80,6 +80,25 @@ func (h *Hub) Unsubscribe(c *Client, channelID string) {
 	}
 }
 
+// BroadcastToUser sends the message to all connected clients for the given userID.
+func (h *Hub) BroadcastToUser(userID string, message []byte) {
+	h.mu.RLock()
+	clients := make([]*Client, 0)
+	for _, c := range h.clients {
+		if c.userID == userID {
+			clients = append(clients, c)
+		}
+	}
+	h.mu.RUnlock()
+	for _, c := range clients {
+		select {
+		case c.send <- message:
+		default:
+			slog.Warn("ws client send buffer full", "clientID", c.id)
+		}
+	}
+}
+
 // Broadcast sends the message to all clients subscribed to the channel (except excludeClientID if non-empty).
 func (h *Hub) Broadcast(channelID string, message []byte, excludeClientID string) {
 	h.mu.RLock()
