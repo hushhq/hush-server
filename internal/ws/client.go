@@ -52,28 +52,48 @@ func (c *Client) readPump() {
 			}
 			return
 		}
-		var msg struct {
-			Type      string `json:"type"`
-			ChannelID string `json:"channel_id"`
-			Token     string `json:"token"`
+		c.handleMessage(raw)
+	}
+}
+
+// handleMessage routes a single incoming JSON message for this client.
+func (c *Client) handleMessage(raw []byte) {
+	var msg struct {
+		Type         string `json:"type"`
+		ChannelID    string `json:"channel_id"`
+		TargetUserID string `json:"target_user_id"`
+		Token        string `json:"token"`
+		Payload      string `json:"payload"`
+	}
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		return
+	}
+	switch msg.Type {
+	case "subscribe":
+		if msg.ChannelID != "" {
+			c.hub.Subscribe(c, msg.ChannelID)
 		}
-		if err := json.Unmarshal(raw, &msg); err != nil {
-			continue
+	case "unsubscribe":
+		if msg.ChannelID != "" {
+			c.hub.Unsubscribe(c, msg.ChannelID)
 		}
-		switch msg.Type {
-		case "subscribe":
-			if msg.ChannelID != "" {
-				c.hub.Subscribe(c, msg.ChannelID)
-			}
-		case "unsubscribe":
-			if msg.ChannelID != "" {
-				c.hub.Unsubscribe(c, msg.ChannelID)
-			}
-		case "message.send", "message.history", "typing.start", "typing.stop":
-			if c.handler != nil {
-				c.handler.Handle(c, msg.Type, raw)
-			}
+	case "message.send", "message.history", "typing.start", "typing.stop":
+		if c.handler != nil {
+			c.handler.Handle(c, msg.Type, raw)
 		}
+	case "media.key":
+		if msg.TargetUserID == "" {
+			return
+		}
+		out, err := json.Marshal(map[string]interface{}{
+			"type":           "media.key",
+			"sender_user_id": c.userID,
+			"payload":        msg.Payload,
+		})
+		if err != nil {
+			return
+		}
+		c.hub.BroadcastToUser(msg.TargetUserID, out)
 	}
 }
 
