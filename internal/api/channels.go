@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/base64"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -16,12 +17,13 @@ const (
 	channelMessagesLimitMax     = 50
 )
 
-// ChannelRoutes returns the router for /api/channels. Phase C: only GET :id/messages.
+// ChannelRoutes returns the router for /api/channels (messages, delete).
 func ChannelRoutes(store db.Store, jwtSecret string) chi.Router {
 	r := chi.NewRouter()
 	h := &channelsHandler{store: store}
 	r.Use(RequireAuth(jwtSecret, store))
 	r.Get("/{id}/messages", h.getMessages)
+	r.Delete("/{id}", h.deleteChannel)
 	return r
 }
 
@@ -101,4 +103,38 @@ func (h *channelsHandler) getMessages(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (h *channelsHandler) deleteChannel(w http.ResponseWriter, r *http.Request) {
+	channelID := chi.URLParam(r, "id")
+	if channelID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "channel id required"})
+		return
+	}
+	userID := userIDFromContext(r.Context())
+	if userID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	serverID, err := h.store.GetServerIDForChannel(r.Context(), channelID)
+	if err != nil {
+		slog.Error("get server for channel", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to resolve channel"})
+		return
+	}
+	if serverID == "" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "channel not found"})
+		return
+	}
+	member, err := h.store.GetServerMember(r.Context(), serverID, userID)
+	if err != nil || member == nil || member.Role != roleAdmin {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required to delete channel"})
+		return
+	}
+	if err := h.store.DeleteChannel(r.Context(), channelID); err != nil {
+		slog.Error("delete channel", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to delete channel"})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

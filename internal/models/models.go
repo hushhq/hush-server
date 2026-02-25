@@ -74,3 +74,73 @@ type Message struct {
 	Ciphertext []byte    `json:"ciphertext"` // base64-encoded in JSON
 	Timestamp  time.Time `json:"timestamp"`
 }
+
+// Server is a Discord-like server.
+type Server struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	IconURL   *string   `json:"iconUrl,omitempty"`
+	OwnerID   string    `json:"ownerId"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+// ServerMember is a user's membership in a server.
+type ServerMember struct {
+	ServerID string    `json:"serverId"`
+	UserID   string    `json:"userId"`
+	Role     string    `json:"role"`
+	JoinedAt time.Time `json:"joinedAt"`
+}
+
+// ServerWithRole embeds Server and adds the current user's role.
+type ServerWithRole struct {
+	Server
+	Role string `json:"role"`
+}
+
+// Channel is a text or voice channel within a server.
+type Channel struct {
+	ID        string  `json:"id"`
+	ServerID  string  `json:"serverId"`
+	Name      string  `json:"name"`
+	Type      string  `json:"type"`
+	VoiceMode *string `json:"voiceMode,omitempty"`
+	ParentID  *string `json:"parentId,omitempty"`
+	Position  int     `json:"position"`
+}
+
+// InviteCode is an invite link token for a server.
+type InviteCode struct {
+	Code      string    `json:"code"`
+	ServerID  string    `json:"serverId"`
+	CreatedBy string    `json:"createdBy"`
+	ExpiresAt time.Time `json:"expiresAt"`
+	MaxUses   int       `json:"maxUses"`
+	Uses      int       `json:"uses"`
+}
+
+// CreateServerRequest is the body for POST /api/servers.
+type CreateServerRequest struct {
+	Name    string  `json:"name"`
+	IconURL *string `json:"iconUrl,omitempty"`
+}
+
+// UpdateServerRequest is the body for PUT /api/servers/:id.
+type UpdateServerRequest struct {
+	Name    *string `json:"name,omitempty"`
+	IconURL *string `json:"iconUrl,omitempty"`
+}
+
+// CreateChannelRequest is the body for POST /api/servers/:id/channels.
+type CreateChannelRequest struct {
+	Name      string  `json:"name"`
+	Type      string  `json:"type"`
+	VoiceMode *string `json:"voiceMode,omitempty"`
+	ParentID  *string `json:"parentId,omitempty"`
+	Position  *int    `json:"position,omitempty"`
+}
+
+// JoinServerRequest is the body for POST /api/servers/:id/join.
+type JoinServerRequest struct {
+	InviteCode string `json:"inviteCode"`
+}

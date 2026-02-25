@@ -54,6 +54,30 @@ func (m *messageStoreMock) IsChannelMember(ctx context.Context, channelID, userI
 	return false, nil
 }
 
+func (m *messageStoreMock) CreateServerWithOwner(context.Context, string, *string, string) (*models.Server, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) GetServerByID(context.Context, string) (*models.Server, error)                       { return nil, nil }
+func (m *messageStoreMock) ListServersForUser(context.Context, string) ([]models.ServerWithRole, error)         { return nil, nil }
+func (m *messageStoreMock) UpdateServer(context.Context, string, *string, *string) error                        { return nil }
+func (m *messageStoreMock) DeleteServer(context.Context, string) error                                          { return nil }
+func (m *messageStoreMock) AddServerMember(context.Context, string, string, string) error                       { return nil }
+func (m *messageStoreMock) RemoveServerMember(context.Context, string, string) error                            { return nil }
+func (m *messageStoreMock) GetServerMember(context.Context, string, string) (*models.ServerMember, error)       { return nil, nil }
+func (m *messageStoreMock) TransferServerOwnership(context.Context, string, string) error                       { return nil }
+func (m *messageStoreMock) UpdateServerMemberRole(context.Context, string, string, string) error                { return nil }
+func (m *messageStoreMock) CountServerMembers(context.Context, string) (int, error)                             { return 0, nil }
+func (m *messageStoreMock) GetNextOwnerCandidate(context.Context, string, string) (*models.ServerMember, error) { return nil, nil }
+func (m *messageStoreMock) CreateChannel(context.Context, string, string, string, *string, *string, int) (*models.Channel, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) ListChannels(context.Context, string) ([]models.Channel, error)       { return nil, nil }
+func (m *messageStoreMock) GetChannelByID(context.Context, string) (*models.Channel, error)      { return nil, nil }
+func (m *messageStoreMock) DeleteChannel(context.Context, string) error                          { return nil }
+func (m *messageStoreMock) GetServerIDForChannel(context.Context, string) (string, error)        { return "", nil }
+func (m *messageStoreMock) GetInviteByCode(context.Context, string) (*models.InviteCode, error)  { return nil, nil }
+func (m *messageStoreMock) ClaimInviteUse(context.Context, string) (bool, error)                 { return true, nil }
+
 // drainUntilType reads from c.send until a message with the given type is received or timeout.
 func drainUntilType(t *testing.T, c *Client, wantType string, timeout time.Duration) []byte {
 	t.Helper()
