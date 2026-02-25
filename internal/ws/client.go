@@ -10,10 +10,11 @@ import (
 )
 
 const (
-	writeWait      = 10 * time.Second
-	pongWait       = 60 * time.Second
-	pingPeriod     = (pongWait * 9) / 10
-	maxMessageSize = 512 * 1024
+	writeWait         = 10 * time.Second
+	pongWait          = 60 * time.Second
+	pingPeriod        = (pongWait * 9) / 10
+	maxMessageSize    = 512 * 1024
+	maxMediaKeyPayload = 4096
 )
 
 // Client is a single WebSocket connection.
@@ -82,7 +83,10 @@ func (c *Client) handleMessage(raw []byte) {
 			c.handler.Handle(c, msg.Type, raw)
 		}
 	case "media.key":
-		if msg.TargetUserID == "" {
+		if msg.TargetUserID == "" || msg.TargetUserID == c.userID {
+			return
+		}
+		if len(msg.Payload) > maxMediaKeyPayload {
 			return
 		}
 		out, err := json.Marshal(map[string]interface{}{
