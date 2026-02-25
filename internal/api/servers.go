@@ -22,6 +22,7 @@ const (
 type serverWithChannelsResponse struct {
 	Server   models.Server   `json:"server"`
 	Channels []models.Channel `json:"channels"`
+	MyRole   string          `json:"myRole"`
 }
 
 // ServerRoutes returns the router for /api/servers (create, list, get, update, delete, join, leave, create/list channels).
@@ -127,7 +128,7 @@ func (h *serverHandler) getServer(w http.ResponseWriter, r *http.Request) {
 	if channels == nil {
 		channels = []models.Channel{}
 	}
-	writeJSON(w, http.StatusOK, serverWithChannelsResponse{Server: *server, Channels: channels})
+	writeJSON(w, http.StatusOK, serverWithChannelsResponse{Server: *server, Channels: channels, MyRole: member.Role})
 }
 
 func (h *serverHandler) updateServer(w http.ResponseWriter, r *http.Request) {

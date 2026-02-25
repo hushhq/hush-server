@@ -93,6 +93,7 @@ func main() {
 		r.Mount("/api/auth", api.AuthRoutes(pool, cfg.JWTSecret, cfg.JWTExpiry))
 		r.Mount("/api/keys", api.KeysRoutes(pool, wsHub, cfg.JWTSecret))
 		r.Mount("/api/servers", api.ServerRoutes(pool, cfg.JWTSecret))
+		r.Mount("/api/invites", api.InviteRoutes(pool))
 		r.Mount("/api/channels", api.ChannelRoutes(pool, cfg.JWTSecret))
 		r.Get("/ws", ws.Handler(wsHub, cfg.JWTSecret, pool, cfg.CORSOrigin))
 		r.Mount("/api/livekit", api.LiveKitRoutes(pool, cfg.JWTSecret, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret))
