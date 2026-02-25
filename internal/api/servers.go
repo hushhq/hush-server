@@ -20,10 +20,9 @@ const (
 
 // serverWithChannelsResponse is the response for GET /api/servers/:id.
 type serverWithChannelsResponse struct {
-	Server    models.Server    `json:"server"`
-	Channels  []models.Channel `json:"channels"`
-	MyRole    string           `json:"myRole"`
-	MemberIds []string         `json:"memberIds"`
+	Server   models.Server    `json:"server"`
+	Channels []models.Channel `json:"channels"`
+	MyRole   string           `json:"myRole"`
 }
 
 // ServerRoutes returns the router for /api/servers (create, list, get, update, delete, join, leave, create/list channels).
@@ -130,18 +129,8 @@ func (h *serverHandler) getServer(w http.ResponseWriter, r *http.Request) {
 	if channels == nil {
 		channels = []models.Channel{}
 	}
-	members, err := h.store.ListServerMembers(r.Context(), serverID)
-	if err != nil {
-		slog.Error("list server members", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load members"})
-		return
-	}
-	memberIds := make([]string, 0, len(members))
-	for _, m := range members {
-		memberIds = append(memberIds, m.UserID)
-	}
 	writeJSON(w, http.StatusOK, serverWithChannelsResponse{
-		Server: *server, Channels: channels, MyRole: member.Role, MemberIds: memberIds,
+		Server: *server, Channels: channels, MyRole: member.Role,
 	})
 }
 

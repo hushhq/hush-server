@@ -193,12 +193,6 @@ func TestGetServer_AsMember_ReturnsServerWithChannels(t *testing.T) {
 		}
 		return nil, nil
 	}
-	store.listServerMembersFn = func(_ context.Context, sid string) ([]models.ServerMemberWithUser, error) {
-		if sid == serverID {
-			return []models.ServerMemberWithUser{}, nil
-		}
-		return nil, nil
-	}
 	router := serversRouter(store)
 	rr := getServer(router, "/"+serverID, token)
 	assert.Equal(t, http.StatusOK, rr.Code)
@@ -207,7 +201,6 @@ func TestGetServer_AsMember_ReturnsServerWithChannels(t *testing.T) {
 	assert.Equal(t, "S1", out.Server.Name)
 	require.Len(t, out.Channels, 1)
 	assert.Equal(t, "general", out.Channels[0].Name)
-	require.NotNil(t, out.MemberIds)
 }
 
 func TestListMembers_Success(t *testing.T) {
