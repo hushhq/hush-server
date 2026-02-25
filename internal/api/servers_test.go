@@ -442,6 +442,67 @@ func TestLeaveServer_SoleMember_Returns409(t *testing.T) {
 	assert.Contains(t, err["error"], "sole member")
 }
 
+func TestUpdateServer_EmptyName_Returns400(t *testing.T) {
+	userID := uuid.New().String()
+	serverID := uuid.New().String()
+	store := &mockStore{}
+	token := makeServerAuth(store, userID)
+	store.getServerMemberFn = func(_ context.Context, sid, uid string) (*models.ServerMember, error) {
+		if sid == serverID && uid == userID {
+			return &models.ServerMember{ServerID: serverID, UserID: userID, Role: "admin"}, nil
+		}
+		return nil, nil
+	}
+	router := serversRouter(store)
+	rr := putServerJSON(router, "/"+serverID, models.UpdateServerRequest{Name: ptrString("   ")}, token)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	err := decodeError(t, rr)
+	assert.Contains(t, err["error"], "name is required")
+}
+
+func TestUpdateServer_NameTooLong_Returns400(t *testing.T) {
+	userID := uuid.New().String()
+	serverID := uuid.New().String()
+	store := &mockStore{}
+	token := makeServerAuth(store, userID)
+	store.getServerMemberFn = func(_ context.Context, sid, uid string) (*models.ServerMember, error) {
+		if sid == serverID && uid == userID {
+			return &models.ServerMember{ServerID: serverID, UserID: userID, Role: "admin"}, nil
+		}
+		return nil, nil
+	}
+	router := serversRouter(store)
+	longName := make([]byte, 101)
+	for i := range longName {
+		longName[i] = 'a'
+	}
+	rr := putServerJSON(router, "/"+serverID, models.UpdateServerRequest{Name: ptrString(string(longName))}, token)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	err := decodeError(t, rr)
+	assert.Contains(t, err["error"], "name exceeds maximum length")
+}
+
+func TestUpdateServer_TrimsName(t *testing.T) {
+	userID := uuid.New().String()
+	serverID := uuid.New().String()
+	store := &mockStore{}
+	token := makeServerAuth(store, userID)
+	store.getServerMemberFn = func(_ context.Context, sid, uid string) (*models.ServerMember, error) {
+		if sid == serverID && uid == userID {
+			return &models.ServerMember{ServerID: serverID, UserID: userID, Role: "admin"}, nil
+		}
+		return nil, nil
+	}
+	store.updateServerFn = func(_ context.Context, sid string, name *string, _ *string) error {
+		require.NotNil(t, name)
+		assert.Equal(t, "Trimmed", *name)
+		return nil
+	}
+	router := serversRouter(store)
+	rr := putServerJSON(router, "/"+serverID, models.UpdateServerRequest{Name: ptrString("  Trimmed  ")}, token)
+	assert.Equal(t, http.StatusOK, rr.Code)
+}
+
 func ptrString(s string) *string {
 	return &s
 }

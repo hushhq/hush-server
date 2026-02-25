@@ -152,6 +152,18 @@ func (h *serverHandler) updateServer(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
 	}
+	if req.Name != nil {
+		trimmed := strings.TrimSpace(*req.Name)
+		if trimmed == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
+			return
+		}
+		if len(trimmed) > maxNameLength {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name exceeds maximum length"})
+			return
+		}
+		req.Name = &trimmed
+	}
 	if err := h.store.UpdateServer(r.Context(), serverID, req.Name, req.IconURL); err != nil {
 		slog.Error("update server", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update server"})
