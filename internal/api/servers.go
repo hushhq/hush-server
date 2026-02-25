@@ -20,9 +20,10 @@ const (
 
 // serverWithChannelsResponse is the response for GET /api/servers/:id.
 type serverWithChannelsResponse struct {
-	Server   models.Server   `json:"server"`
-	Channels []models.Channel `json:"channels"`
-	MyRole   string          `json:"myRole"`
+	Server    models.Server    `json:"server"`
+	Channels  []models.Channel `json:"channels"`
+	MyRole    string           `json:"myRole"`
+	MemberIds []string         `json:"memberIds"`
 }
 
 // ServerRoutes returns the router for /api/servers (create, list, get, update, delete, join, leave, create/list channels).
@@ -32,6 +33,7 @@ func ServerRoutes(store db.Store, jwtSecret string) chi.Router {
 	h := &serverHandler{store: store}
 	r.Post("/", h.createServer)
 	r.Get("/", h.listServers)
+	r.Get("/{id}/members", h.listMembers)
 	r.Get("/{id}", h.getServer)
 	r.Put("/{id}", h.updateServer)
 	r.Delete("/{id}", h.deleteServer)
@@ -128,7 +130,52 @@ func (h *serverHandler) getServer(w http.ResponseWriter, r *http.Request) {
 	if channels == nil {
 		channels = []models.Channel{}
 	}
-	writeJSON(w, http.StatusOK, serverWithChannelsResponse{Server: *server, Channels: channels, MyRole: member.Role})
+	members, err := h.store.ListServerMembers(r.Context(), serverID)
+	if err != nil {
+		slog.Error("list server members", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load members"})
+		return
+	}
+	memberIds := make([]string, 0, len(members))
+	for _, m := range members {
+		memberIds = append(memberIds, m.UserID)
+	}
+	writeJSON(w, http.StatusOK, serverWithChannelsResponse{
+		Server: *server, Channels: channels, MyRole: member.Role, MemberIds: memberIds,
+	})
+}
+
+func (h *serverHandler) listMembers(w http.ResponseWriter, r *http.Request) {
+	serverID := chi.URLParam(r, "id")
+	if serverID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "server id required"})
+		return
+	}
+	userID := userIDFromContext(r.Context())
+	if userID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	member, err := h.store.GetServerMember(r.Context(), serverID, userID)
+	if err != nil {
+		slog.Error("get server member", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to check membership"})
+		return
+	}
+	if member == nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "not a member of this server"})
+		return
+	}
+	list, err := h.store.ListServerMembers(r.Context(), serverID)
+	if err != nil {
+		slog.Error("list server members", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load members"})
+		return
+	}
+	if list == nil {
+		list = []models.ServerMemberWithUser{}
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"members": list})
 }
 
 func (h *serverHandler) updateServer(w http.ResponseWriter, r *http.Request) {

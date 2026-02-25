@@ -143,6 +143,38 @@ func (p *Pool) CountServerMembers(ctx context.Context, serverID string) (int, er
 	return n, err
 }
 
+// ListServerMembers returns all members of a server with display name, ordered by role (admin, mod, member) then name.
+func (p *Pool) ListServerMembers(ctx context.Context, serverID string) ([]models.ServerMemberWithUser, error) {
+	rows, err := p.Query(ctx, `
+		SELECT sm.user_id, u.display_name, sm.role, sm.joined_at
+		FROM server_members sm
+		JOIN users u ON u.id = sm.user_id
+		WHERE sm.server_id = $1
+		ORDER BY (sm.role = 'admin') DESC, (sm.role = 'mod') DESC, u.display_name ASC`,
+		serverID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []models.ServerMemberWithUser
+	for rows.Next() {
+		var m models.ServerMemberWithUser
+		var joinedAt time.Time
+		if err := rows.Scan(&m.UserID, &m.DisplayName, &m.Role, &joinedAt); err != nil {
+			return nil, err
+		}
+		m.JoinedAt = joinedAt
+		out = append(out, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		out = []models.ServerMemberWithUser{}
+	}
+	return out, nil
+}
+
 // GetNextOwnerCandidate returns one member to transfer ownership to: prefer admin, then mod, then oldest member.
 func (p *Pool) GetNextOwnerCandidate(ctx context.Context, serverID, excludeUserID string) (*models.ServerMember, error) {
 	row := p.QueryRow(ctx, `

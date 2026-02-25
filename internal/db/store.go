@@ -38,6 +38,7 @@ type Store interface {
 	AddServerMember(ctx context.Context, serverID, userID, role string) error
 	RemoveServerMember(ctx context.Context, serverID, userID string) error
 	GetServerMember(ctx context.Context, serverID, userID string) (*models.ServerMember, error)
+	ListServerMembers(ctx context.Context, serverID string) ([]models.ServerMemberWithUser, error)
 	TransferServerOwnership(ctx context.Context, serverID, newOwnerID string) error
 	UpdateServerMemberRole(ctx context.Context, serverID, userID, role string) error
 	CountServerMembers(ctx context.Context, serverID string) (int, error)

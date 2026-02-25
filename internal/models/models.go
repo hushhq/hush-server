@@ -92,6 +92,14 @@ type ServerMember struct {
 	JoinedAt time.Time `json:"joinedAt"`
 }
 
+// ServerMemberWithUser is a server member with display name for list responses.
+type ServerMemberWithUser struct {
+	UserID      string    `json:"userId"`
+	DisplayName string    `json:"displayName"`
+	Role        string    `json:"role"`
+	JoinedAt    time.Time `json:"joinedAt"`
+}
+
 // ServerWithRole embeds Server and adds the current user's role.
 type ServerWithRole struct {
 	Server

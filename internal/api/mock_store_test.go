@@ -34,6 +34,7 @@ type mockStore struct {
 	addServerMemberFn         func(ctx context.Context, serverID, userID, role string) error
 	removeServerMemberFn      func(ctx context.Context, serverID, userID string) error
 	getServerMemberFn         func(ctx context.Context, serverID, userID string) (*models.ServerMember, error)
+	listServerMembersFn       func(ctx context.Context, serverID string) ([]models.ServerMemberWithUser, error)
 	transferServerOwnershipFn func(ctx context.Context, serverID, newOwnerID string) error
 	updateServerMemberRoleFn  func(ctx context.Context, serverID, userID, role string) error
 	countServerMembersFn      func(ctx context.Context, serverID string) (int, error)
@@ -218,6 +219,13 @@ func (m *mockStore) RemoveServerMember(ctx context.Context, serverID, userID str
 func (m *mockStore) GetServerMember(ctx context.Context, serverID, userID string) (*models.ServerMember, error) {
 	if m.getServerMemberFn != nil {
 		return m.getServerMemberFn(ctx, serverID, userID)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) ListServerMembers(ctx context.Context, serverID string) ([]models.ServerMemberWithUser, error) {
+	if m.listServerMembersFn != nil {
+		return m.listServerMembersFn(ctx, serverID)
 	}
 	return nil, nil
 }

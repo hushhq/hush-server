@@ -64,6 +64,7 @@ func (m *messageStoreMock) DeleteServer(context.Context, string) error          
 func (m *messageStoreMock) AddServerMember(context.Context, string, string, string) error                       { return nil }
 func (m *messageStoreMock) RemoveServerMember(context.Context, string, string) error                            { return nil }
 func (m *messageStoreMock) GetServerMember(context.Context, string, string) (*models.ServerMember, error)       { return nil, nil }
+func (m *messageStoreMock) ListServerMembers(context.Context, string) ([]models.ServerMemberWithUser, error) { return nil, nil }
 func (m *messageStoreMock) TransferServerOwnership(context.Context, string, string) error                       { return nil }
 func (m *messageStoreMock) UpdateServerMemberRole(context.Context, string, string, string) error                { return nil }
 func (m *messageStoreMock) CountServerMembers(context.Context, string) (int, error)                             { return 0, nil }

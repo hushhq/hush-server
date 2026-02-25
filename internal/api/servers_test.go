@@ -193,6 +193,12 @@ func TestGetServer_AsMember_ReturnsServerWithChannels(t *testing.T) {
 		}
 		return nil, nil
 	}
+	store.listServerMembersFn = func(_ context.Context, sid string) ([]models.ServerMemberWithUser, error) {
+		if sid == serverID {
+			return []models.ServerMemberWithUser{}, nil
+		}
+		return nil, nil
+	}
 	router := serversRouter(store)
 	rr := getServer(router, "/"+serverID, token)
 	assert.Equal(t, http.StatusOK, rr.Code)
@@ -201,6 +207,69 @@ func TestGetServer_AsMember_ReturnsServerWithChannels(t *testing.T) {
 	assert.Equal(t, "S1", out.Server.Name)
 	require.Len(t, out.Channels, 1)
 	assert.Equal(t, "general", out.Channels[0].Name)
+	require.NotNil(t, out.MemberIds)
+}
+
+func TestListMembers_Success(t *testing.T) {
+	userID := uuid.New().String()
+	serverID := uuid.New().String()
+	store := &mockStore{}
+	token := makeServerAuth(store, userID)
+	store.getServerMemberFn = func(_ context.Context, sid, uid string) (*models.ServerMember, error) {
+		if sid == serverID && uid == userID {
+			return &models.ServerMember{ServerID: serverID, UserID: userID, Role: "member"}, nil
+		}
+		return nil, nil
+	}
+	store.listServerMembersFn = func(_ context.Context, sid string) ([]models.ServerMemberWithUser, error) {
+		if sid != serverID {
+			return nil, nil
+		}
+		return []models.ServerMemberWithUser{
+			{UserID: "u-admin", DisplayName: "Alice", Role: "admin", JoinedAt: time.Now()},
+			{UserID: "u-mod", DisplayName: "Bob", Role: "mod", JoinedAt: time.Now()},
+			{UserID: userID, DisplayName: "Caller", Role: "member", JoinedAt: time.Now()},
+		}, nil
+	}
+	router := serversRouter(store)
+	rr := getServer(router, "/"+serverID+"/members", token)
+	assert.Equal(t, http.StatusOK, rr.Code)
+	var out struct {
+		Members []models.ServerMemberWithUser `json:"members"`
+	}
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&out))
+	require.Len(t, out.Members, 3)
+	assert.Equal(t, "admin", out.Members[0].Role)
+	assert.Equal(t, "Alice", out.Members[0].DisplayName)
+	assert.Equal(t, "mod", out.Members[1].Role)
+	assert.Equal(t, "Bob", out.Members[1].DisplayName)
+	assert.Equal(t, "member", out.Members[2].Role)
+	assert.Equal(t, "Caller", out.Members[2].DisplayName)
+}
+
+func TestListMembers_NotMember_403(t *testing.T) {
+	userID := uuid.New().String()
+	serverID := uuid.New().String()
+	store := &mockStore{}
+	token := makeServerAuth(store, userID)
+	store.getServerMemberFn = func(_ context.Context, _, _ string) (*models.ServerMember, error) {
+		return nil, nil
+	}
+	router := serversRouter(store)
+	rr := getServer(router, "/"+serverID+"/members", token)
+	assert.Equal(t, http.StatusForbidden, rr.Code)
+	err := decodeError(t, rr)
+	assert.Contains(t, err["error"], "not a member")
+}
+
+func TestListMembers_NoAuth_401(t *testing.T) {
+	serverID := uuid.New().String()
+	store := &mockStore{}
+	router := serversRouter(store)
+	rr := getServer(router, "/"+serverID+"/members", "")
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+	err := decodeError(t, rr)
+	assert.Contains(t, err["error"], "authorization")
 }
 
 func TestUpdateServer_NotAdmin_Returns403(t *testing.T) {
