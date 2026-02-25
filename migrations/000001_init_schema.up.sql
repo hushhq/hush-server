@@ -34,7 +34,7 @@ CREATE TABLE channels (
     server_id UUID NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     type TEXT NOT NULL CHECK (type IN ('text', 'voice')),
-    voice_mode TEXT CHECK (voice_mode IS NULL OR voice_mode IN ('performance', 'quality')),
+    voice_mode TEXT CHECK (voice_mode IS NULL OR voice_mode IN ('low-latency', 'quality')),
     parent_id UUID REFERENCES channels(id) ON DELETE SET NULL,
     position INT NOT NULL DEFAULT 0
 );

@@ -365,8 +365,8 @@ func (h *serverHandler) createChannel(w http.ResponseWriter, r *http.Request) {
 	}
 	var voiceMode *string
 	if req.Type == "voice" {
-		if req.VoiceMode == nil || (*req.VoiceMode != "performance" && *req.VoiceMode != "quality") {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "voice_mode is required for voice channels and must be performance or quality"})
+		if req.VoiceMode == nil || (*req.VoiceMode != "low-latency" && *req.VoiceMode != "quality") {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "voice_mode is required for voice channels and must be low-latency or quality"})
 			return
 		}
 		voiceMode = req.VoiceMode

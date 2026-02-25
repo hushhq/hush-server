@@ -59,12 +59,12 @@ func TestCreateChannel_ValidVoiceChannel_ReturnsChannel(t *testing.T) {
 		}
 		return nil, nil
 	}
-	perf := "performance"
+	perf := "low-latency"
 	chID := uuid.New().String()
 	store.createChannelFn = func(_ context.Context, sid, name, chType string, voiceMode *string, _ *string, pos int) (*models.Channel, error) {
 		assert.Equal(t, "voice", chType)
 		require.NotNil(t, voiceMode)
-		assert.Equal(t, "performance", *voiceMode)
+		assert.Equal(t, "low-latency", *voiceMode)
 		return &models.Channel{ID: chID, ServerID: sid, Name: name, Type: chType, VoiceMode: voiceMode, Position: pos}, nil
 	}
 	router := serversRouterForChannels(store)
@@ -75,7 +75,7 @@ func TestCreateChannel_ValidVoiceChannel_ReturnsChannel(t *testing.T) {
 	var ch models.Channel
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&ch))
 	assert.Equal(t, "voice", ch.Type)
-	assert.Equal(t, "performance", *ch.VoiceMode)
+	assert.Equal(t, "low-latency", *ch.VoiceMode)
 }
 
 func TestCreateChannel_VoiceModeOnTextChannel_Returns400(t *testing.T) {
@@ -89,7 +89,7 @@ func TestCreateChannel_VoiceModeOnTextChannel_Returns400(t *testing.T) {
 		}
 		return nil, nil
 	}
-	perf := "performance"
+	perf := "low-latency"
 	router := serversRouterForChannels(store)
 	rr := postServerJSON(router, "/"+serverID+"/channels", models.CreateChannelRequest{
 		Name: "general", Type: "text", VoiceMode: &perf,
