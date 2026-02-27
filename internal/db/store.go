@@ -49,6 +49,7 @@ type Store interface {
 	ListChannels(ctx context.Context, serverID string) ([]models.Channel, error)
 	GetChannelByID(ctx context.Context, channelID string) (*models.Channel, error)
 	DeleteChannel(ctx context.Context, channelID string) error
+	MoveChannel(ctx context.Context, channelID string, parentID *string, position int) error
 	GetServerIDForChannel(ctx context.Context, channelID string) (string, error)
 
 	// Invite operations

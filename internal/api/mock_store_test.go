@@ -44,6 +44,7 @@ type mockStore struct {
 	listChannelsFn          func(ctx context.Context, serverID string) ([]models.Channel, error)
 	getChannelByIDFn        func(ctx context.Context, channelID string) (*models.Channel, error)
 	deleteChannelFn         func(ctx context.Context, channelID string) error
+	moveChannelFn           func(ctx context.Context, channelID string, parentID *string, position int) error
 	getServerIDForChannelFn func(ctx context.Context, channelID string) (string, error)
 
 	createInviteFn    func(ctx context.Context, code, serverID, createdBy string, maxUses int, expiresAt time.Time) (*models.InviteCode, error)
@@ -283,6 +284,13 @@ func (m *mockStore) GetChannelByID(ctx context.Context, channelID string) (*mode
 func (m *mockStore) DeleteChannel(ctx context.Context, channelID string) error {
 	if m.deleteChannelFn != nil {
 		return m.deleteChannelFn(ctx, channelID)
+	}
+	return nil
+}
+
+func (m *mockStore) MoveChannel(ctx context.Context, channelID string, parentID *string, position int) error {
+	if m.moveChannelFn != nil {
+		return m.moveChannelFn(ctx, channelID, parentID, position)
 	}
 	return nil
 }

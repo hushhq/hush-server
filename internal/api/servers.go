@@ -395,8 +395,8 @@ func (h *serverHandler) createChannel(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name exceeds maximum length"})
 		return
 	}
-	if req.Type != "text" && req.Type != "voice" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "type must be text or voice"})
+	if req.Type != "text" && req.Type != "voice" && req.Type != "category" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "type must be text, voice, or category"})
 		return
 	}
 	position := 0
@@ -404,7 +404,16 @@ func (h *serverHandler) createChannel(w http.ResponseWriter, r *http.Request) {
 		position = *req.Position
 	}
 	var voiceMode *string
-	if req.Type == "voice" {
+	if req.Type == "category" {
+		if req.VoiceMode != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "voice_mode is not allowed for category channels"})
+			return
+		}
+		if req.ParentID != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "categories cannot be nested"})
+			return
+		}
+	} else if req.Type == "voice" {
 		if req.VoiceMode == nil || (*req.VoiceMode != "low-latency" && *req.VoiceMode != "quality") {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "voice_mode is required for voice channels and must be low-latency or quality"})
 			return
