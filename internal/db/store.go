@@ -52,6 +52,7 @@ type Store interface {
 	GetServerIDForChannel(ctx context.Context, channelID string) (string, error)
 
 	// Invite operations
+	CreateInvite(ctx context.Context, code, serverID, createdBy string, maxUses int, expiresAt time.Time) (*models.InviteCode, error)
 	GetInviteByCode(ctx context.Context, code string) (*models.InviteCode, error)
 	ClaimInviteUse(ctx context.Context, code string) (bool, error)
 }

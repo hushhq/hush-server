@@ -152,3 +152,9 @@ type CreateChannelRequest struct {
 type JoinServerRequest struct {
 	InviteCode string `json:"inviteCode"`
 }
+
+// CreateInviteRequest is the body for POST /api/servers/:id/invites.
+type CreateInviteRequest struct {
+	MaxUses   *int `json:"maxUses,omitempty"`
+	ExpiresIn *int `json:"expiresIn,omitempty"` // seconds
+}

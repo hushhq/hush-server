@@ -1,62 +1,38 @@
 # Production Caddy config for Hush (e.g. gethush.live)
-# Use when deploying with HTTPS. Mount as /etc/caddy/Caddyfile and set CORS_ORIGIN in env.
-# Example: docker run -e CORS_ORIGIN=https://gethush.live -v $(pwd)/caddy/Caddyfile.prod:/etc/caddy/Caddyfile ...
-# With docker-compose.prod.yml: override volumes to use this file and set CORS_ORIGIN in .env.
+# Mount as /etc/caddy/Caddyfile. Set CORS_ORIGIN in env.
 
 :80 {
-  handle /_matrix/* {
-    header X-Content-Type-Options "nosniff"
-    header X-Frame-Options "DENY"
-    header Cross-Origin-Opener-Policy "same-origin"
-    header Cross-Origin-Embedder-Policy "require-corp"
-    reverse_proxy synapse:8008 {
-      header_up Connection {http.request.header.Connection}
-      header_up Upgrade {http.request.header.Upgrade}
-      header_up X-Forwarded-For {remote_host}
-      header_up X-Forwarded-Proto {scheme}
-      header_up X-Forwarded-Host {host}
-      # Strip upstream CORS headers so Caddy is the single source of truth
-      header_down -Access-Control-Allow-Origin
-      header_down -Access-Control-Allow-Methods
-      header_down -Access-Control-Allow-Headers
-      header_down -Access-Control-Expose-Headers
-    }
-    header Access-Control-Allow-Origin "{$CORS_ORIGIN:*}"
-    header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
-    header Access-Control-Allow-Headers "Origin, X-Requested-With, Content-Type, Accept, Authorization"
-    @options {
-      method OPTIONS
-    }
-    handle @options {
-      respond 204
-    }
-  }
-
-  # LiveKit WebSocket: no security headers on this path (they can break the upgrade handshake).
+  # LiveKit WebSocket (no security headers to avoid breaking upgrade)
   handle /livekit* {
     uri strip_prefix /livekit
     reverse_proxy livekit:7880 {
       header_up Connection {http.request.header.Connection}
       header_up Upgrade {http.request.header.Upgrade}
-      header_up X-Forwarded-For {remote_host}
-      header_up X-Forwarded-Proto {scheme}
-      header_up X-Forwarded-Host {host}
     }
   }
 
+  # Go API
+  handle /api/* {
+    reverse_proxy hush-api:8080
+  }
+
+  # Go WebSocket
+  handle /ws {
+    reverse_proxy hush-api:8080 {
+      header_up Connection {http.request.header.Connection}
+      header_up Upgrade {http.request.header.Upgrade}
+    }
+  }
+
+  # Client SPA
   handle /* {
     header X-Content-Type-Options "nosniff"
     header X-Frame-Options "DENY"
     header Cross-Origin-Opener-Policy "same-origin"
-    header Cross-Origin-Embedder-Policy "require-corp"
-    reverse_proxy hush:3001 {
-      header_up Connection {http.request.header.Connection}
-      header_up Upgrade {http.request.header.Upgrade}
-      header_up X-Forwarded-For {remote_host}
-      header_up X-Forwarded-Proto {scheme}
-      header_up X-Forwarded-Host {host}
-      header_down -Access-Control-Allow-Origin
-    }
+    header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+    root * /srv
+    try_files {path} /index.html
+    file_server
   }
 
   log {

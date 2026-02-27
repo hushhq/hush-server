@@ -1,108 +1,44 @@
 # Caddy reverse proxy configuration for Hush
-# Routes Matrix API calls to Synapse and everything else to the Hush app
+# Routes API, WebSocket, and LiveKit traffic to the appropriate backend
+# Serves built client files for all other requests (SPA)
 
 {
-  # Disable automatic HTTPS for localhost development
   auto_https off
 }
 
-# Main site configuration (localhost dev; for production HTTPS see Caddyfile.prod)
 :80 {
-  # Synapse Admin API routes (used by Hush server for room management)
-  handle /_synapse/* {
-    reverse_proxy synapse:8008
-  }
-
-  # Matrix homeserver API routes
-  handle /_matrix/* {
-    header X-Content-Type-Options "nosniff"
-    header X-Frame-Options "DENY"
-    header Cross-Origin-Opener-Policy "same-origin"
-    header Cross-Origin-Embedder-Policy "require-corp"
-    reverse_proxy synapse:8008 {
-      # Preserve WebSocket upgrade headers
-      header_up Connection {http.request.header.Connection}
-      header_up Upgrade {http.request.header.Upgrade}
-
-      # Set X-Forwarded-* headers for Synapse
-      header_up X-Forwarded-For {remote_host}
-      header_up X-Forwarded-Proto {scheme}
-      header_up X-Forwarded-Host {host}
-
-      # Strip upstream CORS headers so Caddy is the single source of truth
-      header_down -Access-Control-Allow-Origin
-      header_down -Access-Control-Allow-Methods
-      header_down -Access-Control-Allow-Headers
-      header_down -Access-Control-Expose-Headers
-    }
-
-    # CORS: set CORS_ORIGIN in production (e.g. https://gethush.live); default * for dev
-    header Access-Control-Allow-Origin "{$CORS_ORIGIN:*}"
-    header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
-    header Access-Control-Allow-Headers "Origin, X-Requested-With, Content-Type, Accept, Authorization"
-
-    # Handle preflight requests
-    @options {
-      method OPTIONS
-    }
-    handle @options {
-      respond 204
-    }
-  }
-
-  # LiveKit WebSocket signaling (no security headers here to avoid breaking the upgrade handshake).
-  # When behind Caddy, set VITE_LIVEKIT_URL to the public URL with /livekit (e.g. ws://localhost/livekit
-  # or wss://your-domain/livekit). uri strip_prefix sends requests to LiveKit at / so the server accepts them.
+  # LiveKit WebSocket signaling (no security headers to avoid breaking upgrade)
   handle /livekit* {
     uri strip_prefix /livekit
     reverse_proxy livekit:7880 {
       header_up Connection {http.request.header.Connection}
       header_up Upgrade {http.request.header.Upgrade}
-      header_up X-Forwarded-For {remote_host}
-      header_up X-Forwarded-Proto {scheme}
-      header_up X-Forwarded-Host {host}
     }
   }
 
-  # Go API and WebSocket (Phase A backend)
+  # Go API
   handle /api/* {
-    reverse_proxy hush-api:8080 {
-      header_up X-Forwarded-For {remote_host}
-      header_up X-Forwarded-Proto {scheme}
-      header_up X-Forwarded-Host {host}
-    }
+    reverse_proxy hush-api:8080
   }
+
+  # Go WebSocket
   handle /ws {
     reverse_proxy hush-api:8080 {
       header_up Connection {http.request.header.Connection}
       header_up Upgrade {http.request.header.Upgrade}
-      header_up X-Forwarded-For {remote_host}
-      header_up X-Forwarded-Proto {scheme}
-      header_up X-Forwarded-Host {host}
     }
   }
 
-  # All other traffic goes to Hush app (security headers for HTML/E2EE worker).
+  # Client SPA — serve built files, fall back to index.html for client-side routing
   handle /* {
     header X-Content-Type-Options "nosniff"
     header X-Frame-Options "DENY"
     header Cross-Origin-Opener-Policy "same-origin"
-    header Cross-Origin-Embedder-Policy "require-corp"
-    reverse_proxy hush:3001 {
-      # Preserve WebSocket upgrade headers for Socket.io
-      header_up Connection {http.request.header.Connection}
-      header_up Upgrade {http.request.header.Upgrade}
-
-      # Set X-Forwarded-* headers
-      header_up X-Forwarded-For {remote_host}
-      header_up X-Forwarded-Proto {scheme}
-      header_up X-Forwarded-Host {host}
-
-      header_down -Access-Control-Allow-Origin
-    }
+    root * /srv
+    try_files {path} /index.html
+    file_server
   }
 
-  # Enable access logging
   log {
     output stdout
     format console

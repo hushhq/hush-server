@@ -106,7 +106,7 @@ func (h *MessageHandler) handleMessageSend(c *Client, raw []byte) {
 		"timestamp":  msg.Timestamp.Format(time.RFC3339Nano),
 	}
 	b, _ := json.Marshal(out)
-	h.hub.Broadcast(payload.ChannelID, b, c.id)
+	h.hub.Broadcast(payload.ChannelID, b, "")
 }
 
 func (h *MessageHandler) handleMessageSendFanout(c *Client, channelID string, ciphertextByRecipient map[string]string, ctx context.Context) {

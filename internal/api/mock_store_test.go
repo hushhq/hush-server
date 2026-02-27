@@ -46,6 +46,7 @@ type mockStore struct {
 	deleteChannelFn         func(ctx context.Context, channelID string) error
 	getServerIDForChannelFn func(ctx context.Context, channelID string) (string, error)
 
+	createInviteFn    func(ctx context.Context, code, serverID, createdBy string, maxUses int, expiresAt time.Time) (*models.InviteCode, error)
 	getInviteByCodeFn func(ctx context.Context, code string) (*models.InviteCode, error)
 	claimInviteUseFn  func(ctx context.Context, code string) (bool, error)
 }
@@ -291,6 +292,13 @@ func (m *mockStore) GetServerIDForChannel(ctx context.Context, channelID string)
 		return m.getServerIDForChannelFn(ctx, channelID)
 	}
 	return "", nil
+}
+
+func (m *mockStore) CreateInvite(ctx context.Context, code, serverID, createdBy string, maxUses int, expiresAt time.Time) (*models.InviteCode, error) {
+	if m.createInviteFn != nil {
+		return m.createInviteFn(ctx, code, serverID, createdBy, maxUses, expiresAt)
+	}
+	return &models.InviteCode{Code: code, ServerID: serverID, CreatedBy: createdBy, MaxUses: maxUses, ExpiresAt: expiresAt}, nil
 }
 
 func (m *mockStore) GetInviteByCode(ctx context.Context, code string) (*models.InviteCode, error) {

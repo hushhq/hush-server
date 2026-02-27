@@ -1,10 +1,13 @@
 package api
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"log/slog"
+	"math/big"
 	"net/http"
 	"strings"
+	"time"
 
 	"hush.app/server/internal/db"
 	"hush.app/server/internal/models"
@@ -40,6 +43,7 @@ func ServerRoutes(store db.Store, jwtSecret string) chi.Router {
 	r.Post("/{id}/leave", h.leaveServer)
 	r.Post("/{id}/channels", h.createChannel)
 	r.Get("/{id}/channels", h.listChannels)
+	r.Post("/{id}/invites", h.createInvite)
 	return r
 }
 
@@ -447,4 +451,81 @@ func (h *serverHandler) listChannels(w http.ResponseWriter, r *http.Request) {
 		channels = []models.Channel{}
 	}
 	writeJSON(w, http.StatusOK, channels)
+}
+
+const (
+	defaultInviteMaxUses   = 50
+	defaultInviteExpiresIn = 7 * 24 * 3600 // 7 days in seconds
+	inviteCodeLength       = 8
+	inviteCodeAlphabet     = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789"
+)
+
+func generateInviteCode() (string, error) {
+	b := make([]byte, inviteCodeLength)
+	for i := range b {
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(inviteCodeAlphabet))))
+		if err != nil {
+			return "", err
+		}
+		b[i] = inviteCodeAlphabet[n.Int64()]
+	}
+	return string(b), nil
+}
+
+func (h *serverHandler) createInvite(w http.ResponseWriter, r *http.Request) {
+	serverID := chi.URLParam(r, "id")
+	if serverID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "server id required"})
+		return
+	}
+	userID := userIDFromContext(r.Context())
+	if userID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	member, err := h.store.GetServerMember(r.Context(), serverID, userID)
+	if err != nil || member == nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "not a member of this server"})
+		return
+	}
+
+	var req models.CreateInviteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		// Empty body is fine — use defaults
+		req = models.CreateInviteRequest{}
+	}
+
+	maxUses := defaultInviteMaxUses
+	if req.MaxUses != nil {
+		if *req.MaxUses < 1 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "maxUses must be at least 1"})
+			return
+		}
+		maxUses = *req.MaxUses
+	}
+
+	expiresInSec := defaultInviteExpiresIn
+	if req.ExpiresIn != nil {
+		if *req.ExpiresIn < 60 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "expiresIn must be at least 60 seconds"})
+			return
+		}
+		expiresInSec = *req.ExpiresIn
+	}
+	expiresAt := time.Now().Add(time.Duration(expiresInSec) * time.Second)
+
+	code, err := generateInviteCode()
+	if err != nil {
+		slog.Error("generate invite code", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to generate invite"})
+		return
+	}
+
+	inv, err := h.store.CreateInvite(r.Context(), code, serverID, userID, maxUses, expiresAt)
+	if err != nil {
+		slog.Error("create invite", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create invite"})
+		return
+	}
+	writeJSON(w, http.StatusCreated, inv)
 }

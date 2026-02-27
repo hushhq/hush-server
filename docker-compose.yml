@@ -1,51 +1,24 @@
 # docker-compose.yml — SELF-HOSTED deployment (includes LiveKit + Redis)
 # For gethush.live hosted: use docker-compose.prod.yml override
 # Usage: docker-compose up -d
-#
-#version: '3.8'
 
 services:
   postgres:
     image: postgres:16-alpine
     container_name: hush-postgres
     environment:
-      - POSTGRES_USER=${POSTGRES_USER:-synapse}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-synapse_password}
-      - POSTGRES_DB=${POSTGRES_DB:-synapse}
+      - POSTGRES_USER=${POSTGRES_USER:-hush}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-hush}
+      - POSTGRES_DB=${POSTGRES_DB:-hush}
       - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init-hush-db.sql:/docker-entrypoint-initdb.d/02-hush.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-synapse}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hush}"]
       interval: 10s
       timeout: 5s
       retries: 5
-    restart: unless-stopped
-    networks:
-      - hush-network
-
-  synapse:
-    image: matrixdotorg/synapse:latest
-    container_name: hush-synapse
-    environment:
-      - SYNAPSE_SERVER_NAME=${MATRIX_SERVER_NAME:-localhost}
-      - SYNAPSE_REPORT_STATS=no
-      - POSTGRES_USER=${POSTGRES_USER:-synapse}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-synapse_password}
-      - POSTGRES_DB=${POSTGRES_DB:-synapse}
-    volumes:
-      - ./synapse/data:/data
-      - synapse_media:/data/media_store
-    depends_on:
-      postgres:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8008/health || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
     restart: unless-stopped
     networks:
       - hush-network
@@ -65,30 +38,6 @@ services:
       - LIVEKIT_URL=${LIVEKIT_URL:-ws://livekit:7880}
     depends_on:
       postgres:
-        condition: service_healthy
-    restart: unless-stopped
-    networks:
-      - hush-network
-
-  hush:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    environment:
-      - PORT=3001
-      - HOST=0.0.0.0
-      # CORS: dev default *; in production set CORS_ORIGIN to frontend origin (e.g. https://gethush.live) via .env or override
-      - CORS_ORIGIN=${CORS_ORIGIN:-*}
-      - MATRIX_HOMESERVER_URL=${MATRIX_HOMESERVER_URL:-http://synapse:8008}
-      - SYNAPSE_ADMIN_TOKEN=${SYNAPSE_ADMIN_TOKEN}
-      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
-      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
-      - LIVEKIT_URL=${LIVEKIT_URL:-ws://livekit:7880}
-      - MAX_GUEST_ROOMS=${MAX_GUEST_ROOMS:-30}
-      - GUEST_ROOM_MAX_DURATION_MS=${GUEST_ROOM_MAX_DURATION_MS:-10800000}
-      - MAX_PARTICIPANTS_PER_ROOM=${MAX_PARTICIPANTS_PER_ROOM:-10}
-    depends_on:
-      synapse:
         condition: service_healthy
     restart: unless-stopped
     networks:
@@ -121,7 +70,7 @@ services:
     ports:
       - "7880:7880"      # WebSocket
       - "7881:7881"      # RTC
-      - "50020-50100:50020-50100/udp"  # Media (narrow range to avoid common port conflicts, e.g. 50012)
+      - "50020-50100:50020-50100/udp"  # Media (narrow range to avoid common port conflicts)
     restart: unless-stopped
     networks:
       - hush-network
@@ -130,17 +79,15 @@ services:
     image: caddy:2-alpine
     container_name: hush-caddy
     environment:
-      # CORS for /_matrix/*. Dev: * (default). Production: set CORS_ORIGIN in .env or override (e.g. https://gethush.live).
       - CORS_ORIGIN=${CORS_ORIGIN:-*}
     ports:
       - "8081:80"
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./client/dist:/srv:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
-      - synapse
-      - hush
       - hush-api
     restart: unless-stopped
     networks:
@@ -152,7 +99,6 @@ networks:
 
 volumes:
   postgres_data:
-  synapse_media:
   redis_data:
   caddy_data:
   caddy_config:
