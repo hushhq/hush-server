@@ -29,5 +29,10 @@ room:
     - mime: video/vp8
     - mime: video/vp9
 
+webhook:
+  urls:
+    - http://hush-api:8080/api/livekit/webhook
+  api_key: devkey
+
 logging:
   level: info

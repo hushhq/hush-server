@@ -97,6 +97,7 @@ func main() {
 		r.Mount("/api/channels", api.ChannelRoutes(pool, cfg.JWTSecret))
 		r.Get("/ws", ws.Handler(wsHub, cfg.JWTSecret, pool, cfg.CORSOrigin))
 		r.Mount("/api/livekit", api.LiveKitRoutes(pool, cfg.JWTSecret, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret))
+		r.Post("/api/livekit/webhook", api.LiveKitWebhookHandler(wsHub, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret))
 	}
 
 	srv := &http.Server{
