@@ -193,6 +193,16 @@ func (p *Pool) GetNextOwnerCandidate(ctx context.Context, serverID, excludeUserI
 	return m, nil
 }
 
+// CreateInvite inserts a new invite code for a server.
+func (p *Pool) CreateInvite(ctx context.Context, code, serverID, createdBy string, maxUses int, expiresAt time.Time) (*models.InviteCode, error) {
+	row := p.QueryRow(ctx, `
+		INSERT INTO invite_codes (code, server_id, created_by, max_uses, uses, expires_at)
+		VALUES ($1, $2, $3, $4, 0, $5)
+		RETURNING code, server_id, created_by, expires_at, max_uses, uses`,
+		code, serverID, createdBy, maxUses, expiresAt)
+	return scanInviteCode(row)
+}
+
 // GetInviteByCode returns the invite by code, or nil if not found.
 func (p *Pool) GetInviteByCode(ctx context.Context, code string) (*models.InviteCode, error) {
 	row := p.QueryRow(ctx, `

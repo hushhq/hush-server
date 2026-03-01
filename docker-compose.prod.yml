@@ -3,21 +3,12 @@
 #
 # Differences from docker-compose.yml:
 #   - Removes livekit and redis services (using LiveKit Cloud instead)
-#   - Sets NODE_ENV=production on the hush server
 #   - Caddy uses Caddyfile.prod (HTTPS + HSTS). Set CORS_ORIGIN in .env (e.g. https://gethush.live).
 #   - LIVEKIT_* vars from environment (set in hosting platform, not docker-compose)
 
 version: "3.8"
 
 services:
-  # Override hush server to production mode
-  hush:
-    environment:
-      - NODE_ENV=production
-      # Set CORS_ORIGIN in .env to your frontend origin (e.g. https://gethush.live).
-      # LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_URL must be set
-      # in the hosting platform env — not here. Never hardcode keys.
-
   # Production Caddy: HTTPS site block + HSTS. Set CORS_ORIGIN in .env.
   caddy:
     volumes:

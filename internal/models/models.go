@@ -152,3 +152,15 @@ type CreateChannelRequest struct {
 type JoinServerRequest struct {
 	InviteCode string `json:"inviteCode"`
 }
+
+// MoveChannelRequest is the body for PUT /api/channels/:id/move.
+type MoveChannelRequest struct {
+	ParentID *string `json:"parentId"`
+	Position int     `json:"position"`
+}
+
+// CreateInviteRequest is the body for POST /api/servers/:id/invites.
+type CreateInviteRequest struct {
+	MaxUses   *int `json:"maxUses,omitempty"`
+	ExpiresIn *int `json:"expiresIn,omitempty"` // seconds
+}

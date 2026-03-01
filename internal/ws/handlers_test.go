@@ -76,6 +76,8 @@ func (m *messageStoreMock) ListChannels(context.Context, string) ([]models.Chann
 func (m *messageStoreMock) GetChannelByID(context.Context, string) (*models.Channel, error)      { return nil, nil }
 func (m *messageStoreMock) DeleteChannel(context.Context, string) error                          { return nil }
 func (m *messageStoreMock) GetServerIDForChannel(context.Context, string) (string, error)        { return "", nil }
+func (m *messageStoreMock) CreateInvite(context.Context, string, string, string, int, time.Time) (*models.InviteCode, error) { return nil, nil }
+func (m *messageStoreMock) MoveChannel(context.Context, string, *string, int) error { return nil }
 func (m *messageStoreMock) GetInviteByCode(context.Context, string) (*models.InviteCode, error)  { return nil, nil }
 func (m *messageStoreMock) ClaimInviteUse(context.Context, string) (bool, error)                 { return true, nil }
 

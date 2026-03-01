@@ -2,12 +2,14 @@ package api
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
 
 	"hush.app/server/internal/db"
+	"hush.app/server/internal/models"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -24,6 +26,7 @@ func ChannelRoutes(store db.Store, jwtSecret string) chi.Router {
 	r.Use(RequireAuth(jwtSecret, store))
 	r.Get("/{id}/messages", h.getMessages)
 	r.Delete("/{id}", h.deleteChannel)
+	r.Put("/{id}/move", h.moveChannel)
 	return r
 }
 
@@ -134,6 +137,67 @@ func (h *channelsHandler) deleteChannel(w http.ResponseWriter, r *http.Request) 
 	if err := h.store.DeleteChannel(r.Context(), channelID); err != nil {
 		slog.Error("delete channel", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to delete channel"})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *channelsHandler) moveChannel(w http.ResponseWriter, r *http.Request) {
+	channelID := chi.URLParam(r, "id")
+	if channelID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "channel id required"})
+		return
+	}
+	userID := userIDFromContext(r.Context())
+	if userID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	serverID, err := h.store.GetServerIDForChannel(r.Context(), channelID)
+	if err != nil {
+		slog.Error("get server for channel", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to resolve channel"})
+		return
+	}
+	if serverID == "" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "channel not found"})
+		return
+	}
+	member, err := h.store.GetServerMember(r.Context(), serverID, userID)
+	if err != nil || member == nil || member.Role != roleAdmin {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
+		return
+	}
+
+	var req models.MoveChannelRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+	if req.Position < 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "position must be >= 0"})
+		return
+	}
+
+	if req.ParentID != nil {
+		parent, err := h.store.GetChannelByID(r.Context(), *req.ParentID)
+		if err != nil || parent == nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "parent channel not found"})
+			return
+		}
+		if parent.ServerID != serverID {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "parent belongs to a different server"})
+			return
+		}
+		if parent.Type != "category" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "parent must be a category channel"})
+			return
+		}
+	}
+
+	if err := h.store.MoveChannel(r.Context(), channelID, req.ParentID, req.Position); err != nil {
+		slog.Error("move channel", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to move channel"})
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

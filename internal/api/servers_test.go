@@ -568,3 +568,102 @@ func TestUpdateServer_TrimsName(t *testing.T) {
 func ptrString(s string) *string {
 	return &s
 }
+
+func ptrInt(n int) *int {
+	return &n
+}
+
+// --- Create Invite tests ---
+
+func TestCreateInvite_Success_Defaults(t *testing.T) {
+	store := &mockStore{}
+	userID := uuid.New().String()
+	serverID := uuid.New().String()
+	token := makeServerAuth(store, userID)
+	store.getServerMemberFn = func(_ context.Context, sID, uID string) (*models.ServerMember, error) {
+		return &models.ServerMember{ServerID: sID, UserID: uID, Role: roleMember}, nil
+	}
+
+	router := serversRouter(store)
+	rr := postServerJSON(router, "/"+serverID+"/invites", nil, token)
+	require.Equal(t, http.StatusCreated, rr.Code)
+
+	var inv models.InviteCode
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &inv))
+	assert.Equal(t, serverID, inv.ServerID)
+	assert.Equal(t, userID, inv.CreatedBy)
+	assert.Equal(t, 50, inv.MaxUses)
+	assert.Len(t, inv.Code, inviteCodeLength)
+}
+
+func TestCreateInvite_CustomParams(t *testing.T) {
+	store := &mockStore{}
+	userID := uuid.New().String()
+	serverID := uuid.New().String()
+	token := makeServerAuth(store, userID)
+	store.getServerMemberFn = func(_ context.Context, sID, uID string) (*models.ServerMember, error) {
+		return &models.ServerMember{ServerID: sID, UserID: uID, Role: roleMember}, nil
+	}
+
+	var capturedMaxUses int
+	store.createInviteFn = func(_ context.Context, code, sID, cBy string, maxUses int, expiresAt time.Time) (*models.InviteCode, error) {
+		capturedMaxUses = maxUses
+		return &models.InviteCode{Code: code, ServerID: sID, CreatedBy: cBy, MaxUses: maxUses, ExpiresAt: expiresAt}, nil
+	}
+
+	router := serversRouter(store)
+	rr := postServerJSON(router, "/"+serverID+"/invites", models.CreateInviteRequest{MaxUses: ptrInt(10), ExpiresIn: ptrInt(3600)}, token)
+	require.Equal(t, http.StatusCreated, rr.Code)
+	assert.Equal(t, 10, capturedMaxUses)
+}
+
+func TestCreateInvite_NotMember_Returns403(t *testing.T) {
+	store := &mockStore{}
+	userID := uuid.New().String()
+	serverID := uuid.New().String()
+	token := makeServerAuth(store, userID)
+	store.getServerMemberFn = func(_ context.Context, sID, uID string) (*models.ServerMember, error) {
+		return nil, nil
+	}
+
+	router := serversRouter(store)
+	rr := postServerJSON(router, "/"+serverID+"/invites", nil, token)
+	assert.Equal(t, http.StatusForbidden, rr.Code)
+}
+
+func TestCreateInvite_NoAuth_Returns401(t *testing.T) {
+	store := &mockStore{}
+	serverID := uuid.New().String()
+
+	router := serversRouter(store)
+	rr := postServerJSON(router, "/"+serverID+"/invites", nil, "")
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+}
+
+func TestCreateInvite_InvalidMaxUses_Returns400(t *testing.T) {
+	store := &mockStore{}
+	userID := uuid.New().String()
+	serverID := uuid.New().String()
+	token := makeServerAuth(store, userID)
+	store.getServerMemberFn = func(_ context.Context, sID, uID string) (*models.ServerMember, error) {
+		return &models.ServerMember{ServerID: sID, UserID: uID, Role: roleMember}, nil
+	}
+
+	router := serversRouter(store)
+	rr := postServerJSON(router, "/"+serverID+"/invites", models.CreateInviteRequest{MaxUses: ptrInt(0)}, token)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestCreateInvite_InvalidExpiresIn_Returns400(t *testing.T) {
+	store := &mockStore{}
+	userID := uuid.New().String()
+	serverID := uuid.New().String()
+	token := makeServerAuth(store, userID)
+	store.getServerMemberFn = func(_ context.Context, sID, uID string) (*models.ServerMember, error) {
+		return &models.ServerMember{ServerID: sID, UserID: uID, Role: roleMember}, nil
+	}
+
+	router := serversRouter(store)
+	rr := postServerJSON(router, "/"+serverID+"/invites", models.CreateInviteRequest{ExpiresIn: ptrInt(30)}, token)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
