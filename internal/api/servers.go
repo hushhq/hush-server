@@ -308,6 +308,19 @@ func (h *serverHandler) joinServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, server)
+	if h.hub != nil {
+		user, _ := h.store.GetUserByID(r.Context(), userID)
+		displayName := userID
+		if user != nil {
+			displayName = user.DisplayName
+		}
+		msg, _ := json.Marshal(map[string]interface{}{
+			"type":         "member_joined",
+			"user_id":      userID,
+			"display_name": displayName,
+		})
+		h.hub.BroadcastToServer(serverID, msg)
+	}
 }
 
 func (h *serverHandler) leaveServer(w http.ResponseWriter, r *http.Request) {
@@ -369,6 +382,13 @@ func (h *serverHandler) leaveServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+	if h.hub != nil {
+		msg, _ := json.Marshal(map[string]interface{}{
+			"type":    "member_left",
+			"user_id": userID,
+		})
+		h.hub.BroadcastToServer(serverID, msg)
+	}
 }
 
 func (h *serverHandler) createChannel(w http.ResponseWriter, r *http.Request) {
