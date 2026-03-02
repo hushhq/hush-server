@@ -21,6 +21,11 @@ const (
 	maxNameLength  = 100
 )
 
+// ServerBroadcaster is satisfied by *ws.Hub. Used for dependency injection in tests.
+type ServerBroadcaster interface {
+	BroadcastToServer(serverID string, message []byte)
+}
+
 // serverWithChannelsResponse is the response for GET /api/servers/:id.
 type serverWithChannelsResponse struct {
 	Server   models.Server    `json:"server"`
@@ -29,10 +34,10 @@ type serverWithChannelsResponse struct {
 }
 
 // ServerRoutes returns the router for /api/servers (create, list, get, update, delete, join, leave, create/list channels).
-func ServerRoutes(store db.Store, jwtSecret string) chi.Router {
+func ServerRoutes(store db.Store, hub ServerBroadcaster, jwtSecret string) chi.Router {
 	r := chi.NewRouter()
 	r.Use(RequireAuth(jwtSecret, store))
-	h := &serverHandler{store: store}
+	h := &serverHandler{store: store, hub: hub}
 	r.Post("/", h.createServer)
 	r.Get("/", h.listServers)
 	r.Get("/{id}/members", h.listMembers)
@@ -49,6 +54,7 @@ func ServerRoutes(store db.Store, jwtSecret string) chi.Router {
 
 type serverHandler struct {
 	store db.Store
+	hub   ServerBroadcaster
 }
 
 func (h *serverHandler) createServer(w http.ResponseWriter, r *http.Request) {
@@ -432,6 +438,13 @@ func (h *serverHandler) createChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, ch)
+	if h.hub != nil {
+		msg, _ := json.Marshal(map[string]interface{}{
+			"type":    "channel_created",
+			"channel": ch,
+		})
+		h.hub.BroadcastToServer(serverID, msg)
+	}
 }
 
 func (h *serverHandler) listChannels(w http.ResponseWriter, r *http.Request) {

@@ -15,7 +15,7 @@ import (
 )
 
 func serversRouterForChannels(store *mockStore) http.Handler {
-	return ServerRoutes(store, testJWTSecret)
+	return ServerRoutes(store, nil, testJWTSecret)
 }
 
 func TestCreateChannel_ValidTextChannel_ReturnsChannel(t *testing.T) {

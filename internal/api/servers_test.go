@@ -18,7 +18,7 @@ import (
 )
 
 func serversRouter(store *mockStore) http.Handler {
-	return ServerRoutes(store, testJWTSecret)
+	return ServerRoutes(store, nil, testJWTSecret)
 }
 
 // makeServerAuth sets getSessionByTokenHashFn on store so token is valid; returns token and userID.
