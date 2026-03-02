@@ -32,7 +32,7 @@ services:
     container_name: hush-api
     environment:
       - PORT=8080
-      - DATABASE_URL=postgres://hush:hush@postgres:5432/hush?sslmode=disable
+      - DATABASE_URL=postgres://${POSTGRES_USER:-hush}:${POSTGRES_PASSWORD:-hush}@postgres:5432/${POSTGRES_DB:-hush}?sslmode=disable
       - JWT_SECRET=${JWT_SECRET:-dev-jwt-secret-change-in-production}
       - CORS_ORIGIN=${CORS_ORIGIN:-*}
       - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
@@ -78,7 +78,9 @@ services:
       - hush-network
 
   caddy:
-    image: caddy:2-alpine
+    build:
+      context: .
+      dockerfile: client/Dockerfile
     container_name: hush-caddy
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -88,7 +90,6 @@ services:
       - "8081:80"
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./client/dist:/srv:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:

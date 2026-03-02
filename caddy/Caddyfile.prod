@@ -2,7 +2,7 @@
 # Mount as /etc/caddy/Caddyfile. Set CORS_ORIGIN in env.
 
 :80 {
-  # LiveKit WebSocket (no security headers to avoid breaking upgrade)
+  # LiveKit WebSocket signaling (no security headers to avoid breaking upgrade)
   handle /livekit* {
     uri strip_prefix /livekit
     reverse_proxy livekit:7880 {

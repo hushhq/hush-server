@@ -2,11 +2,9 @@
 # Usage: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #
 # Differences from docker-compose.yml:
-#   - Removes livekit and redis services (using LiveKit Cloud instead)
 #   - Caddy uses Caddyfile.prod (HTTPS + HSTS). Set CORS_ORIGIN in .env (e.g. https://gethush.live).
-#   - LIVEKIT_* vars from environment (set in hosting platform, not docker-compose)
-
-version: "3.8"
+#   - Self-hosted LiveKit + Redis included (same as base compose).
+#   - When migrating to LiveKit Cloud, add profiles: [self-hosted-only] to livekit and redis services.
 
 services:
   # Production Caddy: HTTPS site block + HSTS. Set CORS_ORIGIN in .env.
@@ -15,13 +13,3 @@ services:
       - ./caddy/Caddyfile.prod:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
-
-  # Disable self-hosted LiveKit (using LiveKit Cloud)
-  livekit:
-    profiles:
-      - self-hosted-only  # This effectively disables it in prod compose
-
-  # Disable Redis (only needed for self-hosted LiveKit)
-  redis:
-    profiles:
-      - self-hosted-only
