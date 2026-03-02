@@ -20,9 +20,9 @@ const (
 )
 
 // ChannelRoutes returns the router for /api/channels (messages, delete).
-func ChannelRoutes(store db.Store, jwtSecret string) chi.Router {
+func ChannelRoutes(store db.Store, hub ServerBroadcaster, jwtSecret string) chi.Router {
 	r := chi.NewRouter()
-	h := &channelsHandler{store: store}
+	h := &channelsHandler{store: store, hub: hub}
 	r.Use(RequireAuth(jwtSecret, store))
 	r.Get("/{id}/messages", h.getMessages)
 	r.Delete("/{id}", h.deleteChannel)
@@ -32,6 +32,7 @@ func ChannelRoutes(store db.Store, jwtSecret string) chi.Router {
 
 type channelsHandler struct {
 	store db.Store
+	hub   ServerBroadcaster
 }
 
 // messageResponse is the JSON shape for one message (ciphertext as base64 string).
@@ -140,6 +141,14 @@ func (h *channelsHandler) deleteChannel(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+	if h.hub != nil {
+		msg, _ := json.Marshal(map[string]interface{}{
+			"type":       "channel_deleted",
+			"channel_id": channelID,
+			"server_id":  serverID,
+		})
+		h.hub.BroadcastToServer(serverID, msg)
+	}
 }
 
 func (h *channelsHandler) moveChannel(w http.ResponseWriter, r *http.Request) {
@@ -201,4 +210,14 @@ func (h *channelsHandler) moveChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+	if h.hub != nil {
+		msg, _ := json.Marshal(map[string]interface{}{
+			"type":       "channel_moved",
+			"channel_id": channelID,
+			"server_id":  serverID,
+			"parent_id":  req.ParentID,
+			"position":   req.Position,
+		})
+		h.hub.BroadcastToServer(serverID, msg)
+	}
 }

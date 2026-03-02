@@ -216,6 +216,20 @@ func (h *serverHandler) updateServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+	if h.hub != nil {
+		payload := map[string]interface{}{
+			"type":      "server_updated",
+			"server_id": serverID,
+		}
+		if req.Name != nil {
+			payload["name"] = *req.Name
+		}
+		if req.IconURL != nil {
+			payload["icon_url"] = *req.IconURL
+		}
+		msg, _ := json.Marshal(payload)
+		h.hub.BroadcastToServer(serverID, msg)
+	}
 }
 
 func (h *serverHandler) deleteServer(w http.ResponseWriter, r *http.Request) {
@@ -233,6 +247,14 @@ func (h *serverHandler) deleteServer(w http.ResponseWriter, r *http.Request) {
 	if err != nil || member == nil || member.Role != roleAdmin {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
 		return
+	}
+	// Broadcast BEFORE deleting: after delete, hub subscribers for this server are gone.
+	if h.hub != nil {
+		msg, _ := json.Marshal(map[string]interface{}{
+			"type":      "server_deleted",
+			"server_id": serverID,
+		})
+		h.hub.BroadcastToServer(serverID, msg)
 	}
 	if err := h.store.DeleteServer(r.Context(), serverID); err != nil {
 		slog.Error("delete server", "err", err)
@@ -373,6 +395,14 @@ func (h *serverHandler) leaveServer(w http.ResponseWriter, r *http.Request) {
 				slog.Error("update new owner role", "err", err)
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to leave server"})
 				return
+			}
+			if h.hub != nil {
+				msg, _ := json.Marshal(map[string]interface{}{
+					"type":    "member_role_changed",
+					"user_id": candidate.UserID,
+					"role":    roleAdmin,
+				})
+				h.hub.BroadcastToServer(serverID, msg)
 			}
 		}
 	}

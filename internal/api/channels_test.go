@@ -18,7 +18,7 @@ import (
 )
 
 func channelsRouter(store *mockStore) http.Handler {
-	return ChannelRoutes(store, testJWTSecret)
+	return ChannelRoutes(store, nil, testJWTSecret)
 }
 
 func getChannelMessages(handler http.Handler, channelID, token string, before string, limit string) *httptest.ResponseRecorder {
