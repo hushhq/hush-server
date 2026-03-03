@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"hush.app/server/internal/db"
@@ -17,13 +18,16 @@ import (
 const (
 	channelMessagesLimitDefault = 50
 	channelMessagesLimitMax     = 50
+	maxNameLength               = 100
 )
 
-// ChannelRoutes returns the router for /api/channels (messages, delete).
-func ChannelRoutes(store db.Store, hub ServerBroadcaster, jwtSecret string) chi.Router {
+// ChannelRoutes returns the router for /api/channels (flat, single-tenant).
+func ChannelRoutes(store db.Store, hub GlobalBroadcaster, jwtSecret string) chi.Router {
 	r := chi.NewRouter()
 	h := &channelsHandler{store: store, hub: hub}
 	r.Use(RequireAuth(jwtSecret, store))
+	r.Post("/", h.createChannel)
+	r.Get("/", h.listChannels)
 	r.Get("/{id}/messages", h.getMessages)
 	r.Delete("/{id}", h.deleteChannel)
 	r.Put("/{id}/move", h.moveChannel)
@@ -32,7 +36,7 @@ func ChannelRoutes(store db.Store, hub ServerBroadcaster, jwtSecret string) chi.
 
 type channelsHandler struct {
 	store db.Store
-	hub   ServerBroadcaster
+	hub   GlobalBroadcaster
 }
 
 // messageResponse is the JSON shape for one message (ciphertext as base64 string).
@@ -42,6 +46,95 @@ type messageResponse struct {
 	SenderID   string `json:"senderId"`
 	Ciphertext string `json:"ciphertext"` // base64
 	Timestamp  string `json:"timestamp"`  // RFC3339Nano
+}
+
+func (h *channelsHandler) createChannel(w http.ResponseWriter, r *http.Request) {
+	userID := userIDFromContext(r.Context())
+	if userID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	role, err := h.store.GetUserRole(r.Context(), userID)
+	if err != nil {
+		slog.Error("get user role", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify role"})
+		return
+	}
+	if !roleAtLeast(role, "admin") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required to create channels"})
+		return
+	}
+	var req models.CreateChannelRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+	req.Name = strings.TrimSpace(req.Name)
+	if req.Name == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
+		return
+	}
+	if len(req.Name) > maxNameLength {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name exceeds maximum length"})
+		return
+	}
+	if req.Type != "text" && req.Type != "voice" && req.Type != "category" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "type must be text, voice, or category"})
+		return
+	}
+	position := 0
+	if req.Position != nil {
+		position = *req.Position
+	}
+	var voiceMode *string
+	if req.Type == "category" {
+		if req.VoiceMode != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "voice_mode is not allowed for category channels"})
+			return
+		}
+		if req.ParentID != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "categories cannot be nested"})
+			return
+		}
+	} else if req.Type == "voice" {
+		if req.VoiceMode == nil || (*req.VoiceMode != "low-latency" && *req.VoiceMode != "quality") {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "voice_mode is required for voice channels and must be low-latency or quality"})
+			return
+		}
+		voiceMode = req.VoiceMode
+	} else {
+		if req.VoiceMode != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "voice_mode is only allowed for voice channels"})
+			return
+		}
+	}
+	ch, err := h.store.CreateChannel(r.Context(), req.Name, req.Type, voiceMode, req.ParentID, position)
+	if err != nil {
+		slog.Error("create channel", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create channel"})
+		return
+	}
+	writeJSON(w, http.StatusCreated, ch)
+	if h.hub != nil {
+		msg, _ := json.Marshal(map[string]interface{}{
+			"type":    "channel_created",
+			"channel": ch,
+		})
+		h.hub.BroadcastToAll(msg)
+	}
+}
+
+func (h *channelsHandler) listChannels(w http.ResponseWriter, r *http.Request) {
+	channels, err := h.store.ListChannels(r.Context())
+	if err != nil {
+		slog.Error("list channels", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list channels"})
+		return
+	}
+	if channels == nil {
+		channels = []models.Channel{}
+	}
+	writeJSON(w, http.StatusOK, channels)
 }
 
 func (h *channelsHandler) getMessages(w http.ResponseWriter, r *http.Request) {
@@ -120,18 +213,13 @@ func (h *channelsHandler) deleteChannel(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
 		return
 	}
-	serverID, err := h.store.GetServerIDForChannel(r.Context(), channelID)
+	role, err := h.store.GetUserRole(r.Context(), userID)
 	if err != nil {
-		slog.Error("get server for channel", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to resolve channel"})
+		slog.Error("get user role", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify role"})
 		return
 	}
-	if serverID == "" {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "channel not found"})
-		return
-	}
-	member, err := h.store.GetServerMember(r.Context(), serverID, userID)
-	if err != nil || member == nil || member.Role != roleAdmin {
+	if !roleAtLeast(role, "admin") {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required to delete channel"})
 		return
 	}
@@ -145,9 +233,8 @@ func (h *channelsHandler) deleteChannel(w http.ResponseWriter, r *http.Request) 
 		msg, _ := json.Marshal(map[string]interface{}{
 			"type":       "channel_deleted",
 			"channel_id": channelID,
-			"server_id":  serverID,
 		})
-		h.hub.BroadcastToServer(serverID, msg)
+		h.hub.BroadcastToAll(msg)
 	}
 }
 
@@ -162,22 +249,16 @@ func (h *channelsHandler) moveChannel(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
 		return
 	}
-	serverID, err := h.store.GetServerIDForChannel(r.Context(), channelID)
+	role, err := h.store.GetUserRole(r.Context(), userID)
 	if err != nil {
-		slog.Error("get server for channel", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to resolve channel"})
+		slog.Error("get user role", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify role"})
 		return
 	}
-	if serverID == "" {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "channel not found"})
-		return
-	}
-	member, err := h.store.GetServerMember(r.Context(), serverID, userID)
-	if err != nil || member == nil || member.Role != roleAdmin {
+	if !roleAtLeast(role, "admin") {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
 		return
 	}
-
 	var req models.MoveChannelRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
@@ -187,15 +268,10 @@ func (h *channelsHandler) moveChannel(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "position must be >= 0"})
 		return
 	}
-
 	if req.ParentID != nil {
 		parent, err := h.store.GetChannelByID(r.Context(), *req.ParentID)
 		if err != nil || parent == nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "parent channel not found"})
-			return
-		}
-		if parent.ServerID != serverID {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "parent belongs to a different server"})
 			return
 		}
 		if parent.Type != "category" {
@@ -203,7 +279,6 @@ func (h *channelsHandler) moveChannel(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-
 	if err := h.store.MoveChannel(r.Context(), channelID, req.ParentID, req.Position); err != nil {
 		slog.Error("move channel", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to move channel"})
@@ -214,10 +289,9 @@ func (h *channelsHandler) moveChannel(w http.ResponseWriter, r *http.Request) {
 		msg, _ := json.Marshal(map[string]interface{}{
 			"type":       "channel_moved",
 			"channel_id": channelID,
-			"server_id":  serverID,
 			"parent_id":  req.ParentID,
 			"position":   req.Position,
 		})
-		h.hub.BroadcastToServer(serverID, msg)
+		h.hub.BroadcastToAll(msg)
 	}
 }

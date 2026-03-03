@@ -61,21 +61,21 @@ func (vs *voiceState) listLocked(roomName string) []voiceParticipant {
 	return result
 }
 
-// parseRoomName extracts serverID and channelID from "server-{sid}-channel-{cid}".
-func parseRoomName(roomName string) (serverID, channelID string, ok bool) {
-	const prefix = "server-"
-	const sep = "-channel-"
-	if !strings.HasPrefix(roomName, prefix) {
-		return "", "", false
+// parseRoomName extracts channelID from "channel-{cid}" (single-tenant naming).
+// Also handles legacy "server-{sid}-channel-{cid}" format during transition.
+func parseRoomName(roomName string) (channelID string, ok bool) {
+	const flatPrefix = "channel-"
+	const legacySep = "-channel-"
+	if strings.HasPrefix(roomName, flatPrefix) {
+		channelID = roomName[len(flatPrefix):]
+		return channelID, channelID != ""
 	}
-	rest := roomName[len(prefix):]
-	idx := strings.Index(rest, sep)
+	idx := strings.Index(roomName, legacySep)
 	if idx < 0 {
-		return "", "", false
+		return "", false
 	}
-	serverID = rest[:idx]
-	channelID = rest[idx+len(sep):]
-	return serverID, channelID, serverID != "" && channelID != ""
+	channelID = roomName[idx+len(legacySep):]
+	return channelID, channelID != ""
 }
 
 // LiveKitWebhookHandler returns an HTTP handler for LiveKit webhook events.
@@ -100,7 +100,7 @@ func LiveKitWebhookHandler(hub *ws.Hub, apiKey, apiSecret string) http.HandlerFu
 			return
 		}
 
-		serverID, channelID, ok := parseRoomName(room.GetName())
+		channelID, ok := parseRoomName(room.GetName())
 		if !ok {
 			slog.Debug("livekit webhook: ignoring non-hush room", "room", room.GetName())
 			w.WriteHeader(http.StatusOK)
@@ -111,10 +111,10 @@ func LiveKitWebhookHandler(hub *ws.Hub, apiKey, apiSecret string) http.HandlerFu
 		switch event.GetEvent() {
 		case webhook.EventParticipantJoined:
 			participants = state.join(room.GetName(), participant.GetIdentity(), participantDisplayName(participant))
-			slog.Info("voice join", "server", serverID, "channel", channelID, "user", participant.GetIdentity())
+			slog.Info("voice join", "channel", channelID, "user", participant.GetIdentity())
 		case webhook.EventParticipantLeft:
 			participants = state.leave(room.GetName(), participant.GetIdentity())
-			slog.Info("voice leave", "server", serverID, "channel", channelID, "user", participant.GetIdentity())
+			slog.Info("voice leave", "channel", channelID, "user", participant.GetIdentity())
 		default:
 			w.WriteHeader(http.StatusOK)
 			return
@@ -125,7 +125,7 @@ func LiveKitWebhookHandler(hub *ws.Hub, apiKey, apiSecret string) http.HandlerFu
 			"channel_id":   channelID,
 			"participants": participants,
 		})
-		hub.BroadcastToServer(serverID, msg)
+		hub.BroadcastToAll(msg)
 
 		w.WriteHeader(http.StatusOK)
 	}
