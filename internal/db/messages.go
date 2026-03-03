@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"hush.app/server/internal/models"
@@ -60,6 +61,27 @@ func (p *Pool) IsChannelMember(ctx context.Context, channelID, userID string) (b
 	err := p.QueryRow(ctx, `
 		SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)`, userID).Scan(&exists)
 	return exists, err
+}
+
+// GetMessageByID returns the message with the given ID, or nil if not found.
+func (p *Pool) GetMessageByID(ctx context.Context, messageID string) (*models.Message, error) {
+	row := p.QueryRow(ctx, `
+		SELECT id, channel_id, sender_id, recipient_id, ciphertext, "timestamp"
+		FROM messages
+		WHERE id = $1`,
+		messageID,
+	)
+	msg, err := scanMessage(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return msg, err
+}
+
+// DeleteMessage removes the message with the given ID.
+func (p *Pool) DeleteMessage(ctx context.Context, messageID string) error {
+	_, err := p.Exec(ctx, `DELETE FROM messages WHERE id = $1`, messageID)
+	return err
 }
 
 func scanMessage(row pgx.Row) (*models.Message, error) {

@@ -51,4 +51,25 @@ type Store interface {
 	CreateInvite(ctx context.Context, code, createdBy string, maxUses int, expiresAt time.Time) (*models.InviteCode, error)
 	GetInviteByCode(ctx context.Context, code string) (*models.InviteCode, error)
 	ClaimInviteUse(ctx context.Context, code string) (bool, error)
+
+	// Moderation — bans
+	InsertBan(ctx context.Context, userID, actorID, reason string, expiresAt *time.Time) (*models.Ban, error)
+	GetActiveBan(ctx context.Context, userID string) (*models.Ban, error)
+	LiftBan(ctx context.Context, banID, liftedByID string) error
+
+	// Moderation — mutes
+	InsertMute(ctx context.Context, userID, actorID, reason string, expiresAt *time.Time) (*models.Mute, error)
+	GetActiveMute(ctx context.Context, userID string) (*models.Mute, error)
+	LiftMute(ctx context.Context, muteID, liftedByID string) error
+
+	// Moderation — audit log
+	InsertAuditLog(ctx context.Context, actorID string, targetID *string, action, reason string, metadata map[string]interface{}) error
+	ListAuditLog(ctx context.Context, limit, offset int) ([]models.AuditLogEntry, error)
+
+	// Moderation — messages
+	GetMessageByID(ctx context.Context, messageID string) (*models.Message, error)
+	DeleteMessage(ctx context.Context, messageID string) error
+
+	// Moderation — sessions
+	DeleteSessionsByUserID(ctx context.Context, userID string) error
 }

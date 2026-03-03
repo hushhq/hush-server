@@ -64,6 +64,27 @@ type mockStore struct {
 	createInviteFn    func(ctx context.Context, code, createdBy string, maxUses int, expiresAt time.Time) (*models.InviteCode, error)
 	getInviteByCodeFn func(ctx context.Context, code string) (*models.InviteCode, error)
 	claimInviteUseFn  func(ctx context.Context, code string) (bool, error)
+
+	// Moderation — bans
+	insertBanFn    func(ctx context.Context, userID, actorID, reason string, expiresAt *time.Time) (*models.Ban, error)
+	getActiveBanFn func(ctx context.Context, userID string) (*models.Ban, error)
+	liftBanFn      func(ctx context.Context, banID, liftedByID string) error
+
+	// Moderation — mutes
+	insertMuteFn    func(ctx context.Context, userID, actorID, reason string, expiresAt *time.Time) (*models.Mute, error)
+	getActiveMuteFn func(ctx context.Context, userID string) (*models.Mute, error)
+	liftMuteFn      func(ctx context.Context, muteID, liftedByID string) error
+
+	// Moderation — audit log
+	insertAuditLogFn func(ctx context.Context, actorID string, targetID *string, action, reason string, metadata map[string]interface{}) error
+	listAuditLogFn   func(ctx context.Context, limit, offset int) ([]models.AuditLogEntry, error)
+
+	// Moderation — messages
+	getMessageByIDFn func(ctx context.Context, messageID string) (*models.Message, error)
+	deleteMessageFn  func(ctx context.Context, messageID string) error
+
+	// Moderation — sessions
+	deleteSessionsByUserIDFn func(ctx context.Context, userID string) error
 }
 
 // ---------- User/session ----------
@@ -296,6 +317,85 @@ func (m *mockStore) ClaimInviteUse(ctx context.Context, code string) (bool, erro
 		return m.claimInviteUseFn(ctx, code)
 	}
 	return true, nil
+}
+
+// ---------- Moderation ----------
+
+func (m *mockStore) InsertBan(ctx context.Context, userID, actorID, reason string, expiresAt *time.Time) (*models.Ban, error) {
+	if m.insertBanFn != nil {
+		return m.insertBanFn(ctx, userID, actorID, reason, expiresAt)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) GetActiveBan(ctx context.Context, userID string) (*models.Ban, error) {
+	if m.getActiveBanFn != nil {
+		return m.getActiveBanFn(ctx, userID)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) LiftBan(ctx context.Context, banID, liftedByID string) error {
+	if m.liftBanFn != nil {
+		return m.liftBanFn(ctx, banID, liftedByID)
+	}
+	return nil
+}
+
+func (m *mockStore) InsertMute(ctx context.Context, userID, actorID, reason string, expiresAt *time.Time) (*models.Mute, error) {
+	if m.insertMuteFn != nil {
+		return m.insertMuteFn(ctx, userID, actorID, reason, expiresAt)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) GetActiveMute(ctx context.Context, userID string) (*models.Mute, error) {
+	if m.getActiveMuteFn != nil {
+		return m.getActiveMuteFn(ctx, userID)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) LiftMute(ctx context.Context, muteID, liftedByID string) error {
+	if m.liftMuteFn != nil {
+		return m.liftMuteFn(ctx, muteID, liftedByID)
+	}
+	return nil
+}
+
+func (m *mockStore) InsertAuditLog(ctx context.Context, actorID string, targetID *string, action, reason string, metadata map[string]interface{}) error {
+	if m.insertAuditLogFn != nil {
+		return m.insertAuditLogFn(ctx, actorID, targetID, action, reason, metadata)
+	}
+	return nil
+}
+
+func (m *mockStore) ListAuditLog(ctx context.Context, limit, offset int) ([]models.AuditLogEntry, error) {
+	if m.listAuditLogFn != nil {
+		return m.listAuditLogFn(ctx, limit, offset)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) GetMessageByID(ctx context.Context, messageID string) (*models.Message, error) {
+	if m.getMessageByIDFn != nil {
+		return m.getMessageByIDFn(ctx, messageID)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) DeleteMessage(ctx context.Context, messageID string) error {
+	if m.deleteMessageFn != nil {
+		return m.deleteMessageFn(ctx, messageID)
+	}
+	return nil
+}
+
+func (m *mockStore) DeleteSessionsByUserID(ctx context.Context, userID string) error {
+	if m.deleteSessionsByUserIDFn != nil {
+		return m.deleteSessionsByUserIDFn(ctx, userID)
+	}
+	return nil
 }
 
 // ---------- Shared test helpers ----------

@@ -110,6 +110,31 @@ func (m *messageStoreMock) GetInviteByCode(context.Context, string) (*models.Inv
 }
 func (m *messageStoreMock) ClaimInviteUse(context.Context, string) (bool, error) { return true, nil }
 
+// Moderation stubs (unused in ws handler tests).
+func (m *messageStoreMock) InsertBan(context.Context, string, string, string, *time.Time) (*models.Ban, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) GetActiveBan(context.Context, string) (*models.Ban, error) { return nil, nil }
+func (m *messageStoreMock) LiftBan(context.Context, string, string) error              { return nil }
+func (m *messageStoreMock) InsertMute(context.Context, string, string, string, *time.Time) (*models.Mute, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) GetActiveMute(context.Context, string) (*models.Mute, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) LiftMute(context.Context, string, string) error { return nil }
+func (m *messageStoreMock) InsertAuditLog(context.Context, string, *string, string, string, map[string]interface{}) error {
+	return nil
+}
+func (m *messageStoreMock) ListAuditLog(context.Context, int, int) ([]models.AuditLogEntry, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) GetMessageByID(context.Context, string) (*models.Message, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) DeleteMessage(context.Context, string) error          { return nil }
+func (m *messageStoreMock) DeleteSessionsByUserID(context.Context, string) error { return nil }
+
 // drainUntilType reads from c.send until a message with the given type is received or timeout.
 func drainUntilType(t *testing.T, c *Client, wantType string, timeout time.Duration) []byte {
 	t.Helper()
