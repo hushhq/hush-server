@@ -15,6 +15,8 @@ import (
 // GlobalBroadcaster is satisfied by *ws.Hub. Used for dependency injection in tests.
 type GlobalBroadcaster interface {
 	BroadcastToAll(message []byte)
+	BroadcastToUser(userID string, message []byte)
+	DisconnectUser(userID string)
 }
 
 // roleOrder maps role names to their numeric rank for comparison.

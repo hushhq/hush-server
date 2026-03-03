@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"sync"
+
+	"github.com/gorilla/websocket"
 )
 
 // Hub holds all connected clients and channel subscriptions.
@@ -161,6 +163,24 @@ func (h *Hub) Broadcast(channelID string, message []byte, excludeClientID string
 		default:
 			slog.Warn("ws client send buffer full", "clientID", c.id)
 		}
+	}
+}
+
+// DisconnectUser closes all WebSocket connections for the given user ID.
+// Used by kick/ban handlers to force the user offline.
+func (h *Hub) DisconnectUser(userID string) {
+	h.mu.RLock()
+	targets := make([]*Client, 0)
+	for _, c := range h.clients {
+		if c.userID == userID {
+			targets = append(targets, c)
+		}
+	}
+	h.mu.RUnlock()
+	for _, c := range targets {
+		_ = c.conn.WriteMessage(websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "removed from instance"))
+		_ = c.conn.Close()
 	}
 }
 
