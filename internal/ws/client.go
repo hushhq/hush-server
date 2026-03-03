@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"golang.org/x/time/rate"
 )
 
 const (
@@ -19,12 +20,14 @@ const (
 
 // Client is a single WebSocket connection.
 type Client struct {
-	id      string
-	userID  string
-	hub     *Hub
-	conn    *websocket.Conn
-	send    chan []byte
-	handler *MessageHandler
+	id              string
+	userID          string
+	hub             *Hub
+	conn            *websocket.Conn
+	send            chan []byte
+	handler         *MessageHandler
+	limiter         *rate.Limiter
+	consecutiveHits int
 }
 
 // Run runs the read and write pumps. Call after Register. Blocks until connection closes.
@@ -53,6 +56,36 @@ func (c *Client) readPump() {
 			}
 			return
 		}
+
+		// Rate-limit message.send only; other message types are control/auth
+		// messages that must never be dropped.
+		var peek struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(raw, &peek); err == nil && peek.Type == "message.send" {
+			if !c.limiter.Allow() {
+				c.consecutiveHits++
+				errMsg, _ := json.Marshal(map[string]interface{}{
+					"type":        "error",
+					"code":        "rate_limited",
+					"retry_after": 2,
+				})
+				c.send <- errMsg
+				if c.consecutiveHits >= wsMaxConsecutiveHit {
+					slog.Warn("ws rate limit: disconnecting client after repeated violations",
+						"userID", c.userID, "hits", c.consecutiveHits)
+					_ = c.conn.WriteControl(
+						websocket.CloseMessage,
+						websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "rate limit exceeded"),
+						time.Now().Add(writeWait),
+					)
+					return
+				}
+				continue
+			}
+			c.consecutiveHits = 0
+		}
+
 		c.handleMessage(raw)
 	}
 }
@@ -134,5 +167,6 @@ func NewClient(conn *websocket.Conn, hub *Hub, userID string, msgHandler *Messag
 		conn:    conn,
 		send:    make(chan []byte, 256),
 		handler: msgHandler,
+		limiter: newClientLimiter(),
 	}
 }

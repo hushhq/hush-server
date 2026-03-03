@@ -3,6 +3,7 @@ package ws
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"hush.app/server/internal/auth"
@@ -23,7 +24,12 @@ func Handler(hub *Hub, jwtSecret string, store db.Store, corsOrigin string) http
 			if corsOrigin == "*" {
 				return true
 			}
-			return r.Header.Get("Origin") == corsOrigin
+			origin := r.Header.Get("Origin")
+			if origin != corsOrigin {
+				slog.Warn("ws upgrade rejected: origin mismatch", "origin", origin, "expected", corsOrigin)
+				return false
+			}
+			return true
 		},
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
