@@ -114,6 +114,80 @@ type InviteCode struct {
 	Uses      int       `json:"uses"`
 }
 
+// Ban represents an active or historical ban record.
+type Ban struct {
+	ID        string     `json:"id"`
+	UserID    string     `json:"userId"`
+	ActorID   string     `json:"actorId"`
+	Reason    string     `json:"reason"`
+	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
+	CreatedAt time.Time  `json:"createdAt"`
+	LiftedAt  *time.Time `json:"liftedAt,omitempty"`
+	LiftedBy  *string    `json:"liftedBy,omitempty"`
+}
+
+// Mute represents an active or historical mute record (text AND voice).
+type Mute struct {
+	ID        string     `json:"id"`
+	UserID    string     `json:"userId"`
+	ActorID   string     `json:"actorId"`
+	Reason    string     `json:"reason"`
+	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
+	CreatedAt time.Time  `json:"createdAt"`
+	LiftedAt  *time.Time `json:"liftedAt,omitempty"`
+	LiftedBy  *string    `json:"liftedBy,omitempty"`
+}
+
+// AuditLogEntry records a single moderation action.
+type AuditLogEntry struct {
+	ID        string                 `json:"id"`
+	ActorID   string                 `json:"actorId"`
+	TargetID  *string                `json:"targetId,omitempty"`
+	Action    string                 `json:"action"`
+	Reason    string                 `json:"reason"`
+	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt time.Time              `json:"createdAt"`
+}
+
+// KickRequest is the body for POST /api/moderation/kick.
+type KickRequest struct {
+	UserID string `json:"userId"`
+	Reason string `json:"reason"`
+}
+
+// BanRequest is the body for POST /api/moderation/ban.
+type BanRequest struct {
+	UserID    string `json:"userId"`
+	Reason    string `json:"reason"`
+	ExpiresIn *int   `json:"expiresIn,omitempty"` // seconds; nil = permanent
+}
+
+// MuteRequest is the body for POST /api/moderation/mute.
+type MuteRequest struct {
+	UserID    string `json:"userId"`
+	Reason    string `json:"reason"`
+	ExpiresIn *int   `json:"expiresIn,omitempty"` // seconds; nil = permanent
+}
+
+// UnbanRequest is the body for POST /api/moderation/unban.
+type UnbanRequest struct {
+	UserID string `json:"userId"`
+	Reason string `json:"reason"`
+}
+
+// UnmuteRequest is the body for POST /api/moderation/unmute.
+type UnmuteRequest struct {
+	UserID string `json:"userId"`
+	Reason string `json:"reason"`
+}
+
+// ChangeRoleRequest is the body for PUT /api/moderation/role.
+type ChangeRoleRequest struct {
+	UserID  string `json:"userId"`
+	NewRole string `json:"newRole"`
+	Reason  string `json:"reason"`
+}
+
 // CreateChannelRequest is the body for POST /api/channels.
 type CreateChannelRequest struct {
 	Name      string  `json:"name"`
