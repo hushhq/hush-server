@@ -16,7 +16,7 @@ func TestPool_InsertMessage_GetMessages_IsChannelMember_Integration(t *testing.T
 	defer cleanup()
 
 	ctx := context.Background()
-	_, err := pool.Exec(ctx, `TRUNCATE messages, server_members, channels, servers, sessions, users CASCADE`)
+	_, err := pool.Exec(ctx, `TRUNCATE messages, channels, sessions, users CASCADE`)
 	require.NoError(t, err)
 
 	hash := "hash"
@@ -25,19 +25,11 @@ func TestPool_InsertMessage_GetMessages_IsChannelMember_Integration(t *testing.T
 	u2, err := pool.CreateUser(ctx, "user2_"+uuid.New().String()[:8], "User 2", &hash)
 	require.NoError(t, err)
 
-	var serverID string
-	err = pool.QueryRow(ctx, `INSERT INTO servers (name, owner_id) VALUES ('s1', $1) RETURNING id`, u1.ID).Scan(&serverID)
-	require.NoError(t, err)
-
 	var channelID string
-	err = pool.QueryRow(ctx, `INSERT INTO channels (server_id, name, type) VALUES ($1, 'general', 'text') RETURNING id`, serverID).Scan(&channelID)
+	err = pool.QueryRow(ctx, `INSERT INTO channels (name, type) VALUES ('general', 'text') RETURNING id`).Scan(&channelID)
 	require.NoError(t, err)
 
-	_, err = pool.Exec(ctx, `INSERT INTO server_members (server_id, user_id, role) VALUES ($1, $2, 'member')`, serverID, u1.ID)
-	require.NoError(t, err)
-	_, err = pool.Exec(ctx, `INSERT INTO server_members (server_id, user_id, role) VALUES ($1, $2, 'member')`, serverID, u2.ID)
-	require.NoError(t, err)
-
+	// In single-tenant model, any existing user is a channel member.
 	ok, err := pool.IsChannelMember(ctx, channelID, u1.ID)
 	require.NoError(t, err)
 	assert.True(t, ok)
@@ -45,8 +37,8 @@ func TestPool_InsertMessage_GetMessages_IsChannelMember_Integration(t *testing.T
 	require.NoError(t, err)
 	assert.True(t, ok)
 
-	unknownChannel := uuid.New().String()
-	ok, err = pool.IsChannelMember(ctx, unknownChannel, u1.ID)
+	// A non-existent user ID is not a member.
+	ok, err = pool.IsChannelMember(ctx, channelID, uuid.New().String())
 	require.NoError(t, err)
 	assert.False(t, ok)
 

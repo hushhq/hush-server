@@ -52,15 +52,13 @@ func (p *Pool) GetMessages(ctx context.Context, channelID, recipientID string, b
 	return scanMessages(rows)
 }
 
-// IsChannelMember returns true if userID is a member of the server that owns the channel.
+// IsChannelMember returns true if the user exists in the instance.
+// In the single-tenant model all authenticated users are members; channelID is
+// retained in the signature for interface compatibility.
 func (p *Pool) IsChannelMember(ctx context.Context, channelID, userID string) (bool, error) {
 	var exists bool
 	err := p.QueryRow(ctx, `
-		SELECT EXISTS(
-			SELECT 1 FROM channels c
-			INNER JOIN server_members sm ON sm.server_id = c.server_id AND sm.user_id = $2
-			WHERE c.id = $1
-		)`, channelID, userID).Scan(&exists)
+		SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)`, userID).Scan(&exists)
 	return exists, err
 }
 
