@@ -59,10 +59,16 @@ func (p *Pool) SetInstanceOwner(ctx context.Context, userID string) (bool, error
 	return tag.RowsAffected() > 0, nil
 }
 
-// GetUserRole returns the role of the user by ID.
+// GetUserRole returns the effective role of the user by ID.
+// If the user is the instance owner (instance_config.owner_id), "owner" is
+// returned regardless of the users.role column — this handles pre-migration
+// users whose role column was never updated.
 func (p *Pool) GetUserRole(ctx context.Context, userID string) (string, error) {
 	var role string
-	err := p.QueryRow(ctx, `SELECT role FROM users WHERE id = $1`, userID).Scan(&role)
+	err := p.QueryRow(ctx, `
+		SELECT CASE WHEN ic.owner_id = u.id THEN 'owner' ELSE u.role END
+		FROM users u CROSS JOIN instance_config ic
+		WHERE u.id = $1`, userID).Scan(&role)
 	return role, err
 }
 
