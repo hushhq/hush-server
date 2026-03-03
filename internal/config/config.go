@@ -13,6 +13,7 @@ type Config struct {
 	JWTSecret    string
 	JWTExpiry    time.Duration
 	CORSOrigin   string
+	Production   bool
 	LiveKitAPIKey    string
 	LiveKitAPISecret string
 	LiveKitURL       string
@@ -32,12 +33,16 @@ func Load() Config {
 			jwtExpiryHours = v
 		}
 	}
+	prod := os.Getenv("PRODUCTION")
+	production := prod == "1" || prod == "true" || prod == "yes"
+
 	return Config{
 		Port:             port,
 		DatabaseURL:      os.Getenv("DATABASE_URL"),
 		JWTSecret:        os.Getenv("JWT_SECRET"),
 		JWTExpiry:        time.Duration(jwtExpiryHours) * time.Hour,
 		CORSOrigin:       os.Getenv("CORS_ORIGIN"),
+		Production:       production,
 		LiveKitAPIKey:    os.Getenv("LIVEKIT_API_KEY"),
 		LiveKitAPISecret: os.Getenv("LIVEKIT_API_SECRET"),
 		LiveKitURL:       os.Getenv("LIVEKIT_URL"),

@@ -22,6 +22,7 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"golang.org/x/time/rate"
 )
 
 func main() {
@@ -63,17 +64,23 @@ func main() {
 		defer pool.Close()
 	}
 
+	wsOrigin := api.WSOriginFromCORSOrigin(cfg.CORSOrigin)
+
 	r := chi.NewRouter()
 	r.Use(chimiddleware.RequestID)
 	r.Use(chimiddleware.RealIP)
 	r.Use(chimiddleware.Logger)
 	r.Use(chimiddleware.Recoverer)
+	// Security headers before CORS so they are always present regardless of origin check outcome.
+	r.Use(api.SecurityHeaders(cfg.Production, wsOrigin))
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{cfg.CORSOrigin},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
 		AllowCredentials: true,
 	}))
+	// General per-IP rate limit: 100 requests per minute with a burst of 100. SEC-04.
+	r.Use(api.IPRateLimiter(rate.Limit(100.0/60.0), 100))
 
 	r.Get("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -90,8 +97,16 @@ func main() {
 
 	wsHub := ws.NewHub()
 	if pool != nil && cfg.JWTSecret != "" {
-		r.Mount("/api/auth", api.AuthRoutes(pool, cfg.JWTSecret, cfg.JWTExpiry))
-		r.Mount("/api/keys", api.KeysRoutes(pool, wsHub, cfg.JWTSecret))
+		// Auth endpoints: stricter per-IP limit — 5 requests per minute. SEC-01.
+		r.Route("/api/auth", func(sub chi.Router) {
+			sub.Use(api.IPRateLimiter(rate.Limit(5.0/60.0), 5))
+			sub.Mount("/", api.AuthRoutes(pool, cfg.JWTSecret, cfg.JWTExpiry))
+		})
+		// Key upload: per-user limit — 10 requests per minute. SEC-03.
+		r.Route("/api/keys", func(sub chi.Router) {
+			sub.Use(api.UserRateLimiter(rate.Limit(10.0/60.0), 10))
+			sub.Mount("/", api.KeysRoutes(pool, wsHub, cfg.JWTSecret))
+		})
 		r.Mount("/api/instance", api.InstanceRoutes(pool, wsHub, cfg.JWTSecret))
 		r.Mount("/api/channels", api.ChannelRoutes(pool, wsHub, cfg.JWTSecret))
 		r.Mount("/api/invites", api.InviteRoutes(pool, cfg.JWTSecret))
