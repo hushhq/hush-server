@@ -32,6 +32,9 @@ func TestGetInstanceConfig_ReturnsConfig(t *testing.T) {
 			RegistrationMode: "open",
 		}, nil
 	}
+	store.getUserRoleFn = func(_ context.Context, _ string) (string, error) {
+		return "owner", nil
+	}
 	router := instanceRouter(store)
 	rr := getServer(router, "/", token)
 	assert.Equal(t, http.StatusOK, rr.Code)
@@ -40,6 +43,7 @@ func TestGetInstanceConfig_ReturnsConfig(t *testing.T) {
 	assert.Equal(t, "My Hush", resp.Name)
 	assert.Equal(t, "open", resp.RegistrationMode)
 	assert.True(t, resp.Bootstrapped, "bootstrapped must be true when ownerID is set")
+	assert.Equal(t, "owner", resp.MyRole)
 }
 
 func TestGetInstanceConfig_Unbootstrapped_BootstrappedFalse(t *testing.T) {
@@ -54,12 +58,16 @@ func TestGetInstanceConfig_Unbootstrapped_BootstrappedFalse(t *testing.T) {
 			RegistrationMode: "open",
 		}, nil
 	}
+	store.getUserRoleFn = func(_ context.Context, _ string) (string, error) {
+		return "member", nil
+	}
 	router := instanceRouter(store)
 	rr := getServer(router, "/", token)
 	assert.Equal(t, http.StatusOK, rr.Code)
 	var resp instanceConfigResponse
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
 	assert.False(t, resp.Bootstrapped, "bootstrapped must be false when ownerID is nil")
+	assert.Equal(t, "member", resp.MyRole)
 }
 
 func TestGetInstanceConfig_Unauthenticated_Returns401(t *testing.T) {

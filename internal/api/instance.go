@@ -46,7 +46,7 @@ type instanceHandler struct {
 	hub   GlobalBroadcaster
 }
 
-// instanceConfigResponse extends InstanceConfig with a bootstrapped flag.
+// instanceConfigResponse extends InstanceConfig with a bootstrapped flag and the caller's role.
 type instanceConfigResponse struct {
 	ID               string  `json:"id"`
 	Name             string  `json:"name"`
@@ -54,6 +54,7 @@ type instanceConfigResponse struct {
 	OwnerID          *string `json:"ownerId"`
 	RegistrationMode string  `json:"registrationMode"`
 	Bootstrapped     bool    `json:"bootstrapped"`
+	MyRole           string  `json:"myRole"`
 }
 
 func (h *instanceHandler) getConfig(w http.ResponseWriter, r *http.Request) {
@@ -63,6 +64,12 @@ func (h *instanceHandler) getConfig(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load instance config"})
 		return
 	}
+	userID := userIDFromContext(r.Context())
+	role, err := h.store.GetUserRole(r.Context(), userID)
+	if err != nil {
+		slog.Error("get user role for instance config", "err", err)
+		role = "member"
+	}
 	writeJSON(w, http.StatusOK, instanceConfigResponse{
 		ID:               cfg.ID,
 		Name:             cfg.Name,
@@ -70,6 +77,7 @@ func (h *instanceHandler) getConfig(w http.ResponseWriter, r *http.Request) {
 		OwnerID:          cfg.OwnerID,
 		RegistrationMode: cfg.RegistrationMode,
 		Bootstrapped:     cfg.OwnerID != nil,
+		MyRole:           role,
 	})
 }
 
