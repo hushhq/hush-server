@@ -8,6 +8,7 @@ type User struct {
 	Username     string     `json:"username"`
 	PasswordHash *string    `json:"-"`
 	DisplayName  string     `json:"displayName"`
+	Role         string     `json:"role"`
 	CreatedAt    time.Time  `json:"createdAt"`
 }
 
@@ -67,49 +68,36 @@ type PreKeyBundle struct {
 // Message is a stored encrypted message. Ciphertext is opaque to the server.
 // RecipientID is nil for broadcast/single-ciphertext; set for fan-out per recipient.
 type Message struct {
-	ID         string    `json:"id"`
-	ChannelID  string    `json:"channelId"`
-	SenderID   string    `json:"senderId"`
-	RecipientID *string  `json:"recipientId,omitempty"`
-	Ciphertext []byte    `json:"ciphertext"` // base64-encoded in JSON
-	Timestamp  time.Time `json:"timestamp"`
+	ID          string    `json:"id"`
+	ChannelID   string    `json:"channelId"`
+	SenderID    string    `json:"senderId"`
+	RecipientID *string   `json:"recipientId,omitempty"`
+	Ciphertext  []byte    `json:"ciphertext"` // base64-encoded in JSON
+	Timestamp   time.Time `json:"timestamp"`
 }
 
-// Server is a Discord-like server.
-type Server struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	IconURL   *string   `json:"iconUrl,omitempty"`
-	OwnerID   string    `json:"ownerId"`
-	CreatedAt time.Time `json:"createdAt"`
+// InstanceConfig is the single-row table that describes this Hush instance.
+type InstanceConfig struct {
+	ID               string    `json:"id"`
+	Name             string    `json:"name"`
+	IconURL          *string   `json:"iconUrl"`
+	OwnerID          *string   `json:"ownerId"`
+	RegistrationMode string    `json:"registrationMode"`
+	CreatedAt        time.Time `json:"createdAt"`
 }
 
-// ServerMember is a user's membership in a server.
-type ServerMember struct {
-	ServerID string    `json:"serverId"`
-	UserID   string    `json:"userId"`
-	Role     string    `json:"role"`
-	JoinedAt time.Time `json:"joinedAt"`
-}
-
-// ServerMemberWithUser is a server member with display name for list responses.
-type ServerMemberWithUser struct {
-	UserID      string    `json:"userId"`
+// Member is a user with their instance role, used for member list responses.
+type Member struct {
+	ID          string    `json:"id"`
+	Username    string    `json:"username"`
 	DisplayName string    `json:"displayName"`
 	Role        string    `json:"role"`
-	JoinedAt    time.Time `json:"joinedAt"`
+	CreatedAt   time.Time `json:"createdAt"`
 }
 
-// ServerWithRole embeds Server and adds the current user's role.
-type ServerWithRole struct {
-	Server
-	Role string `json:"role"`
-}
-
-// Channel is a text or voice channel within a server.
+// Channel is a text or voice channel within the instance.
 type Channel struct {
 	ID        string  `json:"id"`
-	ServerID  string  `json:"serverId"`
 	Name      string  `json:"name"`
 	Type      string  `json:"type"`
 	VoiceMode *string `json:"voiceMode,omitempty"`
@@ -117,29 +105,16 @@ type Channel struct {
 	Position  int     `json:"position"`
 }
 
-// InviteCode is an invite link token for a server.
+// InviteCode is an invite link token for the instance.
 type InviteCode struct {
 	Code      string    `json:"code"`
-	ServerID  string    `json:"serverId"`
 	CreatedBy string    `json:"createdBy"`
 	ExpiresAt time.Time `json:"expiresAt"`
 	MaxUses   int       `json:"maxUses"`
 	Uses      int       `json:"uses"`
 }
 
-// CreateServerRequest is the body for POST /api/servers.
-type CreateServerRequest struct {
-	Name    string  `json:"name"`
-	IconURL *string `json:"iconUrl,omitempty"`
-}
-
-// UpdateServerRequest is the body for PUT /api/servers/:id.
-type UpdateServerRequest struct {
-	Name    *string `json:"name,omitempty"`
-	IconURL *string `json:"iconUrl,omitempty"`
-}
-
-// CreateChannelRequest is the body for POST /api/servers/:id/channels.
+// CreateChannelRequest is the body for POST /api/channels.
 type CreateChannelRequest struct {
 	Name      string  `json:"name"`
 	Type      string  `json:"type"`
@@ -148,19 +123,21 @@ type CreateChannelRequest struct {
 	Position  *int    `json:"position,omitempty"`
 }
 
-// JoinServerRequest is the body for POST /api/servers/:id/join.
-type JoinServerRequest struct {
-	InviteCode string `json:"inviteCode"`
-}
-
 // MoveChannelRequest is the body for PUT /api/channels/:id/move.
 type MoveChannelRequest struct {
 	ParentID *string `json:"parentId"`
 	Position int     `json:"position"`
 }
 
-// CreateInviteRequest is the body for POST /api/servers/:id/invites.
+// CreateInviteRequest is the body for POST /api/invites.
 type CreateInviteRequest struct {
 	MaxUses   *int `json:"maxUses,omitempty"`
 	ExpiresIn *int `json:"expiresIn,omitempty"` // seconds
+}
+
+// UpdateInstanceRequest is the body for PATCH /api/instance.
+type UpdateInstanceRequest struct {
+	Name             *string `json:"name,omitempty"`
+	IconURL          *string `json:"iconUrl,omitempty"`
+	RegistrationMode *string `json:"registrationMode,omitempty"`
 }
