@@ -23,7 +23,7 @@ const lines = [
 
 for (const release of releases) {
   const milestone = milestones.find((m) => m.id === release.milestone);
-  const milestoneLabel = milestone ? ` — ${milestone.title}` : '';
+  const milestoneLabel = milestone ? `: ${milestone.title}` : '';
   const currentTag = release.current ? ' (current)' : '';
 
   lines.push(`## [${release.version}] - ${release.date}${milestoneLabel}${currentTag}`);

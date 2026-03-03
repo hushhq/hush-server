@@ -563,7 +563,7 @@ func (h *serverHandler) createInvite(w http.ResponseWriter, r *http.Request) {
 
 	var req models.CreateInviteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		// Empty body is fine — use defaults
+		// Empty body is fine - use defaults
 		req = models.CreateInviteRequest{}
 	}
 

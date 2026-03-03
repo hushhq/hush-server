@@ -1,10 +1,10 @@
-# docker-compose.prod.yml — gethush.live hosted deployment
+# docker-compose.prod.yml -gethush.live hosted deployment
 # Usage: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #
 # Differences from docker-compose.yml:
 #   - Caddy uses Caddyfile.prod (HTTPS + HSTS). Set CORS_ORIGIN in .env (e.g. https://gethush.live).
 #   - Self-hosted LiveKit + Redis included (same as base compose).
-#   - When migrating to LiveKit Cloud, add profiles: [self-hosted-only] to livekit and redis services.
+#   - LiveKit is always self-hosted. For multi-region, deploy separate LiveKit instances per region.
 
 services:
   # Production Caddy: HTTPS site block + HSTS. Set CORS_ORIGIN in .env.

@@ -182,7 +182,7 @@ func TestClient_HandleMediaKey_NonexistentTargetNoOp(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Should not panic or deadlock — simply a no-op.
+	// Should not panic or deadlock - simply a no-op.
 	sender.handleMessage(raw)
 
 	select {
