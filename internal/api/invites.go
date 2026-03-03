@@ -146,6 +146,24 @@ func (h *inviteHandler) claimInvite(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
 		return
 	}
+	// Banned users cannot rejoin via invite. Check before processing the code
+	// so no instance data is leaked in the error response.
+	ban, err := h.store.GetActiveBan(r.Context(), userID)
+	if err != nil {
+		slog.Error("claimInvite: check ban", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to check ban status"})
+		return
+	}
+	if ban != nil {
+		resp := map[string]interface{}{
+			"error": "You are banned from this instance.",
+		}
+		if ban.ExpiresAt != nil {
+			resp["ban_expires_at"] = ban.ExpiresAt.Format(time.RFC3339)
+		}
+		writeJSON(w, http.StatusForbidden, resp)
+		return
+	}
 	var req claimInviteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Code == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "code is required"})

@@ -30,18 +30,42 @@ func NewMessageHandler(store db.Store, hub *Hub) *MessageHandler {
 }
 
 // Handle processes a single incoming message by type. Raw is the full JSON payload.
+// Muted users are blocked from message.send, typing.start, and typing.stop;
+// other message types (message.history, subscribe, unsubscribe) pass through.
 func (h *MessageHandler) Handle(c *Client, msgType string, raw []byte) {
 	switch msgType {
-	case "message.send":
-		h.handleMessageSend(c, raw)
+	case "message.send", "typing.start", "typing.stop":
+		if h.isMuted(c) {
+			sendError(c, "muted", "You are muted and cannot send messages.")
+			return
+		}
+		if msgType == "message.send" {
+			h.handleMessageSend(c, raw)
+		} else {
+			h.handleTyping(c, msgType, raw)
+		}
 	case "message.history":
 		h.handleMessageHistory(c, raw)
-	case "typing.start", "typing.stop":
-		h.handleTyping(c, msgType, raw)
 	default:
 		// subscribe/unsubscribe handled in readPump
 		return
 	}
+}
+
+// isMuted checks whether the client's user has an active mute record.
+// Returns false on DB error (fail-open for availability).
+func (h *MessageHandler) isMuted(c *Client) bool {
+	if h.store == nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
+	defer cancel()
+	mute, err := h.store.GetActiveMute(ctx, c.userID)
+	if err != nil {
+		slog.Warn("ws mute check failed", "err", err, "userID", c.userID)
+		return false
+	}
+	return mute != nil
 }
 
 func (h *MessageHandler) handleMessageSend(c *Client, raw []byte) {
