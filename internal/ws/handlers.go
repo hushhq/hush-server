@@ -139,6 +139,23 @@ func (h *MessageHandler) handleMessageSendFanout(c *Client, channelID string, ci
 		b, _ := json.Marshal(out)
 		h.hub.BroadcastToUserInChannel(channelID, recipientID, b)
 	}
+	// Insert sender's own copy so their history includes fan-out messages.
+	// Ciphertext is empty - the client caches plaintext at send time.
+	senderID := c.userID
+	senderCopy, err := h.store.InsertMessage(ctx, channelID, c.userID, &senderID, []byte{})
+	if err != nil {
+		slog.Warn("ws InsertMessage sender-copy failed", "err", err)
+		return
+	}
+	echo := map[string]interface{}{
+		"type":       "message.new",
+		"id":         senderCopy.ID,
+		"channel_id": channelID,
+		"sender_id":  c.userID,
+		"timestamp":  senderCopy.Timestamp.Format(time.RFC3339Nano),
+	}
+	echoBytes, _ := json.Marshal(echo)
+	h.hub.BroadcastToUserInChannel(channelID, c.userID, echoBytes)
 }
 
 func (h *MessageHandler) handleMessageHistory(c *Client, raw []byte) {

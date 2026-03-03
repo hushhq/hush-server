@@ -263,8 +263,11 @@ func TestMessageHandler_HandleMessageSend_FanoutStoresAndBroadcastsPerRecipient(
 	})
 	h.Handle(sender, "message.send", raw)
 
-	assert.Equal(t, 2, insertCount)
+	// 2 recipient inserts + 1 sender copy = 3
+	assert.Equal(t, 3, insertCount)
+	// Last insert is the sender copy (recipient_id = sender)
 	assert.NotNil(t, lastRecipientID)
+	assert.Equal(t, "user1", *lastRecipientID)
 
 	// user2 should receive only their own ciphertext, not user3's
 	msg := drainUntilType(t, recv, "message.new", time.Second)
@@ -281,6 +284,20 @@ func TestMessageHandler_HandleMessageSend_FanoutStoresAndBroadcastsPerRecipient(
 	assert.Equal(t, "user1", out.SenderID)
 	assert.Equal(t, "YWVz", out.Ciphertext)
 	assert.NotEmpty(t, out.ID)
+
+	// sender should receive a self-echo for the sender copy (no ciphertext)
+	selfEcho := drainUntilType(t, sender, "message.new", time.Second)
+	var echoOut struct {
+		Type      string `json:"type"`
+		ID        string `json:"id"`
+		ChannelID string `json:"channel_id"`
+		SenderID  string `json:"sender_id"`
+	}
+	require.NoError(t, json.Unmarshal(selfEcho, &echoOut))
+	assert.Equal(t, "message.new", echoOut.Type)
+	assert.Equal(t, "ch1", echoOut.ChannelID)
+	assert.Equal(t, "user1", echoOut.SenderID)
+	assert.Equal(t, "msg-user1", echoOut.ID)
 }
 
 func TestMessageHandler_HandleTyping_BroadcastsToChannel(t *testing.T) {
