@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -10,12 +11,13 @@ import (
 
 	"hush.app/server/internal/models"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func invitesRouter(store *mockStore) http.Handler {
-	return InviteRoutes(store)
+	return InviteRoutes(store, testJWTSecret)
 }
 
 func getInvite(handler http.Handler, path string) *httptest.ResponseRecorder {
@@ -25,14 +27,29 @@ func getInvite(handler http.Handler, path string) *httptest.ResponseRecorder {
 	return rr
 }
 
-func TestGetInviteByCode_ValidCode_ReturnsServerInfo(t *testing.T) {
-	serverID := "s1"
+func postInviteJSON(handler http.Handler, path string, body interface{}, token string) *httptest.ResponseRecorder {
+	var b []byte
+	if body != nil {
+		b, _ = json.Marshal(body)
+	}
+	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	return rr
+}
+
+// ---------- GET /invites/:code (public) ----------
+
+func TestGetInviteInfo_Public_ValidCode_ReturnsInstanceName(t *testing.T) {
 	store := &mockStore{}
 	store.getInviteByCodeFn = func(_ context.Context, code string) (*models.InviteCode, error) {
 		if code == "VALID" {
 			return &models.InviteCode{
 				Code:      "VALID",
-				ServerID:  serverID,
 				Uses:      0,
 				MaxUses:   10,
 				ExpiresAt: time.Now().Add(time.Hour),
@@ -40,19 +57,14 @@ func TestGetInviteByCode_ValidCode_ReturnsServerInfo(t *testing.T) {
 		}
 		return nil, nil
 	}
-	store.getServerByIDFn = func(_ context.Context, sid string) (*models.Server, error) {
-		if sid == serverID {
-			return &models.Server{ID: serverID, Name: "Test Server"}, nil
-		}
-		return nil, nil
-	}
+	// Default GetInstanceConfig returns "Test Instance".
 	router := invitesRouter(store)
 	rr := getInvite(router, "/VALID")
 	assert.Equal(t, http.StatusOK, rr.Code)
 	var resp inviteInfoResponse
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
-	assert.Equal(t, serverID, resp.ServerID)
-	assert.Equal(t, "Test Server", resp.ServerName)
+	assert.Equal(t, "VALID", resp.Code)
+	assert.Equal(t, "Test Instance", resp.InstanceName)
 }
 
 func TestGetInviteByCode_NotFound_Returns404(t *testing.T) {
@@ -73,7 +85,6 @@ func TestGetInviteByCode_Expired_Returns404(t *testing.T) {
 	store.getInviteByCodeFn = func(_ context.Context, _ string) (*models.InviteCode, error) {
 		return &models.InviteCode{
 			Code:      "EXPIRED",
-			ServerID:  "s1",
 			Uses:      0,
 			MaxUses:   10,
 			ExpiresAt: time.Now().Add(-time.Hour),
@@ -92,7 +103,6 @@ func TestGetInviteByCode_MaxUsesReached_Returns404(t *testing.T) {
 	store.getInviteByCodeFn = func(_ context.Context, _ string) (*models.InviteCode, error) {
 		return &models.InviteCode{
 			Code:      "FULL",
-			ServerID:  "s1",
 			Uses:      10,
 			MaxUses:   10,
 			ExpiresAt: time.Now().Add(time.Hour),
@@ -104,4 +114,149 @@ func TestGetInviteByCode_MaxUsesReached_Returns404(t *testing.T) {
 	var errResp map[string]string
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&errResp))
 	assert.Contains(t, errResp["error"], "expired or no longer valid")
+}
+
+// ---------- POST /invites (role-gated) ----------
+
+func TestCreateInvite_ModCanCreate_Returns201(t *testing.T) {
+	userID := uuid.New().String()
+	store := &mockStore{}
+	token := makeAuth(store, userID)
+	store.getUserRoleFn = func(_ context.Context, uid string) (string, error) {
+		if uid == userID {
+			return "mod", nil
+		}
+		return "member", nil
+	}
+	router := invitesRouter(store)
+	rr := postInviteJSON(router, "/", nil, token)
+	assert.Equal(t, http.StatusCreated, rr.Code)
+	var inv models.InviteCode
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&inv))
+	assert.Len(t, inv.Code, inviteCodeLength)
+	assert.Equal(t, defaultInviteMaxUses, inv.MaxUses)
+}
+
+func TestCreateInvite_AdminCanCreate_Returns201(t *testing.T) {
+	userID := uuid.New().String()
+	store := &mockStore{}
+	token := makeAuth(store, userID)
+	store.getUserRoleFn = func(_ context.Context, _ string) (string, error) { return "admin", nil }
+	router := invitesRouter(store)
+	rr := postInviteJSON(router, "/", nil, token)
+	assert.Equal(t, http.StatusCreated, rr.Code)
+}
+
+func TestCreateInvite_MemberForbidden_Returns403(t *testing.T) {
+	userID := uuid.New().String()
+	store := &mockStore{}
+	token := makeAuth(store, userID)
+	store.getUserRoleFn = func(_ context.Context, _ string) (string, error) { return "member", nil }
+	router := invitesRouter(store)
+	rr := postInviteJSON(router, "/", nil, token)
+	assert.Equal(t, http.StatusForbidden, rr.Code)
+	err := decodeError(t, rr)
+	assert.Contains(t, err["error"], "mod")
+}
+
+func TestCreateInvite_NoAuth_Returns401(t *testing.T) {
+	store := &mockStore{}
+	router := invitesRouter(store)
+	rr := postInviteJSON(router, "/", nil, "")
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+}
+
+func TestCreateInvite_CustomMaxUses(t *testing.T) {
+	userID := uuid.New().String()
+	store := &mockStore{}
+	token := makeAuth(store, userID)
+	store.getUserRoleFn = func(_ context.Context, _ string) (string, error) { return "admin", nil }
+	var capturedMaxUses int
+	store.createInviteFn = func(_ context.Context, code, createdBy string, maxUses int, expiresAt time.Time) (*models.InviteCode, error) {
+		capturedMaxUses = maxUses
+		return &models.InviteCode{Code: code, CreatedBy: createdBy, MaxUses: maxUses, ExpiresAt: expiresAt}, nil
+	}
+	router := invitesRouter(store)
+	rr := postInviteJSON(router, "/", models.CreateInviteRequest{MaxUses: ptrInt(10), ExpiresIn: ptrInt(3600)}, token)
+	require.Equal(t, http.StatusCreated, rr.Code)
+	assert.Equal(t, 10, capturedMaxUses)
+}
+
+func TestCreateInvite_InvalidMaxUses_Returns400(t *testing.T) {
+	userID := uuid.New().String()
+	store := &mockStore{}
+	token := makeAuth(store, userID)
+	store.getUserRoleFn = func(_ context.Context, _ string) (string, error) { return "admin", nil }
+	router := invitesRouter(store)
+	rr := postInviteJSON(router, "/", models.CreateInviteRequest{MaxUses: ptrInt(0)}, token)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestCreateInvite_InvalidExpiresIn_Returns400(t *testing.T) {
+	userID := uuid.New().String()
+	store := &mockStore{}
+	token := makeAuth(store, userID)
+	store.getUserRoleFn = func(_ context.Context, _ string) (string, error) { return "admin", nil }
+	router := invitesRouter(store)
+	rr := postInviteJSON(router, "/", models.CreateInviteRequest{ExpiresIn: ptrInt(30)}, token)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+// ---------- POST /invites/claim ----------
+
+func TestClaimInvite_ValidCode_Returns200(t *testing.T) {
+	userID := uuid.New().String()
+	store := &mockStore{}
+	token := makeAuth(store, userID)
+	store.getInviteByCodeFn = func(_ context.Context, code string) (*models.InviteCode, error) {
+		if code == "CLAIM1" {
+			return &models.InviteCode{
+				Code:      "CLAIM1",
+				Uses:      0,
+				MaxUses:   10,
+				ExpiresAt: time.Now().Add(time.Hour),
+			}, nil
+		}
+		return nil, nil
+	}
+	store.claimInviteUseFn = func(_ context.Context, code string) (bool, error) {
+		assert.Equal(t, "CLAIM1", code)
+		return true, nil
+	}
+	router := invitesRouter(store)
+	rr := postInviteJSON(router, "/claim", map[string]string{"code": "CLAIM1"}, token)
+	assert.Equal(t, http.StatusOK, rr.Code)
+	var resp map[string]bool
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.True(t, resp["ok"])
+}
+
+func TestClaimInvite_ExpiredCode_Returns400(t *testing.T) {
+	userID := uuid.New().String()
+	store := &mockStore{}
+	token := makeAuth(store, userID)
+	store.getInviteByCodeFn = func(_ context.Context, _ string) (*models.InviteCode, error) {
+		return &models.InviteCode{
+			Code:      "OLD",
+			ExpiresAt: time.Now().Add(-time.Hour),
+		}, nil
+	}
+	router := invitesRouter(store)
+	rr := postInviteJSON(router, "/claim", map[string]string{"code": "OLD"}, token)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestClaimInvite_MaxUsesReached_Returns400(t *testing.T) {
+	userID := uuid.New().String()
+	store := &mockStore{}
+	token := makeAuth(store, userID)
+	store.getInviteByCodeFn = func(_ context.Context, code string) (*models.InviteCode, error) {
+		return &models.InviteCode{Code: code, ExpiresAt: time.Now().Add(time.Hour)}, nil
+	}
+	store.claimInviteUseFn = func(_ context.Context, _ string) (bool, error) {
+		return false, nil
+	}
+	router := invitesRouter(store)
+	rr := postInviteJSON(router, "/claim", map[string]string{"code": "FULL"}, token)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }

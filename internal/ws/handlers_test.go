@@ -19,22 +19,46 @@ type messageStoreMock struct {
 	isChannelMemberFn func(ctx context.Context, channelID, userID string) (bool, error)
 }
 
-func (m *messageStoreMock) CreateUser(context.Context, string, string, *string) (*models.User, error)              { return nil, nil }
-func (m *messageStoreMock) GetUserByUsername(context.Context, string) (*models.User, error)                         { return nil, nil }
-func (m *messageStoreMock) GetUserByID(context.Context, string) (*models.User, error)                               { return nil, nil }
-func (m *messageStoreMock) CreateSession(context.Context, string, string, string, time.Time) (*models.Session, error) { return nil, nil }
-func (m *messageStoreMock) GetSessionByTokenHash(context.Context, string) (*models.Session, error)                   { return nil, nil }
-func (m *messageStoreMock) DeleteSessionByID(context.Context, string) error                                         { return nil }
-func (m *messageStoreMock) UpsertIdentityKeys(context.Context, string, string, []byte, []byte, []byte, int) error   { return nil }
-func (m *messageStoreMock) InsertOneTimePreKeys(context.Context, string, string, []models.OneTimePreKeyRow) error  { return nil }
+// User/session stubs (unused in ws handler tests).
+func (m *messageStoreMock) CreateUser(context.Context, string, string, *string) (*models.User, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) GetUserByUsername(context.Context, string) (*models.User, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) GetUserByID(context.Context, string) (*models.User, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) CreateSession(context.Context, string, string, string, time.Time) (*models.Session, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) GetSessionByTokenHash(context.Context, string) (*models.Session, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) DeleteSessionByID(context.Context, string) error { return nil }
+
+// Signal key stubs.
+func (m *messageStoreMock) UpsertIdentityKeys(context.Context, string, string, []byte, []byte, []byte, int) error {
+	return nil
+}
+func (m *messageStoreMock) InsertOneTimePreKeys(context.Context, string, string, []models.OneTimePreKeyRow) error {
+	return nil
+}
 func (m *messageStoreMock) GetIdentityAndSignedPreKey(context.Context, string, string) ([]byte, []byte, []byte, int, error) {
 	return nil, nil, nil, 0, nil
 }
-func (m *messageStoreMock) ConsumeOneTimePreKey(context.Context, string, string) (int, []byte, error)     { return 0, nil, nil }
-func (m *messageStoreMock) CountUnusedOneTimePreKeys(context.Context, string, string) (int, error)          { return 0, nil }
-func (m *messageStoreMock) ListDeviceIDsForUser(context.Context, string) ([]string, error)                 { return nil, nil }
-func (m *messageStoreMock) UpsertDevice(context.Context, string, string, string) error                     { return nil }
+func (m *messageStoreMock) ConsumeOneTimePreKey(context.Context, string, string) (int, []byte, error) {
+	return 0, nil, nil
+}
+func (m *messageStoreMock) CountUnusedOneTimePreKeys(context.Context, string, string) (int, error) {
+	return 0, nil
+}
+func (m *messageStoreMock) ListDeviceIDsForUser(context.Context, string) ([]string, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) UpsertDevice(context.Context, string, string, string) error { return nil }
 
+// Message methods (actually used).
 func (m *messageStoreMock) InsertMessage(ctx context.Context, channelID, senderID string, recipientID *string, ciphertext []byte) (*models.Message, error) {
 	if m.insertMessageFn != nil {
 		return m.insertMessageFn(ctx, channelID, senderID, recipientID, ciphertext)
@@ -54,32 +78,37 @@ func (m *messageStoreMock) IsChannelMember(ctx context.Context, channelID, userI
 	return false, nil
 }
 
-func (m *messageStoreMock) CreateServerWithOwner(context.Context, string, *string, string) (*models.Server, error) {
+// Instance stubs.
+func (m *messageStoreMock) GetInstanceConfig(context.Context) (*models.InstanceConfig, error) {
 	return nil, nil
 }
-func (m *messageStoreMock) GetServerByID(context.Context, string) (*models.Server, error)                       { return nil, nil }
-func (m *messageStoreMock) ListServersForUser(context.Context, string) ([]models.ServerWithRole, error)         { return nil, nil }
-func (m *messageStoreMock) UpdateServer(context.Context, string, *string, *string) error                        { return nil }
-func (m *messageStoreMock) DeleteServer(context.Context, string) error                                          { return nil }
-func (m *messageStoreMock) AddServerMember(context.Context, string, string, string) error                       { return nil }
-func (m *messageStoreMock) RemoveServerMember(context.Context, string, string) error                            { return nil }
-func (m *messageStoreMock) GetServerMember(context.Context, string, string) (*models.ServerMember, error)       { return nil, nil }
-func (m *messageStoreMock) ListServerMembers(context.Context, string) ([]models.ServerMemberWithUser, error) { return nil, nil }
-func (m *messageStoreMock) TransferServerOwnership(context.Context, string, string) error                       { return nil }
-func (m *messageStoreMock) UpdateServerMemberRole(context.Context, string, string, string) error                { return nil }
-func (m *messageStoreMock) CountServerMembers(context.Context, string) (int, error)                             { return 0, nil }
-func (m *messageStoreMock) GetNextOwnerCandidate(context.Context, string, string) (*models.ServerMember, error) { return nil, nil }
-func (m *messageStoreMock) CreateChannel(context.Context, string, string, string, *string, *string, int) (*models.Channel, error) {
+func (m *messageStoreMock) UpdateInstanceConfig(context.Context, *string, *string, *string) error {
+	return nil
+}
+func (m *messageStoreMock) SetInstanceOwner(context.Context, string) (bool, error) { return false, nil }
+func (m *messageStoreMock) GetUserRole(context.Context, string) (string, error)    { return "member", nil }
+func (m *messageStoreMock) UpdateUserRole(context.Context, string, string) error   { return nil }
+func (m *messageStoreMock) ListMembers(context.Context) ([]models.Member, error)   { return nil, nil }
+
+// Channel stubs (flat, no serverID).
+func (m *messageStoreMock) CreateChannel(context.Context, string, string, *string, *string, int) (*models.Channel, error) {
 	return nil, nil
 }
-func (m *messageStoreMock) ListChannels(context.Context, string) ([]models.Channel, error)       { return nil, nil }
-func (m *messageStoreMock) GetChannelByID(context.Context, string) (*models.Channel, error)      { return nil, nil }
-func (m *messageStoreMock) DeleteChannel(context.Context, string) error                          { return nil }
-func (m *messageStoreMock) GetServerIDForChannel(context.Context, string) (string, error)        { return "", nil }
-func (m *messageStoreMock) CreateInvite(context.Context, string, string, string, int, time.Time) (*models.InviteCode, error) { return nil, nil }
-func (m *messageStoreMock) MoveChannel(context.Context, string, *string, int) error { return nil }
-func (m *messageStoreMock) GetInviteByCode(context.Context, string) (*models.InviteCode, error)  { return nil, nil }
-func (m *messageStoreMock) ClaimInviteUse(context.Context, string) (bool, error)                 { return true, nil }
+func (m *messageStoreMock) ListChannels(context.Context) ([]models.Channel, error)  { return nil, nil }
+func (m *messageStoreMock) GetChannelByID(context.Context, string) (*models.Channel, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) DeleteChannel(context.Context, string) error                    { return nil }
+func (m *messageStoreMock) MoveChannel(context.Context, string, *string, int) error        { return nil }
+
+// Invite stubs (flat, no serverID).
+func (m *messageStoreMock) CreateInvite(context.Context, string, string, int, time.Time) (*models.InviteCode, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) GetInviteByCode(context.Context, string) (*models.InviteCode, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) ClaimInviteUse(context.Context, string) (bool, error) { return true, nil }
 
 // drainUntilType reads from c.send until a message with the given type is received or timeout.
 func drainUntilType(t *testing.T, c *Client, wantType string, timeout time.Duration) []byte {

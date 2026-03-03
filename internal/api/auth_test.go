@@ -76,6 +76,7 @@ func defaultCreateUser() func(ctx context.Context, username, displayName string,
 			ID:          uuid.New().String(),
 			Username:    username,
 			DisplayName: displayName,
+			Role:        "member",
 			CreatedAt:   time.Now(),
 		}, nil
 	}
@@ -319,4 +320,64 @@ func TestValidateUsername_InvalidChars_ReturnsError(t *testing.T) {
 		assert.Error(t, err, "expected error for %q", name)
 		assert.Contains(t, err.Error(), "username may only contain")
 	}
+}
+
+// ---------- First-user bootstrap ----------
+
+func TestRegister_FirstUserBecomesOwner(t *testing.T) {
+	userID := uuid.New().String()
+	store := &mockStore{
+		createUserFn: func(_ context.Context, username, displayName string, _ *string) (*models.User, error) {
+			return &models.User{
+				ID:          userID,
+				Username:    username,
+				DisplayName: displayName,
+				Role:        "member",
+				CreatedAt:   time.Now(),
+			}, nil
+		},
+		// Simulate first registration: instance has no owner yet.
+		setInstanceOwnerFn: func(_ context.Context, uid string) (bool, error) {
+			assert.Equal(t, userID, uid)
+			return true, nil
+		},
+	}
+	router := newTestRouter(store)
+
+	rr := postJSON(router, "/register", models.RegisterRequest{
+		Username: "alice",
+		Password: "securepass",
+	})
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	resp := decodeAuthResponse(t, rr)
+	assert.Equal(t, "owner", resp.User.Role)
+}
+
+func TestRegister_SubsequentUserIsMember(t *testing.T) {
+	store := &mockStore{
+		createUserFn: func(_ context.Context, username, displayName string, _ *string) (*models.User, error) {
+			return &models.User{
+				ID:          uuid.New().String(),
+				Username:    username,
+				DisplayName: displayName,
+				Role:        "member",
+				CreatedAt:   time.Now(),
+			}, nil
+		},
+		// Owner already set: SetInstanceOwner returns false.
+		setInstanceOwnerFn: func(_ context.Context, _ string) (bool, error) {
+			return false, nil
+		},
+	}
+	router := newTestRouter(store)
+
+	rr := postJSON(router, "/register", models.RegisterRequest{
+		Username: "bob",
+		Password: "securepass",
+	})
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	resp := decodeAuthResponse(t, rr)
+	assert.Equal(t, "member", resp.User.Role)
 }

@@ -10,24 +10,28 @@ func TestParseRoomName(t *testing.T) {
 	tests := []struct {
 		name      string
 		roomName  string
-		serverID  string
 		channelID string
 		ok        bool
 	}{
-		{"valid", "server-abc123-channel-def456", "abc123", "def456", true},
-		{"uuid ids", "server-550e8400-e29b-41d4-a716-446655440000-channel-660e8400-e29b-41d4-a716-446655440001", "550e8400-e29b-41d4-a716-446655440000", "660e8400-e29b-41d4-a716-446655440001", true},
-		{"missing prefix", "room-abc-channel-def", "", "", false},
-		{"missing channel sep", "server-abc-def", "", "", false},
-		{"empty server id", "server--channel-def", "", "", false},
-		{"empty channel id", "server-abc-channel-", "", "", false},
-		{"empty string", "", "", "", false},
+		// Flat format: channel-{id}
+		{"flat valid", "channel-def456", "def456", true},
+		{"flat uuid id", "channel-660e8400-e29b-41d4-a716-446655440001", "660e8400-e29b-41d4-a716-446655440001", true},
+		{"flat empty channel id", "channel-", "", false},
+
+		// Legacy format: server-{sid}-channel-{cid}
+		{"legacy valid", "server-abc123-channel-def456", "def456", true},
+		{"legacy uuid ids", "server-550e8400-e29b-41d4-a716-446655440000-channel-660e8400-e29b-41d4-a716-446655440001", "660e8400-e29b-41d4-a716-446655440001", true},
+		{"legacy empty channel id", "server-abc-channel-", "", false},
+
+		// Invalid formats
+		{"missing channel sep", "server-abc-def", "", false},
+		{"empty string", "", "", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sid, cid, ok := parseRoomName(tt.roomName)
+			cid, ok := parseRoomName(tt.roomName)
 			assert.Equal(t, tt.ok, ok)
 			if ok {
-				assert.Equal(t, tt.serverID, sid)
 				assert.Equal(t, tt.channelID, cid)
 			}
 		})
