@@ -62,7 +62,6 @@ func (c *Client) handleMessage(raw []byte) {
 	var msg struct {
 		Type         string `json:"type"`
 		ChannelID    string `json:"channel_id"`
-		ServerID     string `json:"server_id"`
 		TargetUserID string `json:"target_user_id"`
 		Token        string `json:"token"`
 		Payload      string `json:"payload"`
@@ -78,14 +77,6 @@ func (c *Client) handleMessage(raw []byte) {
 	case "unsubscribe":
 		if msg.ChannelID != "" {
 			c.hub.Unsubscribe(c, msg.ChannelID)
-		}
-	case "subscribe.server":
-		if msg.ServerID != "" {
-			c.hub.SubscribeServer(c, msg.ServerID)
-		}
-	case "unsubscribe.server":
-		if msg.ServerID != "" {
-			c.hub.UnsubscribeServer(c, msg.ServerID)
 		}
 	case "message.send", "message.history", "typing.start", "typing.stop":
 		if c.handler != nil {
