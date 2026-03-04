@@ -70,11 +70,13 @@ type Store interface {
 	InsertBan(ctx context.Context, serverID, userID, actorID, reason string, expiresAt *time.Time) (*models.Ban, error)
 	GetActiveBan(ctx context.Context, serverID, userID string) (*models.Ban, error)
 	LiftBan(ctx context.Context, banID, liftedByID string) error
+	ListActiveBans(ctx context.Context, serverID string) ([]models.Ban, error)
 
 	// Moderation — mutes
 	InsertMute(ctx context.Context, serverID, userID, actorID, reason string, expiresAt *time.Time) (*models.Mute, error)
 	GetActiveMute(ctx context.Context, serverID, userID string) (*models.Mute, error)
 	LiftMute(ctx context.Context, muteID, liftedByID string) error
+	ListActiveMutes(ctx context.Context, serverID string) ([]models.Mute, error)
 
 	// Moderation — audit log
 	InsertAuditLog(ctx context.Context, serverID, actorID string, targetID *string, action, reason string, metadata map[string]interface{}) error

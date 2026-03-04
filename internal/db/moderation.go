@@ -42,6 +42,34 @@ func (p *Pool) GetActiveBan(ctx context.Context, serverID, userID string) (*mode
 	return ban, err
 }
 
+// ListActiveBans returns all active (non-lifted, non-expired) bans for the given guild,
+// ordered by created_at DESC.
+func (p *Pool) ListActiveBans(ctx context.Context, serverID string) ([]models.Ban, error) {
+	rows, err := p.Query(ctx, `
+		SELECT id, server_id, user_id, actor_id, reason, expires_at, created_at, lifted_at, lifted_by
+		FROM bans
+		WHERE server_id = $1
+		  AND lifted_at IS NULL
+		  AND (expires_at IS NULL OR expires_at > now())
+		ORDER BY created_at DESC`,
+		serverID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var bans []models.Ban
+	for rows.Next() {
+		var b models.Ban
+		if err := rows.Scan(&b.ID, &b.ServerID, &b.UserID, &b.ActorID, &b.Reason, &b.ExpiresAt, &b.CreatedAt, &b.LiftedAt, &b.LiftedBy); err != nil {
+			return nil, err
+		}
+		bans = append(bans, b)
+	}
+	return bans, rows.Err()
+}
+
 // LiftBan sets lifted_at = now() and lifted_by on the given ban record.
 // Returns an error if the ban does not exist or is already lifted.
 func (p *Pool) LiftBan(ctx context.Context, banID, liftedByID string) error {
@@ -84,6 +112,34 @@ func (p *Pool) GetActiveMute(ctx context.Context, serverID, userID string) (*mod
 		return nil, nil
 	}
 	return mute, err
+}
+
+// ListActiveMutes returns all active (non-lifted, non-expired) mutes for the given guild,
+// ordered by created_at DESC.
+func (p *Pool) ListActiveMutes(ctx context.Context, serverID string) ([]models.Mute, error) {
+	rows, err := p.Query(ctx, `
+		SELECT id, server_id, user_id, actor_id, reason, expires_at, created_at, lifted_at, lifted_by
+		FROM mutes
+		WHERE server_id = $1
+		  AND lifted_at IS NULL
+		  AND (expires_at IS NULL OR expires_at > now())
+		ORDER BY created_at DESC`,
+		serverID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var mutes []models.Mute
+	for rows.Next() {
+		var m models.Mute
+		if err := rows.Scan(&m.ID, &m.ServerID, &m.UserID, &m.ActorID, &m.Reason, &m.ExpiresAt, &m.CreatedAt, &m.LiftedAt, &m.LiftedBy); err != nil {
+			return nil, err
+		}
+		mutes = append(mutes, m)
+	}
+	return mutes, rows.Err()
 }
 
 // LiftMute sets lifted_at = now() and lifted_by on the given mute record.

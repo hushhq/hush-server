@@ -32,6 +32,8 @@ func ModerationRoutes(store db.Store, hub GlobalBroadcaster) chi.Router {
 	r.Post("/unmute", h.unmuteMember)
 	r.Delete("/messages/{messageId}", h.deleteMessage)
 	r.Get("/audit-log", h.getAuditLog)
+	r.Get("/bans", h.listBans)
+	r.Get("/mutes", h.listMutes)
 	return r
 }
 
@@ -397,6 +399,48 @@ func (h *moderationHandler) deleteMessage(w http.ResponseWriter, r *http.Request
 		h.hub.BroadcastToServer(serverID, out)
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// listBans handles GET /api/servers/{serverId}/moderation/bans.
+// Required guild role: admin+. Returns active (non-lifted, non-expired) bans for the guild.
+func (h *moderationHandler) listBans(w http.ResponseWriter, r *http.Request) {
+	serverID := chi.URLParam(r, "serverId")
+	actorRole := guildRoleFromContext(r.Context())
+	if !roleAtLeast(actorRole, "admin") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role or higher required"})
+		return
+	}
+	bans, err := h.store.ListActiveBans(r.Context(), serverID)
+	if err != nil {
+		slog.Error("list bans", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list bans"})
+		return
+	}
+	if bans == nil {
+		bans = []models.Ban{}
+	}
+	writeJSON(w, http.StatusOK, bans)
+}
+
+// listMutes handles GET /api/servers/{serverId}/moderation/mutes.
+// Required guild role: admin+. Returns active (non-lifted, non-expired) mutes for the guild.
+func (h *moderationHandler) listMutes(w http.ResponseWriter, r *http.Request) {
+	serverID := chi.URLParam(r, "serverId")
+	actorRole := guildRoleFromContext(r.Context())
+	if !roleAtLeast(actorRole, "admin") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role or higher required"})
+		return
+	}
+	mutes, err := h.store.ListActiveMutes(r.Context(), serverID)
+	if err != nil {
+		slog.Error("list mutes", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list mutes"})
+		return
+	}
+	if mutes == nil {
+		mutes = []models.Mute{}
+	}
+	writeJSON(w, http.StatusOK, mutes)
 }
 
 // getAuditLog handles GET /api/servers/{serverId}/moderation/audit-log.

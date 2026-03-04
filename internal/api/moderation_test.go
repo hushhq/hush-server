@@ -355,6 +355,112 @@ func TestUnmuteMember_Success(t *testing.T) {
 	require.True(t, muteLifted, "mute must be lifted on successful unmute")
 }
 
+// ---------- List Bans ----------
+
+func TestListBans_ReturnsOnlyActive(t *testing.T) {
+	actorID := uuid.New().String()
+	ban1ID := uuid.New().String()
+	ban2ID := uuid.New().String()
+
+	store := &mockStore{
+		listActiveBansFn: func(_ context.Context, _ string) ([]models.Ban, error) {
+			return []models.Ban{
+				{ID: ban1ID, UserID: uuid.New().String(), ActorID: actorID, Reason: "harassment"},
+				{ID: ban2ID, UserID: uuid.New().String(), ActorID: actorID, Reason: "spamming"},
+			}, nil
+		},
+	}
+	router := buildModerationRouter(store, actorID, "admin")
+
+	rr := getModerationPath(router, "/bans", "")
+	require.Equal(t, http.StatusOK, rr.Code)
+	var bans []models.Ban
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&bans))
+	require.Len(t, bans, 2)
+}
+
+func TestListBans_NonAdminDenied(t *testing.T) {
+	actorID := uuid.New().String()
+
+	store := &mockStore{}
+	router := buildModerationRouter(store, actorID, "member")
+
+	rr := getModerationPath(router, "/bans", "")
+	require.Equal(t, http.StatusForbidden, rr.Code)
+	errBody := decodeError(t, rr)
+	assert.Contains(t, errBody["error"], "admin")
+}
+
+func TestListBans_EmptyWhenNoBans(t *testing.T) {
+	actorID := uuid.New().String()
+
+	store := &mockStore{
+		listActiveBansFn: func(_ context.Context, _ string) ([]models.Ban, error) {
+			return nil, nil
+		},
+	}
+	router := buildModerationRouter(store, actorID, "admin")
+
+	rr := getModerationPath(router, "/bans", "")
+	require.Equal(t, http.StatusOK, rr.Code)
+	var bans []models.Ban
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&bans))
+	assert.Len(t, bans, 0, "empty array must be returned when no active bans exist")
+}
+
+// ---------- List Mutes ----------
+
+func TestListMutes_ReturnsOnlyActive(t *testing.T) {
+	actorID := uuid.New().String()
+	mute1ID := uuid.New().String()
+	mute2ID := uuid.New().String()
+
+	store := &mockStore{
+		listActiveMutesFn: func(_ context.Context, _ string) ([]models.Mute, error) {
+			return []models.Mute{
+				{ID: mute1ID, UserID: uuid.New().String(), ActorID: actorID, Reason: "excessive noise"},
+				{ID: mute2ID, UserID: uuid.New().String(), ActorID: actorID, Reason: "spam"},
+			}, nil
+		},
+	}
+	router := buildModerationRouter(store, actorID, "admin")
+
+	rr := getModerationPath(router, "/mutes", "")
+	require.Equal(t, http.StatusOK, rr.Code)
+	var mutes []models.Mute
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&mutes))
+	require.Len(t, mutes, 2)
+}
+
+func TestListMutes_NonAdminDenied(t *testing.T) {
+	actorID := uuid.New().String()
+
+	store := &mockStore{}
+	router := buildModerationRouter(store, actorID, "member")
+
+	rr := getModerationPath(router, "/mutes", "")
+	require.Equal(t, http.StatusForbidden, rr.Code)
+	errBody := decodeError(t, rr)
+	assert.Contains(t, errBody["error"], "admin")
+}
+
+func TestListMutes_EmptyWhenNoMutes(t *testing.T) {
+	actorID := uuid.New().String()
+
+	store := &mockStore{
+		listActiveMutesFn: func(_ context.Context, _ string) ([]models.Mute, error) {
+			return nil, nil
+		},
+	}
+	router := buildModerationRouter(store, actorID, "admin")
+
+	rr := getModerationPath(router, "/mutes", "")
+	require.Equal(t, http.StatusOK, rr.Code)
+	var mutes []models.Mute
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&mutes))
+	assert.Len(t, mutes, 0, "empty array must be returned when no active mutes exist")
+}
+
 // ---------- Delete Message ----------
 
 func TestDeleteMessage_OwnMessage(t *testing.T) {

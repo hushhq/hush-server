@@ -152,6 +152,9 @@ func (m *messageStoreMock) GetActiveBan(context.Context, string, string) (*model
 	return nil, nil
 }
 func (m *messageStoreMock) LiftBan(context.Context, string, string) error { return nil }
+func (m *messageStoreMock) ListActiveBans(context.Context, string) ([]models.Ban, error) {
+	return nil, nil
+}
 func (m *messageStoreMock) InsertMute(context.Context, string, string, string, string, *time.Time) (*models.Mute, error) {
 	return nil, nil
 }
@@ -159,6 +162,9 @@ func (m *messageStoreMock) GetActiveMute(context.Context, string, string) (*mode
 	return nil, nil
 }
 func (m *messageStoreMock) LiftMute(context.Context, string, string) error { return nil }
+func (m *messageStoreMock) ListActiveMutes(context.Context, string) ([]models.Mute, error) {
+	return nil, nil
+}
 func (m *messageStoreMock) InsertAuditLog(context.Context, string, string, *string, string, string, map[string]interface{}) error {
 	return nil
 }

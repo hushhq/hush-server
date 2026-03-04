@@ -80,14 +80,16 @@ type mockStore struct {
 	listServerMembersFn      func(ctx context.Context, serverID string) ([]models.ServerMemberWithUser, error)
 
 	// Moderation — bans (guild-scoped — serverID param)
-	insertBanFn    func(ctx context.Context, serverID, userID, actorID, reason string, expiresAt *time.Time) (*models.Ban, error)
-	getActiveBanFn func(ctx context.Context, serverID, userID string) (*models.Ban, error)
-	liftBanFn      func(ctx context.Context, banID, liftedByID string) error
+	insertBanFn      func(ctx context.Context, serverID, userID, actorID, reason string, expiresAt *time.Time) (*models.Ban, error)
+	getActiveBanFn   func(ctx context.Context, serverID, userID string) (*models.Ban, error)
+	liftBanFn        func(ctx context.Context, banID, liftedByID string) error
+	listActiveBansFn func(ctx context.Context, serverID string) ([]models.Ban, error)
 
 	// Moderation — mutes (guild-scoped — serverID param)
-	insertMuteFn    func(ctx context.Context, serverID, userID, actorID, reason string, expiresAt *time.Time) (*models.Mute, error)
-	getActiveMuteFn func(ctx context.Context, serverID, userID string) (*models.Mute, error)
-	liftMuteFn      func(ctx context.Context, muteID, liftedByID string) error
+	insertMuteFn      func(ctx context.Context, serverID, userID, actorID, reason string, expiresAt *time.Time) (*models.Mute, error)
+	getActiveMuteFn   func(ctx context.Context, serverID, userID string) (*models.Mute, error)
+	liftMuteFn        func(ctx context.Context, muteID, liftedByID string) error
+	listActiveMutesFn func(ctx context.Context, serverID string) ([]models.Mute, error)
 
 	// Moderation — audit log (guild-scoped — serverID param)
 	insertAuditLogFn func(ctx context.Context, serverID, actorID string, targetID *string, action, reason string, metadata map[string]interface{}) error
@@ -430,6 +432,13 @@ func (m *mockStore) LiftBan(ctx context.Context, banID, liftedByID string) error
 	return nil
 }
 
+func (m *mockStore) ListActiveBans(ctx context.Context, serverID string) ([]models.Ban, error) {
+	if m.listActiveBansFn != nil {
+		return m.listActiveBansFn(ctx, serverID)
+	}
+	return nil, nil
+}
+
 func (m *mockStore) InsertMute(ctx context.Context, serverID, userID, actorID, reason string, expiresAt *time.Time) (*models.Mute, error) {
 	if m.insertMuteFn != nil {
 		return m.insertMuteFn(ctx, serverID, userID, actorID, reason, expiresAt)
@@ -449,6 +458,13 @@ func (m *mockStore) LiftMute(ctx context.Context, muteID, liftedByID string) err
 		return m.liftMuteFn(ctx, muteID, liftedByID)
 	}
 	return nil
+}
+
+func (m *mockStore) ListActiveMutes(ctx context.Context, serverID string) ([]models.Mute, error) {
+	if m.listActiveMutesFn != nil {
+		return m.listActiveMutesFn(ctx, serverID)
+	}
+	return nil, nil
 }
 
 func (m *mockStore) InsertAuditLog(ctx context.Context, serverID, actorID string, targetID *string, action, reason string, metadata map[string]interface{}) error {
