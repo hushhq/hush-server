@@ -76,14 +76,57 @@ type Message struct {
 	Timestamp   time.Time `json:"timestamp"`
 }
 
+// Server is a guild within this Hush instance.
+type Server struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	IconURL   *string   `json:"iconUrl,omitempty"`
+	OwnerID   string    `json:"ownerId"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+// ServerMember records a user's membership and role within a guild.
+type ServerMember struct {
+	ServerID string    `json:"serverId"`
+	UserID   string    `json:"userId"`
+	Role     string    `json:"role"`
+	JoinedAt time.Time `json:"joinedAt"`
+}
+
+// ServerMemberWithUser combines user fields with guild membership info for member-list responses.
+type ServerMemberWithUser struct {
+	ID          string    `json:"id"`
+	Username    string    `json:"username"`
+	DisplayName string    `json:"displayName"`
+	CreatedAt   time.Time `json:"createdAt"`
+	Role        string    `json:"role"`
+	JoinedAt    time.Time `json:"joinedAt"`
+}
+
+// GuildBillingStats is the minimal metadata exposed to the instance operator for billing.
+// Exactly 5 fields — no guild name, no channel list, no member details.
+type GuildBillingStats struct {
+	ID           string    `json:"id"`
+	MemberCount  int       `json:"memberCount"`
+	StorageBytes int64     `json:"storageBytes"`
+	OwnerID      string    `json:"ownerId"`
+	CreatedAt    time.Time `json:"createdAt"`
+}
+
+// CreateServerRequest is the body for POST /api/servers.
+type CreateServerRequest struct {
+	Name string `json:"name"`
+}
+
 // InstanceConfig is the single-row table that describes this Hush instance.
 type InstanceConfig struct {
-	ID               string    `json:"id"`
-	Name             string    `json:"name"`
-	IconURL          *string   `json:"iconUrl"`
-	OwnerID          *string   `json:"ownerId"`
-	RegistrationMode string    `json:"registrationMode"`
-	CreatedAt        time.Time `json:"createdAt"`
+	ID                   string    `json:"id"`
+	Name                 string    `json:"name"`
+	IconURL              *string   `json:"iconUrl"`
+	OwnerID              *string   `json:"ownerId"`
+	RegistrationMode     string    `json:"registrationMode"`
+	ServerCreationPolicy string    `json:"serverCreationPolicy"`
+	CreatedAt            time.Time `json:"createdAt"`
 }
 
 // Member is a user with their instance role, used for member list responses.
@@ -95,9 +138,10 @@ type Member struct {
 	CreatedAt   time.Time `json:"createdAt"`
 }
 
-// Channel is a text or voice channel within the instance.
+// Channel is a text or voice channel within a guild.
 type Channel struct {
 	ID        string  `json:"id"`
+	ServerID  *string `json:"serverId,omitempty"`
 	Name      string  `json:"name"`
 	Type      string  `json:"type"`
 	VoiceMode *string `json:"voiceMode,omitempty"`
@@ -105,9 +149,10 @@ type Channel struct {
 	Position  int     `json:"position"`
 }
 
-// InviteCode is an invite link token for the instance.
+// InviteCode is an invite link token for the instance or a specific guild.
 type InviteCode struct {
 	Code      string    `json:"code"`
+	ServerID  *string   `json:"serverId,omitempty"`
 	CreatedBy string    `json:"createdBy"`
 	ExpiresAt time.Time `json:"expiresAt"`
 	MaxUses   int       `json:"maxUses"`
@@ -117,6 +162,7 @@ type InviteCode struct {
 // Ban represents an active or historical ban record.
 type Ban struct {
 	ID        string     `json:"id"`
+	ServerID  *string    `json:"serverId,omitempty"`
 	UserID    string     `json:"userId"`
 	ActorID   string     `json:"actorId"`
 	Reason    string     `json:"reason"`
@@ -129,6 +175,7 @@ type Ban struct {
 // Mute represents an active or historical mute record (text AND voice).
 type Mute struct {
 	ID        string     `json:"id"`
+	ServerID  *string    `json:"serverId,omitempty"`
 	UserID    string     `json:"userId"`
 	ActorID   string     `json:"actorId"`
 	Reason    string     `json:"reason"`
@@ -141,6 +188,7 @@ type Mute struct {
 // AuditLogEntry records a single moderation action.
 type AuditLogEntry struct {
 	ID        string                 `json:"id"`
+	ServerID  *string                `json:"serverId,omitempty"`
 	ActorID   string                 `json:"actorId"`
 	TargetID  *string                `json:"targetId,omitempty"`
 	Action    string                 `json:"action"`
@@ -211,7 +259,8 @@ type CreateInviteRequest struct {
 
 // UpdateInstanceRequest is the body for PATCH /api/instance.
 type UpdateInstanceRequest struct {
-	Name             *string `json:"name,omitempty"`
-	IconURL          *string `json:"iconUrl,omitempty"`
-	RegistrationMode *string `json:"registrationMode,omitempty"`
+	Name                 *string `json:"name,omitempty"`
+	IconURL              *string `json:"iconUrl,omitempty"`
+	RegistrationMode     *string `json:"registrationMode,omitempty"`
+	ServerCreationPolicy *string `json:"serverCreationPolicy,omitempty"`
 }
