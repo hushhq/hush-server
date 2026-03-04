@@ -108,12 +108,20 @@ func main() {
 			sub.Mount("/", api.KeysRoutes(pool, wsHub, cfg.JWTSecret))
 		})
 		r.Mount("/api/instance", api.InstanceRoutes(pool, wsHub, cfg.JWTSecret))
-		r.Mount("/api/channels", api.ChannelRoutes(pool, wsHub, cfg.JWTSecret))
-		r.Mount("/api/invites", api.InviteRoutes(pool, cfg.JWTSecret))
-		r.Mount("/api/moderation", api.ModerationRoutes(pool, wsHub, cfg.JWTSecret))
+
+		// Guild-scoped API: auth and RequireGuildMember applied inside ServerRoutes.
+		// Channels, guild invites, and moderation are all mounted under /{serverId}.
+		r.Mount("/api/servers", api.ServerRoutes(pool, wsHub, cfg.JWTSecret))
+
+		// Public invite info (unauthenticated) + claim (authenticated, not guild-scoped).
+		r.Mount("/api/invites", api.PublicInviteRoutes(pool, cfg.JWTSecret))
+
+		// Instance-operator admin endpoints.
+		r.Mount("/api/admin", api.AdminRoutes(pool, cfg.JWTSecret))
+
 		r.Get("/ws", ws.Handler(wsHub, cfg.JWTSecret, pool, cfg.CORSOrigin))
 		r.Mount("/api/livekit", api.LiveKitRoutes(pool, cfg.JWTSecret, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret))
-		r.Post("/api/livekit/webhook", api.LiveKitWebhookHandler(wsHub, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret))
+		r.Post("/api/livekit/webhook", api.LiveKitWebhookHandler(wsHub, pool, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret))
 	}
 
 	srv := &http.Server{

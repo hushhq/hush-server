@@ -20,16 +20,26 @@ const (
 	inviteCodeAlphabet     = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789"
 )
 
-// InviteRoutes returns the router for /api/invites (instance-global).
-func InviteRoutes(store db.Store, jwtSecret string) chi.Router {
+// GuildInviteRoutes returns the router for guild-scoped invite creation.
+// Mounted under /api/servers/{serverId}/invites.
+// Auth and RequireGuildMember are applied by the parent router.
+func GuildInviteRoutes(store db.Store) chi.Router {
 	h := &inviteHandler{store: store}
 	r := chi.NewRouter()
-	// Public: resolve invite info before login
+	r.Post("/", h.createInvite)
+	return r
+}
+
+// PublicInviteRoutes returns the router for invite resolution and claiming.
+// Mounted at /api/invites. Auth is applied inside for the claim route.
+func PublicInviteRoutes(store db.Store, jwtSecret string) chi.Router {
+	h := &inviteHandler{store: store}
+	r := chi.NewRouter()
+	// Public: resolve invite info before login (unauthenticated).
 	r.Get("/{code}", h.getInviteInfo)
-	// Authenticated routes
+	// Authenticated: claim an invite. User is NOT a guild member yet — no RequireGuildMember.
 	r.Group(func(r chi.Router) {
 		r.Use(RequireAuth(jwtSecret, store))
-		r.Post("/", h.createInvite)
 		r.Post("/claim", h.claimInvite)
 	})
 	return r
@@ -40,10 +50,12 @@ type inviteHandler struct {
 }
 
 // inviteInfoResponse is returned for public GET /api/invites/:code.
+// Includes serverId so the frontend can navigate to the guild after claim.
 type inviteInfoResponse struct {
-	Code         string `json:"code"`
-	InstanceName string `json:"instanceName"`
-	ExpiresAt    string `json:"expiresAt"`
+	Code      string `json:"code"`
+	GuildName string `json:"guildName"`
+	ExpiresAt string `json:"expiresAt"`
+	ServerID  string `json:"serverId"`
 }
 
 func (h *inviteHandler) getInviteInfo(w http.ResponseWriter, r *http.Request) {
@@ -65,36 +77,37 @@ func (h *inviteHandler) getInviteInfo(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "invite expired or no longer valid"})
 		return
 	}
-	cfg, err := h.store.GetInstanceConfig(r.Context())
-	if err != nil || cfg == nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load instance config"})
+	if inv.ServerID == nil || *inv.ServerID == "" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "invite not associated with a guild"})
+		return
+	}
+	guild, err := h.store.GetServerByID(r.Context(), *inv.ServerID)
+	if err != nil || guild == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load guild info"})
 		return
 	}
 	writeJSON(w, http.StatusOK, inviteInfoResponse{
-		Code:         inv.Code,
-		InstanceName: cfg.Name,
-		ExpiresAt:    inv.ExpiresAt.Format(time.RFC3339),
+		Code:      inv.Code,
+		GuildName: guild.Name,
+		ExpiresAt: inv.ExpiresAt.Format(time.RFC3339),
+		ServerID:  guild.ID,
 	})
 }
 
-// createInviteRequest is the JSON body for POST /api/invites.
+// createInviteRequest is the JSON body for POST /api/servers/{serverId}/invites.
 type createInviteRequest struct {
 	MaxUses   *int `json:"maxUses"`
 	ExpiresIn *int `json:"expiresIn"` // seconds
 }
 
 func (h *inviteHandler) createInvite(w http.ResponseWriter, r *http.Request) {
+	serverID := chi.URLParam(r, "serverId")
 	userID := userIDFromContext(r.Context())
 	if userID == "" {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
 		return
 	}
-	role, err := h.store.GetUserRole(r.Context(), userID)
-	if err != nil {
-		slog.Error("get user role", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify role"})
-		return
-	}
+	role := guildRoleFromContext(r.Context())
 	if !roleAtLeast(role, "mod") {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "mod role or higher required to create invites"})
 		return
@@ -126,7 +139,7 @@ func (h *inviteHandler) createInvite(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to generate invite"})
 		return
 	}
-	inv, err := h.store.CreateInvite(r.Context(), code, userID, maxUses, expiresAt)
+	inv, err := h.store.CreateInvite(r.Context(), serverID, code, userID, maxUses, expiresAt)
 	if err != nil {
 		slog.Error("create invite", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create invite"})
@@ -140,28 +153,16 @@ type claimInviteRequest struct {
 	Code string `json:"code"`
 }
 
+// claimInviteResponse is returned after a successful invite claim.
+type claimInviteResponse struct {
+	ServerID  string `json:"serverId"`
+	GuildName string `json:"guildName"`
+}
+
 func (h *inviteHandler) claimInvite(w http.ResponseWriter, r *http.Request) {
 	userID := userIDFromContext(r.Context())
 	if userID == "" {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
-		return
-	}
-	// Banned users cannot rejoin via invite. Check before processing the code
-	// so no instance data is leaked in the error response.
-	ban, err := h.store.GetActiveBan(r.Context(), userID)
-	if err != nil {
-		slog.Error("claimInvite: check ban", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to check ban status"})
-		return
-	}
-	if ban != nil {
-		resp := map[string]interface{}{
-			"error": "You are banned from this instance.",
-		}
-		if ban.ExpiresAt != nil {
-			resp["ban_expires_at"] = ban.ExpiresAt.Format(time.RFC3339)
-		}
-		writeJSON(w, http.StatusForbidden, resp)
 		return
 	}
 	var req claimInviteRequest
@@ -171,7 +172,7 @@ func (h *inviteHandler) claimInvite(w http.ResponseWriter, r *http.Request) {
 	}
 	inv, err := h.store.GetInviteByCode(r.Context(), req.Code)
 	if err != nil {
-		slog.Error("get invite by code", "err", err)
+		slog.Error("claimInvite: get invite by code", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to validate invite"})
 		return
 	}
@@ -179,9 +180,38 @@ func (h *inviteHandler) claimInvite(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid or expired invite code"})
 		return
 	}
+	if inv.ServerID == nil || *inv.ServerID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invite not associated with a guild"})
+		return
+	}
+	serverID := *inv.ServerID
+
+	// Guild-scoped ban check — does not prevent the user from using other guilds (IROLE-04).
+	ban, err := h.store.GetActiveBan(r.Context(), serverID, userID)
+	if err != nil {
+		slog.Error("claimInvite: check ban", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to check ban status"})
+		return
+	}
+	if ban != nil {
+		guild, err := h.store.GetServerByID(r.Context(), serverID)
+		guildName := serverID
+		if err == nil && guild != nil {
+			guildName = guild.Name
+		}
+		resp := map[string]interface{}{
+			"error": "You are banned from " + guildName + ".",
+		}
+		if ban.ExpiresAt != nil {
+			resp["ban_expires_at"] = ban.ExpiresAt.Format(time.RFC3339)
+		}
+		writeJSON(w, http.StatusForbidden, resp)
+		return
+	}
+
 	claimed, err := h.store.ClaimInviteUse(r.Context(), req.Code)
 	if err != nil {
-		slog.Error("claim invite use", "err", err)
+		slog.Error("claimInvite: claim invite use", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to claim invite"})
 		return
 	}
@@ -189,7 +219,24 @@ func (h *inviteHandler) claimInvite(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invite code has reached maximum uses"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+
+	// Add the user to the guild as a member.
+	if err := h.store.AddServerMember(r.Context(), serverID, userID, "member"); err != nil {
+		slog.Error("claimInvite: add server member", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to join guild"})
+		return
+	}
+
+	guild, err := h.store.GetServerByID(r.Context(), serverID)
+	guildName := serverID
+	if err == nil && guild != nil {
+		guildName = guild.Name
+	}
+
+	writeJSON(w, http.StatusOK, claimInviteResponse{
+		ServerID:  serverID,
+		GuildName: guildName,
+	})
 }
 
 func generateInviteCode() (string, error) {

@@ -1,16 +1,19 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/livekit/protocol/auth"
 	"github.com/livekit/protocol/livekit"
 	"github.com/livekit/protocol/webhook"
 
+	"hush.app/server/internal/db"
 	"hush.app/server/internal/ws"
 )
 
@@ -78,10 +81,13 @@ func parseRoomName(roomName string) (channelID string, ok bool) {
 	return channelID, channelID != ""
 }
 
+const webhookChannelLookupTimeout = 5 * time.Second
+
 // LiveKitWebhookHandler returns an HTTP handler for LiveKit webhook events.
 // It tracks voice participants in-memory and broadcasts voice_state_update
-// to all WS clients subscribed to the affected server.
-func LiveKitWebhookHandler(hub *ws.Hub, apiKey, apiSecret string) http.HandlerFunc {
+// to the guild's WS subscribers via BroadcastToServer.
+// Falls back to BroadcastToAll if the channel's server ID cannot be resolved.
+func LiveKitWebhookHandler(hub *ws.Hub, store db.Store, apiKey, apiSecret string) http.HandlerFunc {
 	provider := auth.NewSimpleKeyProvider(apiKey, apiSecret)
 	state := newVoiceState()
 
@@ -125,10 +131,33 @@ func LiveKitWebhookHandler(hub *ws.Hub, apiKey, apiSecret string) http.HandlerFu
 			"channel_id":   channelID,
 			"participants": participants,
 		})
-		hub.BroadcastToAll(msg)
+
+		// Resolve the channel's server_id to broadcast to the correct guild only.
+		serverID := resolveChannelServerID(store, channelID)
+		if serverID != "" {
+			hub.BroadcastToServer(serverID, msg)
+		} else {
+			hub.BroadcastToAll(msg)
+		}
 
 		w.WriteHeader(http.StatusOK)
 	}
+}
+
+// resolveChannelServerID looks up the server_id for a channel.
+// Returns empty string if the store is nil, the channel is not found, or the
+// channel has no server association (fail-open: caller falls back to BroadcastToAll).
+func resolveChannelServerID(store db.Store, channelID string) string {
+	if store == nil || channelID == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), webhookChannelLookupTimeout)
+	defer cancel()
+	ch, err := store.GetChannelByID(ctx, channelID)
+	if err != nil || ch == nil || ch.ServerID == nil {
+		return ""
+	}
+	return *ch.ServerID
 }
 
 func participantDisplayName(p *livekit.ParticipantInfo) string {

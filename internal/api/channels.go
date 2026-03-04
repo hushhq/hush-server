@@ -21,11 +21,12 @@ const (
 	maxNameLength               = 100
 )
 
-// ChannelRoutes returns the router for /api/channels (flat, single-tenant).
-func ChannelRoutes(store db.Store, hub GlobalBroadcaster, jwtSecret string) chi.Router {
+// ChannelRoutes returns the router for channels nested under /api/servers/{serverId}.
+// Auth and RequireGuildMember are applied by the parent router; this router
+// only adds channel-specific routes.
+func ChannelRoutes(store db.Store, hub GlobalBroadcaster) chi.Router {
 	r := chi.NewRouter()
 	h := &channelsHandler{store: store, hub: hub}
-	r.Use(RequireAuth(jwtSecret, store))
 	r.Post("/", h.createChannel)
 	r.Get("/", h.listChannels)
 	r.Get("/{id}/messages", h.getMessages)
@@ -49,17 +50,13 @@ type messageResponse struct {
 }
 
 func (h *channelsHandler) createChannel(w http.ResponseWriter, r *http.Request) {
+	serverID := chi.URLParam(r, "serverId")
 	userID := userIDFromContext(r.Context())
 	if userID == "" {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
 		return
 	}
-	role, err := h.store.GetUserRole(r.Context(), userID)
-	if err != nil {
-		slog.Error("get user role", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify role"})
-		return
-	}
+	role := guildRoleFromContext(r.Context())
 	if !roleAtLeast(role, "admin") {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required to create channels"})
 		return
@@ -108,7 +105,7 @@ func (h *channelsHandler) createChannel(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
-	ch, err := h.store.CreateChannel(r.Context(), req.Name, req.Type, voiceMode, req.ParentID, position)
+	ch, err := h.store.CreateChannel(r.Context(), serverID, req.Name, req.Type, voiceMode, req.ParentID, position)
 	if err != nil {
 		slog.Error("create channel", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create channel"})
@@ -120,12 +117,13 @@ func (h *channelsHandler) createChannel(w http.ResponseWriter, r *http.Request) 
 			"type":    "channel_created",
 			"channel": ch,
 		})
-		h.hub.BroadcastToAll(msg)
+		h.hub.BroadcastToServer(serverID, msg)
 	}
 }
 
 func (h *channelsHandler) listChannels(w http.ResponseWriter, r *http.Request) {
-	channels, err := h.store.ListChannels(r.Context())
+	serverID := chi.URLParam(r, "serverId")
+	channels, err := h.store.ListChannels(r.Context(), serverID)
 	if err != nil {
 		slog.Error("list channels", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list channels"})
@@ -203,22 +201,13 @@ func (h *channelsHandler) getMessages(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *channelsHandler) deleteChannel(w http.ResponseWriter, r *http.Request) {
+	serverID := chi.URLParam(r, "serverId")
 	channelID := chi.URLParam(r, "id")
 	if channelID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "channel id required"})
 		return
 	}
-	userID := userIDFromContext(r.Context())
-	if userID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
-		return
-	}
-	role, err := h.store.GetUserRole(r.Context(), userID)
-	if err != nil {
-		slog.Error("get user role", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify role"})
-		return
-	}
+	role := guildRoleFromContext(r.Context())
 	if !roleAtLeast(role, "admin") {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required to delete channel"})
 		return
@@ -234,27 +223,18 @@ func (h *channelsHandler) deleteChannel(w http.ResponseWriter, r *http.Request) 
 			"type":       "channel_deleted",
 			"channel_id": channelID,
 		})
-		h.hub.BroadcastToAll(msg)
+		h.hub.BroadcastToServer(serverID, msg)
 	}
 }
 
 func (h *channelsHandler) moveChannel(w http.ResponseWriter, r *http.Request) {
+	serverID := chi.URLParam(r, "serverId")
 	channelID := chi.URLParam(r, "id")
 	if channelID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "channel id required"})
 		return
 	}
-	userID := userIDFromContext(r.Context())
-	if userID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
-		return
-	}
-	role, err := h.store.GetUserRole(r.Context(), userID)
-	if err != nil {
-		slog.Error("get user role", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify role"})
-		return
-	}
+	role := guildRoleFromContext(r.Context())
 	if !roleAtLeast(role, "admin") {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
 		return
@@ -292,6 +272,7 @@ func (h *channelsHandler) moveChannel(w http.ResponseWriter, r *http.Request) {
 			"parent_id":  req.ParentID,
 			"position":   req.Position,
 		})
-		h.hub.BroadcastToAll(msg)
+		h.hub.BroadcastToServer(serverID, msg)
 	}
 }
+
