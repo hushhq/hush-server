@@ -15,6 +15,7 @@ import (
 // GlobalBroadcaster is satisfied by *ws.Hub. Used for dependency injection in tests.
 type GlobalBroadcaster interface {
 	BroadcastToAll(message []byte)
+	BroadcastToServer(serverID string, message []byte)
 	BroadcastToUser(userID string, message []byte)
 	DisconnectUser(userID string)
 }
@@ -50,13 +51,14 @@ type instanceHandler struct {
 
 // instanceConfigResponse extends InstanceConfig with a bootstrapped flag and the caller's role.
 type instanceConfigResponse struct {
-	ID               string  `json:"id"`
-	Name             string  `json:"name"`
-	IconURL          *string `json:"iconUrl"`
-	OwnerID          *string `json:"ownerId"`
-	RegistrationMode string  `json:"registrationMode"`
-	Bootstrapped     bool    `json:"bootstrapped"`
-	MyRole           string  `json:"myRole"`
+	ID                   string  `json:"id"`
+	Name                 string  `json:"name"`
+	IconURL              *string `json:"iconUrl"`
+	OwnerID              *string `json:"ownerId"`
+	RegistrationMode     string  `json:"registrationMode"`
+	ServerCreationPolicy string  `json:"serverCreationPolicy"`
+	Bootstrapped         bool    `json:"bootstrapped"`
+	MyRole               string  `json:"myRole"`
 }
 
 func (h *instanceHandler) getConfig(w http.ResponseWriter, r *http.Request) {
@@ -73,21 +75,23 @@ func (h *instanceHandler) getConfig(w http.ResponseWriter, r *http.Request) {
 		role = "member"
 	}
 	writeJSON(w, http.StatusOK, instanceConfigResponse{
-		ID:               cfg.ID,
-		Name:             cfg.Name,
-		IconURL:          cfg.IconURL,
-		OwnerID:          cfg.OwnerID,
-		RegistrationMode: cfg.RegistrationMode,
-		Bootstrapped:     cfg.OwnerID != nil,
-		MyRole:           role,
+		ID:                   cfg.ID,
+		Name:                 cfg.Name,
+		IconURL:              cfg.IconURL,
+		OwnerID:              cfg.OwnerID,
+		RegistrationMode:     cfg.RegistrationMode,
+		ServerCreationPolicy: cfg.ServerCreationPolicy,
+		Bootstrapped:         cfg.OwnerID != nil,
+		MyRole:               role,
 	})
 }
 
 // updateConfigRequest is the JSON body for PUT /api/instance.
 type updateConfigRequest struct {
-	Name             *string `json:"name"`
-	IconURL          *string `json:"iconUrl"`
-	RegistrationMode *string `json:"registrationMode"`
+	Name                 *string `json:"name"`
+	IconURL              *string `json:"iconUrl"`
+	RegistrationMode     *string `json:"registrationMode"`
+	ServerCreationPolicy *string `json:"serverCreationPolicy"`
 }
 
 func (h *instanceHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
@@ -127,7 +131,15 @@ func (h *instanceHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := h.store.UpdateInstanceConfig(r.Context(), req.Name, req.IconURL, req.RegistrationMode); err != nil {
+	if req.ServerCreationPolicy != nil {
+		switch *req.ServerCreationPolicy {
+		case "any_member", "admin_only":
+		default:
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "serverCreationPolicy must be any_member or admin_only"})
+			return
+		}
+	}
+	if err := h.store.UpdateInstanceConfig(r.Context(), req.Name, req.IconURL, req.RegistrationMode, req.ServerCreationPolicy); err != nil {
 		slog.Error("update instance config", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update instance config"})
 		return

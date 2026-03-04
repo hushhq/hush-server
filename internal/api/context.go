@@ -7,6 +7,7 @@ type contextKey string
 const (
 	contextKeyUserID    contextKey = "userID"
 	contextKeySessionID contextKey = "sessionID"
+	contextKeyGuildRole contextKey = "guildRole"
 )
 
 func withUserID(ctx context.Context, userID string) context.Context {
@@ -24,5 +25,14 @@ func withSessionID(ctx context.Context, sessionID string) context.Context {
 
 func sessionIDFromContext(ctx context.Context) string {
 	v, _ := ctx.Value(contextKeySessionID).(string)
+	return v
+}
+
+func withGuildRole(ctx context.Context, role string) context.Context {
+	return context.WithValue(ctx, contextKeyGuildRole, role)
+}
+
+func guildRoleFromContext(ctx context.Context) string {
+	v, _ := ctx.Value(contextKeyGuildRole).(string)
 	return v
 }

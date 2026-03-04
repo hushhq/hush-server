@@ -8,11 +8,12 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// Hub holds all connected clients and channel subscriptions.
+// Hub holds all connected clients, channel subscriptions, and guild subscriptions.
 type Hub struct {
 	mu       sync.RWMutex
 	clients  map[string]*Client              // clientID -> client
 	channels map[string]map[string]*Client   // channelID -> clientID -> client
+	servers  map[string]map[string]*Client   // serverID -> clientID -> client
 	presence map[string]struct{}             // userID -> present
 }
 
@@ -21,6 +22,7 @@ func NewHub() *Hub {
 	return &Hub{
 		clients:  make(map[string]*Client),
 		channels: make(map[string]map[string]*Client),
+		servers:  make(map[string]map[string]*Client),
 		presence: make(map[string]struct{}),
 	}
 }
@@ -41,6 +43,9 @@ func (h *Hub) Unregister(c *Client) {
 	defer h.mu.Unlock()
 	delete(h.clients, c.id)
 	for _, m := range h.channels {
+		delete(m, c.id)
+	}
+	for _, m := range h.servers {
 		delete(m, c.id)
 	}
 	if !h.hasOtherClientForUser(c.userID) {
@@ -78,6 +83,50 @@ func (h *Hub) Unsubscribe(c *Client, channelID string) {
 		delete(m, c.id)
 		if len(m) == 0 {
 			delete(h.channels, channelID)
+		}
+	}
+}
+
+// SubscribeToServer adds the client to the server's subscriber set.
+func (h *Hub) SubscribeToServer(c *Client, serverID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.servers[serverID] == nil {
+		h.servers[serverID] = make(map[string]*Client)
+	}
+	h.servers[serverID][c.id] = c
+}
+
+// UnsubscribeFromServer removes the client from the server's subscriber set.
+func (h *Hub) UnsubscribeFromServer(c *Client, serverID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if m := h.servers[serverID]; m != nil {
+		delete(m, c.id)
+		if len(m) == 0 {
+			delete(h.servers, serverID)
+		}
+	}
+}
+
+// BroadcastToServer sends the message to all clients subscribed to the given server.
+func (h *Hub) BroadcastToServer(serverID string, message []byte) {
+	h.mu.RLock()
+	m := h.servers[serverID]
+	if m == nil {
+		h.mu.RUnlock()
+		return
+	}
+	clients := make([]*Client, 0, len(m))
+	for _, c := range m {
+		clients = append(clients, c)
+	}
+	h.mu.RUnlock()
+	for _, c := range clients {
+		select {
+		case c.send <- message:
+		default:
+			slog.Warn("ws client send buffer full", "clientID", c.id)
 		}
 	}
 }

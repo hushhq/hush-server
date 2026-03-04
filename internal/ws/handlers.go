@@ -35,7 +35,8 @@ func NewMessageHandler(store db.Store, hub *Hub) *MessageHandler {
 func (h *MessageHandler) Handle(c *Client, msgType string, raw []byte) {
 	switch msgType {
 	case "message.send", "typing.start", "typing.stop":
-		if h.isMuted(c) {
+		serverID := h.resolveServerIDFromPayload(raw)
+		if h.isMuted(c, serverID) {
 			sendError(c, "muted", "You are muted and cannot send messages.")
 			return
 		}
@@ -52,15 +53,36 @@ func (h *MessageHandler) Handle(c *Client, msgType string, raw []byte) {
 	}
 }
 
-// isMuted checks whether the client's user has an active mute record.
-// Returns false on DB error (fail-open for availability).
-func (h *MessageHandler) isMuted(c *Client) bool {
+// resolveServerIDFromPayload extracts channel_id from the payload and looks up
+// the channel's server_id. Returns empty string on any error (fail-open).
+func (h *MessageHandler) resolveServerIDFromPayload(raw []byte) string {
 	if h.store == nil {
+		return ""
+	}
+	var payload struct {
+		ChannelID string `json:"channel_id"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil || payload.ChannelID == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
+	defer cancel()
+	ch, err := h.store.GetChannelByID(ctx, payload.ChannelID)
+	if err != nil || ch == nil || ch.ServerID == nil {
+		return ""
+	}
+	return *ch.ServerID
+}
+
+// isMuted checks whether the client's user has an active mute record in the given guild.
+// Returns false on DB error (fail-open for availability).
+func (h *MessageHandler) isMuted(c *Client, serverID string) bool {
+	if h.store == nil || serverID == "" {
 		return false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
 	defer cancel()
-	mute, err := h.store.GetActiveMute(ctx, c.userID)
+	mute, err := h.store.GetActiveMute(ctx, serverID, c.userID)
 	if err != nil {
 		slog.Warn("ws mute check failed", "err", err, "userID", c.userID)
 		return false

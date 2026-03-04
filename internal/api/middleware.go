@@ -5,7 +5,32 @@ import (
 
 	"hush.app/server/internal/auth"
 	"hush.app/server/internal/db"
+
+	"github.com/go-chi/chi/v5"
 )
+
+// RequireGuildMember extracts {serverId} from the URL, verifies the requesting
+// user is a member of that guild, and injects the guild role into the request
+// context. Must be applied after RequireAuth so userID is available.
+func RequireGuildMember(store db.Store) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			serverID := chi.URLParam(r, "serverId")
+			if serverID == "" {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing server ID"})
+				return
+			}
+			userID := userIDFromContext(r.Context())
+			role, err := store.GetServerMemberRole(r.Context(), serverID, userID)
+			if err != nil || role == "" {
+				writeJSON(w, http.StatusForbidden, map[string]string{"error": "not a guild member"})
+				return
+			}
+			ctx := withGuildRole(r.Context(), role)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
 
 // RequireAuth returns middleware that validates the bearer JWT, verifies the
 // session against the database, and injects userID and sessionID into the
