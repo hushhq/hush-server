@@ -90,7 +90,7 @@ func TestUpdateInstanceConfig_OwnerCanUpdate_Returns204(t *testing.T) {
 		return "member", nil
 	}
 	var updatedName string
-	store.updateInstanceConfigFn = func(_ context.Context, name *string, _ *string, _ *string) error {
+	store.updateInstanceConfigFn = func(_ context.Context, name *string, _ *string, _ *string, _ *string) error {
 		if name != nil {
 			updatedName = *name
 		}

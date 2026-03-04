@@ -17,8 +17,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// channelsRouter wraps ChannelRoutes with RequireAuth for message history tests.
+// In production, auth is applied by the parent ServerRoutes router.
 func channelsRouter(store *mockStore) http.Handler {
-	return ChannelRoutes(store, nil, testJWTSecret)
+	inner := ChannelRoutes(store, nil)
+	return RequireAuth(testJWTSecret, store)(inner)
 }
 
 func getChannelMessages(handler http.Handler, channelID, token string, before string, limit string) *httptest.ResponseRecorder {
