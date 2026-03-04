@@ -10,20 +10,20 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// CreateInvite inserts a new invite code for the instance.
-func (p *Pool) CreateInvite(ctx context.Context, code, createdBy string, maxUses int, expiresAt time.Time) (*models.InviteCode, error) {
+// CreateInvite inserts a new invite code scoped to the given guild.
+func (p *Pool) CreateInvite(ctx context.Context, serverID, code, createdBy string, maxUses int, expiresAt time.Time) (*models.InviteCode, error) {
 	row := p.QueryRow(ctx, `
-		INSERT INTO invite_codes (code, created_by, max_uses, uses, expires_at)
-		VALUES ($1, $2, $3, 0, $4)
-		RETURNING code, created_by, expires_at, max_uses, uses`,
-		code, createdBy, maxUses, expiresAt)
+		INSERT INTO invite_codes (server_id, code, created_by, max_uses, uses, expires_at)
+		VALUES ($1, $2, $3, $4, 0, $5)
+		RETURNING code, server_id, created_by, expires_at, max_uses, uses`,
+		serverID, code, createdBy, maxUses, expiresAt)
 	return scanInviteCode(row)
 }
 
 // GetInviteByCode returns the invite by code, or nil if not found.
 func (p *Pool) GetInviteByCode(ctx context.Context, code string) (*models.InviteCode, error) {
 	row := p.QueryRow(ctx, `
-		SELECT code, created_by, expires_at, max_uses, uses
+		SELECT code, server_id, created_by, expires_at, max_uses, uses
 		FROM invite_codes WHERE code = $1`, code)
 	inv, err := scanInviteCode(row)
 	if err != nil {
@@ -49,7 +49,7 @@ func (p *Pool) ClaimInviteUse(ctx context.Context, code string) (bool, error) {
 
 func scanInviteCode(row pgx.Row) (*models.InviteCode, error) {
 	var inv models.InviteCode
-	err := row.Scan(&inv.Code, &inv.CreatedBy, &inv.ExpiresAt, &inv.MaxUses, &inv.Uses)
+	err := row.Scan(&inv.Code, &inv.ServerID, &inv.CreatedBy, &inv.ExpiresAt, &inv.MaxUses, &inv.Uses)
 	if err != nil {
 		return nil, err
 	}

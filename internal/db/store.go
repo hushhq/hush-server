@@ -34,37 +34,51 @@ type Store interface {
 
 	// Instance config methods
 	GetInstanceConfig(ctx context.Context) (*models.InstanceConfig, error)
-	UpdateInstanceConfig(ctx context.Context, name *string, iconURL *string, registrationMode *string) error
+	UpdateInstanceConfig(ctx context.Context, name *string, iconURL *string, registrationMode *string, serverCreationPolicy *string) error
 	SetInstanceOwner(ctx context.Context, userID string) (bool, error)
 	GetUserRole(ctx context.Context, userID string) (string, error)
 	UpdateUserRole(ctx context.Context, userID, role string) error
 	ListMembers(ctx context.Context) ([]models.Member, error)
 
 	// Channel operations
-	CreateChannel(ctx context.Context, name, channelType string, voiceMode *string, parentID *string, position int) (*models.Channel, error)
-	ListChannels(ctx context.Context) ([]models.Channel, error)
+	CreateChannel(ctx context.Context, serverID, name, channelType string, voiceMode *string, parentID *string, position int) (*models.Channel, error)
+	ListChannels(ctx context.Context, serverID string) ([]models.Channel, error)
 	GetChannelByID(ctx context.Context, channelID string) (*models.Channel, error)
 	DeleteChannel(ctx context.Context, channelID string) error
 	MoveChannel(ctx context.Context, channelID string, parentID *string, position int) error
 
 	// Invite operations
-	CreateInvite(ctx context.Context, code, createdBy string, maxUses int, expiresAt time.Time) (*models.InviteCode, error)
+	CreateInvite(ctx context.Context, serverID, code, createdBy string, maxUses int, expiresAt time.Time) (*models.InviteCode, error)
 	GetInviteByCode(ctx context.Context, code string) (*models.InviteCode, error)
 	ClaimInviteUse(ctx context.Context, code string) (bool, error)
 
+	// Server operations
+	CreateServer(ctx context.Context, name, ownerID string) (*models.Server, error)
+	GetServerByID(ctx context.Context, serverID string) (*models.Server, error)
+	ListServersForUser(ctx context.Context, userID string) ([]models.Server, error)
+	DeleteServer(ctx context.Context, serverID string) error
+	ListGuildBillingStats(ctx context.Context) ([]models.GuildBillingStats, error)
+
+	// Server member operations
+	AddServerMember(ctx context.Context, serverID, userID, role string) error
+	RemoveServerMember(ctx context.Context, serverID, userID string) error
+	GetServerMemberRole(ctx context.Context, serverID, userID string) (string, error)
+	UpdateServerMemberRole(ctx context.Context, serverID, userID, role string) error
+	ListServerMembers(ctx context.Context, serverID string) ([]models.ServerMemberWithUser, error)
+
 	// Moderation — bans
-	InsertBan(ctx context.Context, userID, actorID, reason string, expiresAt *time.Time) (*models.Ban, error)
-	GetActiveBan(ctx context.Context, userID string) (*models.Ban, error)
+	InsertBan(ctx context.Context, serverID, userID, actorID, reason string, expiresAt *time.Time) (*models.Ban, error)
+	GetActiveBan(ctx context.Context, serverID, userID string) (*models.Ban, error)
 	LiftBan(ctx context.Context, banID, liftedByID string) error
 
 	// Moderation — mutes
-	InsertMute(ctx context.Context, userID, actorID, reason string, expiresAt *time.Time) (*models.Mute, error)
-	GetActiveMute(ctx context.Context, userID string) (*models.Mute, error)
+	InsertMute(ctx context.Context, serverID, userID, actorID, reason string, expiresAt *time.Time) (*models.Mute, error)
+	GetActiveMute(ctx context.Context, serverID, userID string) (*models.Mute, error)
 	LiftMute(ctx context.Context, muteID, liftedByID string) error
 
 	// Moderation — audit log
-	InsertAuditLog(ctx context.Context, actorID string, targetID *string, action, reason string, metadata map[string]interface{}) error
-	ListAuditLog(ctx context.Context, limit, offset int) ([]models.AuditLogEntry, error)
+	InsertAuditLog(ctx context.Context, serverID, actorID string, targetID *string, action, reason string, metadata map[string]interface{}) error
+	ListAuditLog(ctx context.Context, serverID string, limit, offset int) ([]models.AuditLogEntry, error)
 
 	// Moderation — messages
 	GetMessageByID(ctx context.Context, messageID string) (*models.Message, error)

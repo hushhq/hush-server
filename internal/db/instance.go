@@ -11,22 +11,22 @@ import (
 // GetInstanceConfig returns the single instance configuration row.
 func (p *Pool) GetInstanceConfig(ctx context.Context) (*models.InstanceConfig, error) {
 	row := p.QueryRow(ctx, `
-		SELECT id, name, icon_url, owner_id, registration_mode, created_at
+		SELECT id, name, icon_url, owner_id, registration_mode, server_creation_policy, created_at
 		FROM instance_config LIMIT 1`)
 	var c models.InstanceConfig
-	if err := row.Scan(&c.ID, &c.Name, &c.IconURL, &c.OwnerID, &c.RegistrationMode, &c.CreatedAt); err != nil {
+	if err := row.Scan(&c.ID, &c.Name, &c.IconURL, &c.OwnerID, &c.RegistrationMode, &c.ServerCreationPolicy, &c.CreatedAt); err != nil {
 		return nil, err
 	}
 	return &c, nil
 }
 
 // UpdateInstanceConfig updates only the non-nil fields of instance_config.
-func (p *Pool) UpdateInstanceConfig(ctx context.Context, name *string, iconURL *string, registrationMode *string) error {
-	if name == nil && iconURL == nil && registrationMode == nil {
+func (p *Pool) UpdateInstanceConfig(ctx context.Context, name *string, iconURL *string, registrationMode *string, serverCreationPolicy *string) error {
+	if name == nil && iconURL == nil && registrationMode == nil && serverCreationPolicy == nil {
 		return nil
 	}
-	setClauses := make([]string, 0, 3)
-	args := make([]any, 0, 3)
+	setClauses := make([]string, 0, 4)
+	args := make([]any, 0, 4)
 	idx := 1
 	if name != nil {
 		setClauses = append(setClauses, fmt.Sprintf("name = $%d", idx))
@@ -41,6 +41,11 @@ func (p *Pool) UpdateInstanceConfig(ctx context.Context, name *string, iconURL *
 	if registrationMode != nil {
 		setClauses = append(setClauses, fmt.Sprintf("registration_mode = $%d", idx))
 		args = append(args, *registrationMode)
+		idx++
+	}
+	if serverCreationPolicy != nil {
+		setClauses = append(setClauses, fmt.Sprintf("server_creation_policy = $%d", idx))
+		args = append(args, *serverCreationPolicy)
 		idx++
 	}
 	query := "UPDATE instance_config SET " + strings.Join(setClauses, ", ")

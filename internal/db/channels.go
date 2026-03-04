@@ -10,23 +10,24 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// CreateChannel inserts a channel and returns the created row.
-func (p *Pool) CreateChannel(ctx context.Context, name, channelType string, voiceMode *string, parentID *string, position int) (*models.Channel, error) {
+// CreateChannel inserts a channel scoped to the given guild and returns the created row.
+func (p *Pool) CreateChannel(ctx context.Context, serverID, name, channelType string, voiceMode *string, parentID *string, position int) (*models.Channel, error) {
 	row := p.QueryRow(ctx, `
-		INSERT INTO channels (name, type, voice_mode, parent_id, position)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, name, type, voice_mode, parent_id, position`,
-		name, channelType, voiceMode, parentID, position,
+		INSERT INTO channels (server_id, name, type, voice_mode, parent_id, position)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, server_id, name, type, voice_mode, parent_id, position`,
+		serverID, name, channelType, voiceMode, parentID, position,
 	)
 	return scanChannel(row)
 }
 
-// ListChannels returns all channels ordered by position, then name.
-func (p *Pool) ListChannels(ctx context.Context) ([]models.Channel, error) {
+// ListChannels returns all channels for the given guild ordered by position, then name.
+func (p *Pool) ListChannels(ctx context.Context, serverID string) ([]models.Channel, error) {
 	rows, err := p.Query(ctx, `
-		SELECT id, name, type, voice_mode, parent_id, position
+		SELECT id, server_id, name, type, voice_mode, parent_id, position
 		FROM channels
-		ORDER BY position, name`)
+		WHERE server_id = $1
+		ORDER BY position, name`, serverID)
 	if err != nil {
 		return nil, err
 	}
@@ -45,7 +46,7 @@ func (p *Pool) ListChannels(ctx context.Context) ([]models.Channel, error) {
 // GetChannelByID returns the channel by ID, or nil if not found.
 func (p *Pool) GetChannelByID(ctx context.Context, channelID string) (*models.Channel, error) {
 	row := p.QueryRow(ctx, `
-		SELECT id, name, type, voice_mode, parent_id, position
+		SELECT id, server_id, name, type, voice_mode, parent_id, position
 		FROM channels WHERE id = $1`, channelID)
 	c, err := scanChannel(row)
 	if err != nil {
@@ -109,6 +110,21 @@ func (p *Pool) MoveChannel(ctx context.Context, channelID string, newParentID *s
 	return tx.Commit(ctx)
 }
 
+// IsChannelMember checks whether the user belongs to the guild that owns the channel.
+// A user is a channel member if they are a member of the server that contains the channel.
+func (p *Pool) IsChannelMember(ctx context.Context, channelID, userID string) (bool, error) {
+	var exists bool
+	err := p.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM server_members sm
+			JOIN channels c ON c.server_id = sm.server_id
+			WHERE c.id = $1 AND sm.user_id = $2
+		)`, channelID, userID,
+	).Scan(&exists)
+	return exists, err
+}
+
 // shiftPositions adjusts the position of sibling channels in the given scope.
 // op is either ">" (close gap) or ">=" (make room); delta is -1 or +1.
 func shiftPositions(ctx context.Context, tx pgx.Tx, channelID string, isCategory bool, parentID *string, op string, pivotPos, delta int) error {
@@ -141,7 +157,7 @@ func shiftPositions(ctx context.Context, tx pgx.Tx, channelID string, isCategory
 
 func scanChannel(row pgx.Row) (*models.Channel, error) {
 	var c models.Channel
-	err := row.Scan(&c.ID, &c.Name, &c.Type, &c.VoiceMode, &c.ParentID, &c.Position)
+	err := row.Scan(&c.ID, &c.ServerID, &c.Name, &c.Type, &c.VoiceMode, &c.ParentID, &c.Position)
 	if err != nil {
 		return nil, err
 	}
