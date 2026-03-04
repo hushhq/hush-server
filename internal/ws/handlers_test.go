@@ -6,11 +6,15 @@ import (
 	"testing"
 	"time"
 
+	"hush.app/server/internal/db"
 	"hush.app/server/internal/models"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// compile-time interface check: messageStoreMock must satisfy db.Store.
+var _ db.Store = (*messageStoreMock)(nil)
 
 // messageStoreMock implements db.Store for message handler tests. Only message methods are used.
 type messageStoreMock struct {
@@ -82,7 +86,7 @@ func (m *messageStoreMock) IsChannelMember(ctx context.Context, channelID, userI
 func (m *messageStoreMock) GetInstanceConfig(context.Context) (*models.InstanceConfig, error) {
 	return nil, nil
 }
-func (m *messageStoreMock) UpdateInstanceConfig(context.Context, *string, *string, *string) error {
+func (m *messageStoreMock) UpdateInstanceConfig(context.Context, *string, *string, *string, *string) error {
 	return nil
 }
 func (m *messageStoreMock) SetInstanceOwner(context.Context, string) (bool, error) { return false, nil }
@@ -90,19 +94,21 @@ func (m *messageStoreMock) GetUserRole(context.Context, string) (string, error) 
 func (m *messageStoreMock) UpdateUserRole(context.Context, string, string) error   { return nil }
 func (m *messageStoreMock) ListMembers(context.Context) ([]models.Member, error)   { return nil, nil }
 
-// Channel stubs (flat, no serverID).
-func (m *messageStoreMock) CreateChannel(context.Context, string, string, *string, *string, int) (*models.Channel, error) {
+// Channel stubs (guild-scoped — serverID param).
+func (m *messageStoreMock) CreateChannel(context.Context, string, string, string, *string, *string, int) (*models.Channel, error) {
 	return nil, nil
 }
-func (m *messageStoreMock) ListChannels(context.Context) ([]models.Channel, error)  { return nil, nil }
+func (m *messageStoreMock) ListChannels(context.Context, string) ([]models.Channel, error) {
+	return nil, nil
+}
 func (m *messageStoreMock) GetChannelByID(context.Context, string) (*models.Channel, error) {
 	return nil, nil
 }
-func (m *messageStoreMock) DeleteChannel(context.Context, string) error                    { return nil }
-func (m *messageStoreMock) MoveChannel(context.Context, string, *string, int) error        { return nil }
+func (m *messageStoreMock) DeleteChannel(context.Context, string) error             { return nil }
+func (m *messageStoreMock) MoveChannel(context.Context, string, *string, int) error { return nil }
 
-// Invite stubs (flat, no serverID).
-func (m *messageStoreMock) CreateInvite(context.Context, string, string, int, time.Time) (*models.InviteCode, error) {
+// Invite stubs (guild-scoped — serverID param).
+func (m *messageStoreMock) CreateInvite(context.Context, string, string, string, int, time.Time) (*models.InviteCode, error) {
 	return nil, nil
 }
 func (m *messageStoreMock) GetInviteByCode(context.Context, string) (*models.InviteCode, error) {
@@ -110,23 +116,53 @@ func (m *messageStoreMock) GetInviteByCode(context.Context, string) (*models.Inv
 }
 func (m *messageStoreMock) ClaimInviteUse(context.Context, string) (bool, error) { return true, nil }
 
-// Moderation stubs (unused in ws handler tests).
-func (m *messageStoreMock) InsertBan(context.Context, string, string, string, *time.Time) (*models.Ban, error) {
+// Server / guild operation stubs.
+func (m *messageStoreMock) CreateServer(context.Context, string, string) (*models.Server, error) {
 	return nil, nil
 }
-func (m *messageStoreMock) GetActiveBan(context.Context, string) (*models.Ban, error) { return nil, nil }
-func (m *messageStoreMock) LiftBan(context.Context, string, string) error              { return nil }
-func (m *messageStoreMock) InsertMute(context.Context, string, string, string, *time.Time) (*models.Mute, error) {
+func (m *messageStoreMock) GetServerByID(context.Context, string) (*models.Server, error) {
 	return nil, nil
 }
-func (m *messageStoreMock) GetActiveMute(context.Context, string) (*models.Mute, error) {
+func (m *messageStoreMock) ListServersForUser(context.Context, string) ([]models.Server, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) DeleteServer(context.Context, string) error { return nil }
+func (m *messageStoreMock) ListGuildBillingStats(context.Context) ([]models.GuildBillingStats, error) {
+	return nil, nil
+}
+
+// Server member operation stubs.
+func (m *messageStoreMock) AddServerMember(context.Context, string, string, string) error { return nil }
+func (m *messageStoreMock) RemoveServerMember(context.Context, string, string) error      { return nil }
+func (m *messageStoreMock) GetServerMemberRole(context.Context, string, string) (string, error) {
+	return "", nil
+}
+func (m *messageStoreMock) UpdateServerMemberRole(context.Context, string, string, string) error {
+	return nil
+}
+func (m *messageStoreMock) ListServerMembers(context.Context, string) ([]models.ServerMemberWithUser, error) {
+	return nil, nil
+}
+
+// Moderation stubs (guild-scoped — serverID param).
+func (m *messageStoreMock) InsertBan(context.Context, string, string, string, string, *time.Time) (*models.Ban, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) GetActiveBan(context.Context, string, string) (*models.Ban, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) LiftBan(context.Context, string, string) error { return nil }
+func (m *messageStoreMock) InsertMute(context.Context, string, string, string, string, *time.Time) (*models.Mute, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) GetActiveMute(context.Context, string, string) (*models.Mute, error) {
 	return nil, nil
 }
 func (m *messageStoreMock) LiftMute(context.Context, string, string) error { return nil }
-func (m *messageStoreMock) InsertAuditLog(context.Context, string, *string, string, string, map[string]interface{}) error {
+func (m *messageStoreMock) InsertAuditLog(context.Context, string, string, *string, string, string, map[string]interface{}) error {
 	return nil
 }
-func (m *messageStoreMock) ListAuditLog(context.Context, int, int) ([]models.AuditLogEntry, error) {
+func (m *messageStoreMock) ListAuditLog(context.Context, string, int, int) ([]models.AuditLogEntry, error) {
 	return nil, nil
 }
 func (m *messageStoreMock) GetMessageByID(context.Context, string) (*models.Message, error) {

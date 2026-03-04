@@ -32,13 +32,13 @@ type mockStore struct {
 	deleteSessionByIDFn     func(ctx context.Context, sessionID string) error
 
 	// Signal keys
-	upsertIdentityKeysFn         func(ctx context.Context, userID, deviceID string, identityKey, signedPreKey, signedPreKeySignature []byte, registrationID int) error
-	insertOneTimePreKeysFn        func(ctx context.Context, userID, deviceID string, keys []models.OneTimePreKeyRow) error
-	getIdentityAndSignedPreKeyFn  func(ctx context.Context, userID, deviceID string) (identityKey, signedPreKey, signedPreKeySignature []byte, registrationID int, err error)
-	consumeOneTimePreKeyFn        func(ctx context.Context, userID, deviceID string) (keyID int, publicKey []byte, err error)
-	countUnusedOneTimePreKeysFn   func(ctx context.Context, userID, deviceID string) (int, error)
-	listDeviceIDsForUserFn        func(ctx context.Context, userID string) ([]string, error)
-	upsertDeviceFn                func(ctx context.Context, userID, deviceID, label string) error
+	upsertIdentityKeysFn        func(ctx context.Context, userID, deviceID string, identityKey, signedPreKey, signedPreKeySignature []byte, registrationID int) error
+	insertOneTimePreKeysFn       func(ctx context.Context, userID, deviceID string, keys []models.OneTimePreKeyRow) error
+	getIdentityAndSignedPreKeyFn func(ctx context.Context, userID, deviceID string) (identityKey, signedPreKey, signedPreKeySignature []byte, registrationID int, err error)
+	consumeOneTimePreKeyFn       func(ctx context.Context, userID, deviceID string) (keyID int, publicKey []byte, err error)
+	countUnusedOneTimePreKeysFn  func(ctx context.Context, userID, deviceID string) (int, error)
+	listDeviceIDsForUserFn       func(ctx context.Context, userID string) ([]string, error)
+	upsertDeviceFn               func(ctx context.Context, userID, deviceID, label string) error
 
 	// Messages
 	insertMessageFn   func(ctx context.Context, channelID, senderID string, recipientID *string, ciphertext []byte) (*models.Message, error)
@@ -47,37 +47,51 @@ type mockStore struct {
 
 	// Instance
 	getInstanceConfigFn    func(ctx context.Context) (*models.InstanceConfig, error)
-	updateInstanceConfigFn func(ctx context.Context, name *string, iconURL *string, registrationMode *string) error
+	updateInstanceConfigFn func(ctx context.Context, name *string, iconURL *string, registrationMode *string, serverCreationPolicy *string) error
 	setInstanceOwnerFn     func(ctx context.Context, userID string) (bool, error)
 	getUserRoleFn          func(ctx context.Context, userID string) (string, error)
 	updateUserRoleFn       func(ctx context.Context, userID, role string) error
 	listMembersFn          func(ctx context.Context) ([]models.Member, error)
 
-	// Channels (no serverID)
-	createChannelFn  func(ctx context.Context, name, channelType string, voiceMode *string, parentID *string, position int) (*models.Channel, error)
-	listChannelsFn   func(ctx context.Context) ([]models.Channel, error)
+	// Channels (guild-scoped — serverID param)
+	createChannelFn  func(ctx context.Context, serverID, name, channelType string, voiceMode *string, parentID *string, position int) (*models.Channel, error)
+	listChannelsFn   func(ctx context.Context, serverID string) ([]models.Channel, error)
 	getChannelByIDFn func(ctx context.Context, channelID string) (*models.Channel, error)
 	deleteChannelFn  func(ctx context.Context, channelID string) error
 	moveChannelFn    func(ctx context.Context, channelID string, parentID *string, position int) error
 
-	// Invites (no serverID)
-	createInviteFn    func(ctx context.Context, code, createdBy string, maxUses int, expiresAt time.Time) (*models.InviteCode, error)
+	// Invites (guild-scoped — serverID param)
+	createInviteFn    func(ctx context.Context, serverID, code, createdBy string, maxUses int, expiresAt time.Time) (*models.InviteCode, error)
 	getInviteByCodeFn func(ctx context.Context, code string) (*models.InviteCode, error)
 	claimInviteUseFn  func(ctx context.Context, code string) (bool, error)
 
-	// Moderation — bans
-	insertBanFn    func(ctx context.Context, userID, actorID, reason string, expiresAt *time.Time) (*models.Ban, error)
-	getActiveBanFn func(ctx context.Context, userID string) (*models.Ban, error)
+	// Server / guild operations
+	createServerFn          func(ctx context.Context, name, ownerID string) (*models.Server, error)
+	getServerByIDFn         func(ctx context.Context, serverID string) (*models.Server, error)
+	listServersForUserFn    func(ctx context.Context, userID string) ([]models.Server, error)
+	deleteServerFn          func(ctx context.Context, serverID string) error
+	listGuildBillingStatsFn func(ctx context.Context) ([]models.GuildBillingStats, error)
+
+	// Server member operations
+	addServerMemberFn        func(ctx context.Context, serverID, userID, role string) error
+	removeServerMemberFn     func(ctx context.Context, serverID, userID string) error
+	getServerMemberRoleFn    func(ctx context.Context, serverID, userID string) (string, error)
+	updateServerMemberRoleFn func(ctx context.Context, serverID, userID, role string) error
+	listServerMembersFn      func(ctx context.Context, serverID string) ([]models.ServerMemberWithUser, error)
+
+	// Moderation — bans (guild-scoped — serverID param)
+	insertBanFn    func(ctx context.Context, serverID, userID, actorID, reason string, expiresAt *time.Time) (*models.Ban, error)
+	getActiveBanFn func(ctx context.Context, serverID, userID string) (*models.Ban, error)
 	liftBanFn      func(ctx context.Context, banID, liftedByID string) error
 
-	// Moderation — mutes
-	insertMuteFn    func(ctx context.Context, userID, actorID, reason string, expiresAt *time.Time) (*models.Mute, error)
-	getActiveMuteFn func(ctx context.Context, userID string) (*models.Mute, error)
+	// Moderation — mutes (guild-scoped — serverID param)
+	insertMuteFn    func(ctx context.Context, serverID, userID, actorID, reason string, expiresAt *time.Time) (*models.Mute, error)
+	getActiveMuteFn func(ctx context.Context, serverID, userID string) (*models.Mute, error)
 	liftMuteFn      func(ctx context.Context, muteID, liftedByID string) error
 
-	// Moderation — audit log
-	insertAuditLogFn func(ctx context.Context, actorID string, targetID *string, action, reason string, metadata map[string]interface{}) error
-	listAuditLogFn   func(ctx context.Context, limit, offset int) ([]models.AuditLogEntry, error)
+	// Moderation — audit log (guild-scoped — serverID param)
+	insertAuditLogFn func(ctx context.Context, serverID, actorID string, targetID *string, action, reason string, metadata map[string]interface{}) error
+	listAuditLogFn   func(ctx context.Context, serverID string, limit, offset int) ([]models.AuditLogEntry, error)
 
 	// Moderation — messages
 	getMessageByIDFn func(ctx context.Context, messageID string) (*models.Message, error)
@@ -223,9 +237,9 @@ func (m *mockStore) GetInstanceConfig(ctx context.Context) (*models.InstanceConf
 	}, nil
 }
 
-func (m *mockStore) UpdateInstanceConfig(ctx context.Context, name *string, iconURL *string, registrationMode *string) error {
+func (m *mockStore) UpdateInstanceConfig(ctx context.Context, name *string, iconURL *string, registrationMode *string, serverCreationPolicy *string) error {
 	if m.updateInstanceConfigFn != nil {
-		return m.updateInstanceConfigFn(ctx, name, iconURL, registrationMode)
+		return m.updateInstanceConfigFn(ctx, name, iconURL, registrationMode, serverCreationPolicy)
 	}
 	return nil
 }
@@ -261,16 +275,16 @@ func (m *mockStore) ListMembers(ctx context.Context) ([]models.Member, error) {
 
 // ---------- Channels ----------
 
-func (m *mockStore) CreateChannel(ctx context.Context, name, channelType string, voiceMode *string, parentID *string, position int) (*models.Channel, error) {
+func (m *mockStore) CreateChannel(ctx context.Context, serverID, name, channelType string, voiceMode *string, parentID *string, position int) (*models.Channel, error) {
 	if m.createChannelFn != nil {
-		return m.createChannelFn(ctx, name, channelType, voiceMode, parentID, position)
+		return m.createChannelFn(ctx, serverID, name, channelType, voiceMode, parentID, position)
 	}
 	return nil, nil
 }
 
-func (m *mockStore) ListChannels(ctx context.Context) ([]models.Channel, error) {
+func (m *mockStore) ListChannels(ctx context.Context, serverID string) ([]models.Channel, error) {
 	if m.listChannelsFn != nil {
-		return m.listChannelsFn(ctx)
+		return m.listChannelsFn(ctx, serverID)
 	}
 	return nil, nil
 }
@@ -298,9 +312,9 @@ func (m *mockStore) MoveChannel(ctx context.Context, channelID string, parentID 
 
 // ---------- Invites ----------
 
-func (m *mockStore) CreateInvite(ctx context.Context, code, createdBy string, maxUses int, expiresAt time.Time) (*models.InviteCode, error) {
+func (m *mockStore) CreateInvite(ctx context.Context, serverID, code, createdBy string, maxUses int, expiresAt time.Time) (*models.InviteCode, error) {
 	if m.createInviteFn != nil {
-		return m.createInviteFn(ctx, code, createdBy, maxUses, expiresAt)
+		return m.createInviteFn(ctx, serverID, code, createdBy, maxUses, expiresAt)
 	}
 	return &models.InviteCode{Code: code, CreatedBy: createdBy, MaxUses: maxUses, ExpiresAt: expiresAt}, nil
 }
@@ -319,18 +333,92 @@ func (m *mockStore) ClaimInviteUse(ctx context.Context, code string) (bool, erro
 	return true, nil
 }
 
-// ---------- Moderation ----------
+// ---------- Server / guild operations ----------
 
-func (m *mockStore) InsertBan(ctx context.Context, userID, actorID, reason string, expiresAt *time.Time) (*models.Ban, error) {
-	if m.insertBanFn != nil {
-		return m.insertBanFn(ctx, userID, actorID, reason, expiresAt)
+func (m *mockStore) CreateServer(ctx context.Context, name, ownerID string) (*models.Server, error) {
+	if m.createServerFn != nil {
+		return m.createServerFn(ctx, name, ownerID)
+	}
+	return &models.Server{ID: uuid.New().String(), Name: name, OwnerID: ownerID}, nil
+}
+
+func (m *mockStore) GetServerByID(ctx context.Context, serverID string) (*models.Server, error) {
+	if m.getServerByIDFn != nil {
+		return m.getServerByIDFn(ctx, serverID)
 	}
 	return nil, nil
 }
 
-func (m *mockStore) GetActiveBan(ctx context.Context, userID string) (*models.Ban, error) {
+func (m *mockStore) ListServersForUser(ctx context.Context, userID string) ([]models.Server, error) {
+	if m.listServersForUserFn != nil {
+		return m.listServersForUserFn(ctx, userID)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) DeleteServer(ctx context.Context, serverID string) error {
+	if m.deleteServerFn != nil {
+		return m.deleteServerFn(ctx, serverID)
+	}
+	return nil
+}
+
+func (m *mockStore) ListGuildBillingStats(ctx context.Context) ([]models.GuildBillingStats, error) {
+	if m.listGuildBillingStatsFn != nil {
+		return m.listGuildBillingStatsFn(ctx)
+	}
+	return nil, nil
+}
+
+// ---------- Server member operations ----------
+
+func (m *mockStore) AddServerMember(ctx context.Context, serverID, userID, role string) error {
+	if m.addServerMemberFn != nil {
+		return m.addServerMemberFn(ctx, serverID, userID, role)
+	}
+	return nil
+}
+
+func (m *mockStore) RemoveServerMember(ctx context.Context, serverID, userID string) error {
+	if m.removeServerMemberFn != nil {
+		return m.removeServerMemberFn(ctx, serverID, userID)
+	}
+	return nil
+}
+
+func (m *mockStore) GetServerMemberRole(ctx context.Context, serverID, userID string) (string, error) {
+	if m.getServerMemberRoleFn != nil {
+		return m.getServerMemberRoleFn(ctx, serverID, userID)
+	}
+	return "", nil
+}
+
+func (m *mockStore) UpdateServerMemberRole(ctx context.Context, serverID, userID, role string) error {
+	if m.updateServerMemberRoleFn != nil {
+		return m.updateServerMemberRoleFn(ctx, serverID, userID, role)
+	}
+	return nil
+}
+
+func (m *mockStore) ListServerMembers(ctx context.Context, serverID string) ([]models.ServerMemberWithUser, error) {
+	if m.listServerMembersFn != nil {
+		return m.listServerMembersFn(ctx, serverID)
+	}
+	return nil, nil
+}
+
+// ---------- Moderation ----------
+
+func (m *mockStore) InsertBan(ctx context.Context, serverID, userID, actorID, reason string, expiresAt *time.Time) (*models.Ban, error) {
+	if m.insertBanFn != nil {
+		return m.insertBanFn(ctx, serverID, userID, actorID, reason, expiresAt)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) GetActiveBan(ctx context.Context, serverID, userID string) (*models.Ban, error) {
 	if m.getActiveBanFn != nil {
-		return m.getActiveBanFn(ctx, userID)
+		return m.getActiveBanFn(ctx, serverID, userID)
 	}
 	return nil, nil
 }
@@ -342,16 +430,16 @@ func (m *mockStore) LiftBan(ctx context.Context, banID, liftedByID string) error
 	return nil
 }
 
-func (m *mockStore) InsertMute(ctx context.Context, userID, actorID, reason string, expiresAt *time.Time) (*models.Mute, error) {
+func (m *mockStore) InsertMute(ctx context.Context, serverID, userID, actorID, reason string, expiresAt *time.Time) (*models.Mute, error) {
 	if m.insertMuteFn != nil {
-		return m.insertMuteFn(ctx, userID, actorID, reason, expiresAt)
+		return m.insertMuteFn(ctx, serverID, userID, actorID, reason, expiresAt)
 	}
 	return nil, nil
 }
 
-func (m *mockStore) GetActiveMute(ctx context.Context, userID string) (*models.Mute, error) {
+func (m *mockStore) GetActiveMute(ctx context.Context, serverID, userID string) (*models.Mute, error) {
 	if m.getActiveMuteFn != nil {
-		return m.getActiveMuteFn(ctx, userID)
+		return m.getActiveMuteFn(ctx, serverID, userID)
 	}
 	return nil, nil
 }
@@ -363,16 +451,16 @@ func (m *mockStore) LiftMute(ctx context.Context, muteID, liftedByID string) err
 	return nil
 }
 
-func (m *mockStore) InsertAuditLog(ctx context.Context, actorID string, targetID *string, action, reason string, metadata map[string]interface{}) error {
+func (m *mockStore) InsertAuditLog(ctx context.Context, serverID, actorID string, targetID *string, action, reason string, metadata map[string]interface{}) error {
 	if m.insertAuditLogFn != nil {
-		return m.insertAuditLogFn(ctx, actorID, targetID, action, reason, metadata)
+		return m.insertAuditLogFn(ctx, serverID, actorID, targetID, action, reason, metadata)
 	}
 	return nil
 }
 
-func (m *mockStore) ListAuditLog(ctx context.Context, limit, offset int) ([]models.AuditLogEntry, error) {
+func (m *mockStore) ListAuditLog(ctx context.Context, serverID string, limit, offset int) ([]models.AuditLogEntry, error) {
 	if m.listAuditLogFn != nil {
-		return m.listAuditLogFn(ctx, limit, offset)
+		return m.listAuditLogFn(ctx, serverID, limit, offset)
 	}
 	return nil, nil
 }
@@ -418,10 +506,22 @@ func makeAuth(store *mockStore, userID string) string {
 	return token
 }
 
-// makeServerAuth is an alias for makeAuth, kept for backward compatibility with
-// tests that were written when a server-scoped auth helper was needed.
+// makeServerAuth is an alias for makeAuth, kept for backward compatibility.
 func makeServerAuth(store *mockStore, userID string) string {
 	return makeAuth(store, userID)
+}
+
+// makeGuildAuth sets up auth AND guild membership mock for the given role.
+// Returns the bearer token. Useful for tests that need to pass RequireGuildMember.
+func makeGuildAuth(store *mockStore, userID, guildRole string) string {
+	token := makeAuth(store, userID)
+	store.getServerMemberRoleFn = func(_ context.Context, _, uid string) (string, error) {
+		if uid == userID {
+			return guildRole, nil
+		}
+		return "", nil
+	}
+	return token
 }
 
 func postServerJSON(handler http.Handler, path string, body interface{}, token string) *httptest.ResponseRecorder {
@@ -456,6 +556,16 @@ func putServerJSON(handler http.Handler, path string, body interface{}, token st
 	b, _ := json.Marshal(body)
 	req := httptest.NewRequest(http.MethodPut, path, bytes.NewReader(b))
 	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	return rr
+}
+
+func deleteServer(handler http.Handler, path, token string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodDelete, path, nil)
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
