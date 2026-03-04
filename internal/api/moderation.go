@@ -96,6 +96,7 @@ func (h *moderationHandler) kickMember(w http.ResponseWriter, r *http.Request) {
 			"user_id":   req.UserID,
 		})
 		h.hub.BroadcastToServer(serverID, msg)
+		h.hub.DisconnectUser(req.UserID)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -169,6 +170,7 @@ func (h *moderationHandler) banMember(w http.ResponseWriter, r *http.Request) {
 			"user_id":   req.UserID,
 		})
 		h.hub.BroadcastToServer(serverID, msg)
+		h.hub.DisconnectUser(req.UserID)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

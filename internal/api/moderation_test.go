@@ -534,6 +534,97 @@ func TestClaimInvite_BannedFromGuild_Rejected(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, rr.Code)
 }
 
+// ---------- DisconnectUser verification ----------
+
+// mockHub implements GlobalBroadcaster and records broadcast and disconnect calls.
+type mockHub struct {
+	broadcastCalls  []mockBroadcast
+	disconnectCalls []string
+}
+
+type mockBroadcast struct {
+	serverID string
+	message  []byte
+}
+
+func (m *mockHub) BroadcastToAll(msg []byte)                { /* no-op */ }
+func (m *mockHub) BroadcastToServer(sid string, msg []byte) { m.broadcastCalls = append(m.broadcastCalls, mockBroadcast{sid, msg}) }
+func (m *mockHub) BroadcastToUser(_ string, _ []byte)       { /* no-op */ }
+func (m *mockHub) DisconnectUser(uid string)                 { m.disconnectCalls = append(m.disconnectCalls, uid) }
+
+// buildModerationRouterWithHub wires ModerationRoutes with a custom hub for testing broadcast/disconnect.
+func buildModerationRouterWithHub(store *mockStore, actorID, actorRole string, hub GlobalBroadcaster) http.Handler {
+	inner := ModerationRoutes(store, hub)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := withUserID(r.Context(), actorID)
+		ctx = withGuildRole(ctx, actorRole)
+		inner.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// TestKickMember_CallsDisconnectUser verifies kickMember broadcasts member_kicked and
+// then calls DisconnectUser on the target so their WS session is terminated immediately.
+func TestKickMember_CallsDisconnectUser(t *testing.T) {
+	actorID := uuid.New().String()
+	targetID := uuid.New().String()
+
+	store := &mockStore{
+		getServerMemberRoleFn: func(_ context.Context, _, userID string) (string, error) {
+			if userID == targetID {
+				return "member", nil
+			}
+			return "", nil
+		},
+		deleteSessionsByUserIDFn: func(_ context.Context, _ string) error { return nil },
+	}
+	hub := &mockHub{}
+	router := buildModerationRouterWithHub(store, actorID, "mod", hub)
+
+	rr := postServerJSON(router, "/kick", models.KickRequest{UserID: targetID, Reason: "spamming"}, "")
+	require.Equal(t, http.StatusNoContent, rr.Code)
+
+	require.Len(t, hub.broadcastCalls, 1, "kickMember must broadcast member_kicked")
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(hub.broadcastCalls[0].message, &payload))
+	assert.Equal(t, "member_kicked", payload["type"])
+
+	require.Len(t, hub.disconnectCalls, 1, "kickMember must call DisconnectUser once")
+	assert.Equal(t, targetID, hub.disconnectCalls[0])
+}
+
+// TestBanMember_CallsDisconnectUser verifies banMember broadcasts member_banned and
+// then calls DisconnectUser on the target so their WS session is terminated immediately.
+func TestBanMember_CallsDisconnectUser(t *testing.T) {
+	actorID := uuid.New().String()
+	targetID := uuid.New().String()
+
+	store := &mockStore{
+		getServerMemberRoleFn: func(_ context.Context, _, userID string) (string, error) {
+			if userID == targetID {
+				return "member", nil
+			}
+			return "", nil
+		},
+		insertBanFn: func(_ context.Context, _, _, _, _ string, _ *time.Time) (*models.Ban, error) {
+			return &models.Ban{ID: uuid.New().String()}, nil
+		},
+		deleteSessionsByUserIDFn: func(_ context.Context, _ string) error { return nil },
+	}
+	hub := &mockHub{}
+	router := buildModerationRouterWithHub(store, actorID, "admin", hub)
+
+	rr := postServerJSON(router, "/ban", models.BanRequest{UserID: targetID, Reason: "harassment"}, "")
+	require.Equal(t, http.StatusNoContent, rr.Code)
+
+	require.Len(t, hub.broadcastCalls, 1, "banMember must broadcast member_banned")
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(hub.broadcastCalls[0].message, &payload))
+	assert.Equal(t, "member_banned", payload["type"])
+
+	require.Len(t, hub.disconnectCalls, 1, "banMember must call DisconnectUser once")
+	assert.Equal(t, targetID, hub.disconnectCalls[0])
+}
+
 // TestClaimInvite_BannedFromOtherGuild_Allowed verifies that a guild-scoped ban does NOT
 // prevent the user from claiming an invite for a different guild (IROLE-04).
 func TestClaimInvite_BannedFromOtherGuild_Allowed(t *testing.T) {
