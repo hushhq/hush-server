@@ -71,6 +71,15 @@ func (h *authHandler) register(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "registration failed"})
 		return
 	}
+	// Check if username belongs to a banned user (prevent re-registration)
+	existing, _ := h.store.GetUserByUsername(r.Context(), req.Username)
+	if existing != nil {
+		ban, _ := h.store.GetActiveInstanceBan(r.Context(), existing.ID)
+		if ban != nil {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "Registration blocked. Reason: " + ban.Reason})
+			return
+		}
+	}
 	user, err := h.store.CreateUser(r.Context(), req.Username, req.DisplayName, &hash)
 	if err != nil {
 		if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "unique constraint") {
@@ -116,6 +125,18 @@ func (h *authHandler) login(w http.ResponseWriter, r *http.Request) {
 	}
 	if !auth.ComparePassword(*user.PasswordHash, req.Password) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid username or password"})
+		return
+	}
+	// Check instance ban before allowing login
+	ban, _ := h.store.GetActiveInstanceBan(r.Context(), user.ID)
+	if ban != nil {
+		msg := "Your account has been suspended. Reason: " + ban.Reason
+		if ban.ExpiresAt != nil {
+			msg += ". Expires: " + ban.ExpiresAt.Format(time.RFC3339)
+		} else {
+			msg += ". Expires: permanent"
+		}
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": msg})
 		return
 	}
 	h.sendAuthResponse(w, r, user)

@@ -101,6 +101,18 @@ type mockStore struct {
 
 	// Moderation — sessions
 	deleteSessionsByUserIDFn func(ctx context.Context, userID string) error
+
+	// Instance bans
+	insertInstanceBanFn    func(ctx context.Context, userID, actorID, reason string, expiresAt *time.Time) (*models.InstanceBan, error)
+	getActiveInstanceBanFn func(ctx context.Context, userID string) (*models.InstanceBan, error)
+	liftInstanceBanFn      func(ctx context.Context, banID, liftedByID string) error
+
+	// Instance audit log
+	insertInstanceAuditLogFn func(ctx context.Context, actorID string, targetID *string, action, reason string, metadata map[string]interface{}) error
+	listInstanceAuditLogFn   func(ctx context.Context, limit, offset int, filter *db.InstanceAuditLogFilter) ([]models.InstanceAuditLogEntry, error)
+
+	// User search
+	searchUsersFn func(ctx context.Context, query string, limit int) ([]models.UserSearchResult, error)
 }
 
 // ---------- User/session ----------
@@ -500,6 +512,54 @@ func (m *mockStore) DeleteSessionsByUserID(ctx context.Context, userID string) e
 		return m.deleteSessionsByUserIDFn(ctx, userID)
 	}
 	return nil
+}
+
+// ---------- Instance bans ----------
+
+func (m *mockStore) InsertInstanceBan(ctx context.Context, userID, actorID, reason string, expiresAt *time.Time) (*models.InstanceBan, error) {
+	if m.insertInstanceBanFn != nil {
+		return m.insertInstanceBanFn(ctx, userID, actorID, reason, expiresAt)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) GetActiveInstanceBan(ctx context.Context, userID string) (*models.InstanceBan, error) {
+	if m.getActiveInstanceBanFn != nil {
+		return m.getActiveInstanceBanFn(ctx, userID)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) LiftInstanceBan(ctx context.Context, banID, liftedByID string) error {
+	if m.liftInstanceBanFn != nil {
+		return m.liftInstanceBanFn(ctx, banID, liftedByID)
+	}
+	return nil
+}
+
+// ---------- Instance audit log ----------
+
+func (m *mockStore) InsertInstanceAuditLog(ctx context.Context, actorID string, targetID *string, action, reason string, metadata map[string]interface{}) error {
+	if m.insertInstanceAuditLogFn != nil {
+		return m.insertInstanceAuditLogFn(ctx, actorID, targetID, action, reason, metadata)
+	}
+	return nil
+}
+
+func (m *mockStore) ListInstanceAuditLog(ctx context.Context, limit, offset int, filter *db.InstanceAuditLogFilter) ([]models.InstanceAuditLogEntry, error) {
+	if m.listInstanceAuditLogFn != nil {
+		return m.listInstanceAuditLogFn(ctx, limit, offset, filter)
+	}
+	return nil, nil
+}
+
+// ---------- User search ----------
+
+func (m *mockStore) SearchUsers(ctx context.Context, query string, limit int) ([]models.UserSearchResult, error) {
+	if m.searchUsersFn != nil {
+		return m.searchUsersFn(ctx, query, limit)
+	}
+	return nil, nil
 }
 
 // ---------- Shared test helpers ----------
