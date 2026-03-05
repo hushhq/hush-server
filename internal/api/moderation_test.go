@@ -569,6 +569,117 @@ func TestGetAuditLog_ModDenied(t *testing.T) {
 	assert.Contains(t, errBody["error"], "admin")
 }
 
+// TestAuditLog_FilterByAction verifies that ?action=kick causes the handler to pass a
+// non-nil AuditLogFilter with Action="kick" to the store and returns only matching entries.
+func TestAuditLog_FilterByAction(t *testing.T) {
+	actorID := uuid.New().String()
+
+	allEntries := []models.AuditLogEntry{
+		{ID: "e-kick-1", ActorID: actorID, Action: "kick", Reason: "spamming"},
+		{ID: "e-kick-2", ActorID: actorID, Action: "kick", Reason: "toxicity"},
+		{ID: "e-ban-1", ActorID: actorID, Action: "ban", Reason: "repeated violations"},
+	}
+
+	var capturedFilter *db.AuditLogFilter
+	store := &mockStore{
+		listAuditLogFn: func(_ context.Context, _ string, _, _ int, filter *db.AuditLogFilter) ([]models.AuditLogEntry, error) {
+			capturedFilter = filter
+			// Simulate DB filtering: only return entries matching the action filter.
+			if filter != nil && filter.Action != "" {
+				var filtered []models.AuditLogEntry
+				for _, e := range allEntries {
+					if e.Action == filter.Action {
+						filtered = append(filtered, e)
+					}
+				}
+				return filtered, nil
+			}
+			return allEntries, nil
+		},
+	}
+	router := buildModerationRouter(store, actorID, "admin")
+
+	rr := getModerationPath(router, "/audit-log?action=kick", "")
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	var entries []models.AuditLogEntry
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&entries))
+	require.Len(t, entries, 2, "only kick entries should be returned when filtering by action=kick")
+	assert.Equal(t, "kick", entries[0].Action)
+	assert.Equal(t, "kick", entries[1].Action)
+
+	require.NotNil(t, capturedFilter, "filter must be non-nil when action param is provided")
+	assert.Equal(t, "kick", capturedFilter.Action)
+	assert.Empty(t, capturedFilter.ActorID)
+	assert.Empty(t, capturedFilter.TargetID)
+}
+
+// TestAuditLog_FilterByActorID verifies that ?actor_id=X causes the handler to pass a
+// non-nil AuditLogFilter with ActorID=X to the store and returns only matching entries.
+func TestAuditLog_FilterByActorID(t *testing.T) {
+	actorA := uuid.New().String()
+	actorB := uuid.New().String()
+
+	allEntries := []models.AuditLogEntry{
+		{ID: "e-1", ActorID: actorA, Action: "kick", Reason: "rule1"},
+		{ID: "e-2", ActorID: actorA, Action: "mute", Reason: "rule2"},
+		{ID: "e-3", ActorID: actorB, Action: "ban", Reason: "rule3"},
+	}
+
+	var capturedFilter *db.AuditLogFilter
+	store := &mockStore{
+		listAuditLogFn: func(_ context.Context, _ string, _, _ int, filter *db.AuditLogFilter) ([]models.AuditLogEntry, error) {
+			capturedFilter = filter
+			// Simulate DB filtering: only return entries matching the actor filter.
+			if filter != nil && filter.ActorID != "" {
+				var filtered []models.AuditLogEntry
+				for _, e := range allEntries {
+					if e.ActorID == filter.ActorID {
+						filtered = append(filtered, e)
+					}
+				}
+				return filtered, nil
+			}
+			return allEntries, nil
+		},
+	}
+	router := buildModerationRouter(store, actorA, "admin")
+
+	rr := getModerationPath(router, "/audit-log?actor_id="+actorA, "")
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	var entries []models.AuditLogEntry
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&entries))
+	require.Len(t, entries, 2, "only entries by actorA should be returned when filtering by actor_id=actorA")
+	for _, e := range entries {
+		assert.Equal(t, actorA, e.ActorID)
+	}
+
+	require.NotNil(t, capturedFilter, "filter must be non-nil when actor_id param is provided")
+	assert.Equal(t, actorA, capturedFilter.ActorID)
+	assert.Empty(t, capturedFilter.Action)
+	assert.Empty(t, capturedFilter.TargetID)
+}
+
+// TestAuditLog_NoFilter verifies that when no filter params are provided, the handler
+// passes a nil filter to the store (no WHERE clause narrowing beyond server_id).
+func TestAuditLog_NoFilter(t *testing.T) {
+	actorID := uuid.New().String()
+
+	var capturedFilter *db.AuditLogFilter
+	store := &mockStore{
+		listAuditLogFn: func(_ context.Context, _ string, _, _ int, filter *db.AuditLogFilter) ([]models.AuditLogEntry, error) {
+			capturedFilter = filter
+			return []models.AuditLogEntry{}, nil
+		},
+	}
+	router := buildModerationRouter(store, actorID, "admin")
+
+	rr := getModerationPath(router, "/audit-log", "")
+	require.Equal(t, http.StatusOK, rr.Code)
+	assert.Nil(t, capturedFilter, "filter must be nil when no filter params are provided")
+}
+
 // ---------- Claim Invite — Banned User ----------
 
 func TestClaimInvite_BannedUser(t *testing.T) {
