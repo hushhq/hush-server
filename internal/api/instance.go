@@ -284,14 +284,17 @@ func (h *instanceHandler) instanceBan(w http.ResponseWriter, r *http.Request) {
 	// 1. Delete sessions (prevents new guild joins during cascade)
 	_ = h.store.DeleteSessionsByUserID(r.Context(), req.UserID)
 
-	// 2. Notify user via WS, then disconnect
+	// 2. Notify user via WS, then disconnect after flush delay
 	if h.hub != nil {
 		banMsg, _ := json.Marshal(map[string]interface{}{
 			"type":   "instance_banned",
 			"reason": req.Reason,
 		})
 		h.hub.BroadcastToUser(req.UserID, banMsg)
-		h.hub.DisconnectUser(req.UserID)
+		targetUserID := req.UserID
+		time.AfterFunc(500*time.Millisecond, func() {
+			h.hub.DisconnectUser(targetUserID)
+		})
 	}
 
 	// 3. Insert instance ban record
