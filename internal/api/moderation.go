@@ -472,7 +472,18 @@ func (h *moderationHandler) getAuditLog(w http.ResponseWriter, r *http.Request) 
 			offset = n
 		}
 	}
-	entries, err := h.store.ListAuditLog(r.Context(), serverID, limit, offset)
+	var filter *db.AuditLogFilter
+	actionParam := r.URL.Query().Get("action")
+	actorParam := r.URL.Query().Get("actor_id")
+	targetParam := r.URL.Query().Get("target_id")
+	if actionParam != "" || actorParam != "" || targetParam != "" {
+		filter = &db.AuditLogFilter{
+			Action:   actionParam,
+			ActorID:  actorParam,
+			TargetID: targetParam,
+		}
+	}
+	entries, err := h.store.ListAuditLog(r.Context(), serverID, limit, offset, filter)
 	if err != nil {
 		slog.Error("auditLog: list", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load audit log"})

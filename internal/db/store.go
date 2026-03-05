@@ -80,7 +80,7 @@ type Store interface {
 
 	// Moderation — audit log
 	InsertAuditLog(ctx context.Context, serverID, actorID string, targetID *string, action, reason string, metadata map[string]interface{}) error
-	ListAuditLog(ctx context.Context, serverID string, limit, offset int) ([]models.AuditLogEntry, error)
+	ListAuditLog(ctx context.Context, serverID string, limit, offset int, filter *AuditLogFilter) ([]models.AuditLogEntry, error)
 
 	// Moderation — messages
 	GetMessageByID(ctx context.Context, messageID string) (*models.Message, error)

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"hush.app/server/internal/db"
 	"hush.app/server/internal/models"
 
 	"github.com/google/uuid"
@@ -540,7 +541,7 @@ func TestGetAuditLog_AdminAccess(t *testing.T) {
 	actorID := uuid.New().String()
 
 	store := &mockStore{
-		listAuditLogFn: func(_ context.Context, _ string, limit, offset int) ([]models.AuditLogEntry, error) {
+		listAuditLogFn: func(_ context.Context, _ string, limit, offset int, _ *db.AuditLogFilter) ([]models.AuditLogEntry, error) {
 			return []models.AuditLogEntry{
 				{ID: "entry-1", ActorID: actorID, Action: "kick", Reason: "spamming"},
 			}, nil

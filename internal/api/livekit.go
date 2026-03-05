@@ -26,6 +26,7 @@ var roomNameRE = regexp.MustCompile(`^[a-zA-Z0-9._=-]+$`)
 func LiveKitRoutes(store db.Store, jwtSecret string, apiKey, apiSecret string) chi.Router {
 	r := chi.NewRouter()
 	h := &livekitHandler{
+		store:     store,
 		apiKey:    apiKey,
 		apiSecret: apiSecret,
 	}
@@ -34,6 +35,7 @@ func LiveKitRoutes(store db.Store, jwtSecret string, apiKey, apiSecret string) c
 }
 
 type livekitHandler struct {
+	store     db.Store
 	apiKey    string
 	apiSecret string
 }
@@ -79,6 +81,26 @@ func (h *livekitHandler) token(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	userID := userIDFromContext(r.Context())
+
+	// Mute check: deny token if the user is muted in the channel's server.
+	// roomName format: "channel-{channelId}" — skip check for other formats.
+	if h.store != nil {
+		channelID := strings.TrimPrefix(roomName, "channel-")
+		if channelID != roomName { // roomName started with "channel-"
+			ch, err := h.store.GetChannelByID(r.Context(), channelID)
+			if err == nil && ch != nil && ch.ServerID != nil {
+				mute, err := h.store.GetActiveMute(r.Context(), *ch.ServerID, userID)
+				if err == nil && mute != nil {
+					writeJSON(w, http.StatusForbidden, map[string]string{
+						"error": "You are muted in this server and cannot join voice channels.",
+						"code":  "muted",
+					})
+					return
+				}
+			}
+		}
+	}
+
 	tokenString, err := livekit.GenerateToken(h.apiKey, h.apiSecret, userID, roomName, participantName, livekitTokenValidFor)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "token generation failed"})

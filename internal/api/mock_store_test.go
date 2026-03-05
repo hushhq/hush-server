@@ -93,7 +93,7 @@ type mockStore struct {
 
 	// Moderation — audit log (guild-scoped — serverID param)
 	insertAuditLogFn func(ctx context.Context, serverID, actorID string, targetID *string, action, reason string, metadata map[string]interface{}) error
-	listAuditLogFn   func(ctx context.Context, serverID string, limit, offset int) ([]models.AuditLogEntry, error)
+	listAuditLogFn   func(ctx context.Context, serverID string, limit, offset int, filter *db.AuditLogFilter) ([]models.AuditLogEntry, error)
 
 	// Moderation — messages
 	getMessageByIDFn func(ctx context.Context, messageID string) (*models.Message, error)
@@ -474,9 +474,9 @@ func (m *mockStore) InsertAuditLog(ctx context.Context, serverID, actorID string
 	return nil
 }
 
-func (m *mockStore) ListAuditLog(ctx context.Context, serverID string, limit, offset int) ([]models.AuditLogEntry, error) {
+func (m *mockStore) ListAuditLog(ctx context.Context, serverID string, limit, offset int, filter *db.AuditLogFilter) ([]models.AuditLogEntry, error) {
 	if m.listAuditLogFn != nil {
-		return m.listAuditLogFn(ctx, serverID, limit, offset)
+		return m.listAuditLogFn(ctx, serverID, limit, offset, filter)
 	}
 	return nil, nil
 }

@@ -168,7 +168,7 @@ func (m *messageStoreMock) ListActiveMutes(context.Context, string) ([]models.Mu
 func (m *messageStoreMock) InsertAuditLog(context.Context, string, string, *string, string, string, map[string]interface{}) error {
 	return nil
 }
-func (m *messageStoreMock) ListAuditLog(context.Context, string, int, int) ([]models.AuditLogEntry, error) {
+func (m *messageStoreMock) ListAuditLog(_ context.Context, _ string, _, _ int, _ *db.AuditLogFilter) ([]models.AuditLogEntry, error) {
 	return nil, nil
 }
 func (m *messageStoreMock) GetMessageByID(context.Context, string) (*models.Message, error) {

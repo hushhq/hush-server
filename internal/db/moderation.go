@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -172,16 +173,45 @@ func (p *Pool) InsertAuditLog(ctx context.Context, serverID, actorID string, tar
 	return err
 }
 
+// AuditLogFilter holds optional filter parameters for ListAuditLog.
+type AuditLogFilter struct {
+	Action   string // Filter by action type (e.g. "kick", "ban", "mute"). Empty = no filter.
+	ActorID  string // Filter by actor user ID. Empty = no filter.
+	TargetID string // Filter by target user ID. Empty = no filter.
+}
+
 // ListAuditLog returns audit log entries for the given guild ordered by created_at DESC with pagination.
-func (p *Pool) ListAuditLog(ctx context.Context, serverID string, limit, offset int) ([]models.AuditLogEntry, error) {
-	rows, err := p.Query(ctx, `
+// An optional filter may narrow results by action type, actor ID, and/or target ID.
+func (p *Pool) ListAuditLog(ctx context.Context, serverID string, limit, offset int, filter *AuditLogFilter) ([]models.AuditLogEntry, error) {
+	query := `
 		SELECT id, server_id, actor_id, target_id, action, reason, metadata, created_at
 		FROM audit_log
-		WHERE server_id = $1
-		ORDER BY created_at DESC
-		LIMIT $2 OFFSET $3`,
-		serverID, limit, offset,
-	)
+		WHERE server_id = $1`
+	args := []interface{}{serverID}
+	paramIdx := 2
+
+	if filter != nil {
+		if filter.Action != "" {
+			query += " AND action = $" + itoa(paramIdx)
+			args = append(args, filter.Action)
+			paramIdx++
+		}
+		if filter.ActorID != "" {
+			query += " AND actor_id = $" + itoa(paramIdx)
+			args = append(args, filter.ActorID)
+			paramIdx++
+		}
+		if filter.TargetID != "" {
+			query += " AND target_id = $" + itoa(paramIdx)
+			args = append(args, filter.TargetID)
+			paramIdx++
+		}
+	}
+
+	query += " ORDER BY created_at DESC LIMIT $" + itoa(paramIdx) + " OFFSET $" + itoa(paramIdx+1)
+	args = append(args, limit, offset)
+
+	rows, err := p.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -202,6 +232,12 @@ func (p *Pool) ListAuditLog(ctx context.Context, serverID string, limit, offset 
 		out = append(out, entry)
 	}
 	return out, rows.Err()
+}
+
+// itoa converts an int to its decimal string representation.
+// Avoids importing strconv in the moderation package.
+func itoa(n int) string {
+	return strconv.Itoa(n)
 }
 
 // DeleteSessionsByUserID removes all active sessions for the given user.
