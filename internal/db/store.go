@@ -88,4 +88,22 @@ type Store interface {
 
 	// Moderation — sessions
 	DeleteSessionsByUserID(ctx context.Context, userID string) error
+
+	// Instance bans
+	InsertInstanceBan(ctx context.Context, userID, actorID, reason string, expiresAt *time.Time) (*models.InstanceBan, error)
+	GetActiveInstanceBan(ctx context.Context, userID string) (*models.InstanceBan, error)
+	LiftInstanceBan(ctx context.Context, banID, liftedByID string) error
+
+	// Instance audit log
+	InsertInstanceAuditLog(ctx context.Context, actorID string, targetID *string, action, reason string, metadata map[string]interface{}) error
+	ListInstanceAuditLog(ctx context.Context, limit, offset int, filter *InstanceAuditLogFilter) ([]models.InstanceAuditLogEntry, error)
+
+	// User search (admin)
+	SearchUsers(ctx context.Context, query string, limit int) ([]models.UserSearchResult, error)
+}
+
+// InstanceAuditLogFilter filters instance audit log queries.
+type InstanceAuditLogFilter struct {
+	Action   string
+	TargetID string
 }

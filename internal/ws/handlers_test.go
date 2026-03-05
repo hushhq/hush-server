@@ -177,6 +177,28 @@ func (m *messageStoreMock) GetMessageByID(context.Context, string) (*models.Mess
 func (m *messageStoreMock) DeleteMessage(context.Context, string) error          { return nil }
 func (m *messageStoreMock) DeleteSessionsByUserID(context.Context, string) error { return nil }
 
+// Instance ban stubs.
+func (m *messageStoreMock) InsertInstanceBan(context.Context, string, string, string, *time.Time) (*models.InstanceBan, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) GetActiveInstanceBan(context.Context, string) (*models.InstanceBan, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) LiftInstanceBan(context.Context, string, string) error { return nil }
+
+// Instance audit log stubs.
+func (m *messageStoreMock) InsertInstanceAuditLog(context.Context, string, *string, string, string, map[string]interface{}) error {
+	return nil
+}
+func (m *messageStoreMock) ListInstanceAuditLog(_ context.Context, _, _ int, _ *db.InstanceAuditLogFilter) ([]models.InstanceAuditLogEntry, error) {
+	return nil, nil
+}
+
+// User search stub.
+func (m *messageStoreMock) SearchUsers(context.Context, string, int) ([]models.UserSearchResult, error) {
+	return nil, nil
+}
+
 // drainUntilType reads from c.send until a message with the given type is received or timeout.
 func drainUntilType(t *testing.T, c *Client, wantType string, timeout time.Duration) []byte {
 	t.Helper()

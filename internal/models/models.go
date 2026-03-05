@@ -264,3 +264,51 @@ type UpdateInstanceRequest struct {
 	RegistrationMode     *string `json:"registrationMode,omitempty"`
 	ServerCreationPolicy *string `json:"serverCreationPolicy,omitempty"`
 }
+
+// InstanceBan is an instance-level ban record (separate from guild bans).
+type InstanceBan struct {
+	ID        string     `json:"id"`
+	UserID    string     `json:"userId"`
+	ActorID   string     `json:"actorId"`
+	Reason    string     `json:"reason"`
+	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
+	CreatedAt time.Time  `json:"createdAt"`
+	LiftedAt  *time.Time `json:"liftedAt,omitempty"`
+	LiftedBy  *string    `json:"liftedBy,omitempty"`
+}
+
+// InstanceAuditLogEntry records an instance-level admin action.
+type InstanceAuditLogEntry struct {
+	ID        string                 `json:"id"`
+	ActorID   string                 `json:"actorId"`
+	TargetID  *string                `json:"targetId,omitempty"`
+	Action    string                 `json:"action"`
+	Reason    string                 `json:"reason"`
+	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt time.Time              `json:"createdAt"`
+}
+
+// UserSearchResult is returned by the admin user search endpoint.
+type UserSearchResult struct {
+	ID           string     `json:"id"`
+	Username     string     `json:"username"`
+	DisplayName  string     `json:"displayName"`
+	Role         string     `json:"role"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	IsBanned     bool       `json:"isBanned"`
+	BanReason    *string    `json:"banReason,omitempty"`
+	BanExpiresAt *time.Time `json:"banExpiresAt,omitempty"`
+}
+
+// InstanceBanRequest is the body for POST /api/instance/bans.
+type InstanceBanRequest struct {
+	UserID    string `json:"userId"`
+	Reason    string `json:"reason"`
+	ExpiresIn *int   `json:"expiresIn,omitempty"` // seconds; nil = permanent
+}
+
+// InstanceUnbanRequest is the body for POST /api/instance/unban.
+type InstanceUnbanRequest struct {
+	UserID string `json:"userId"`
+	Reason string `json:"reason"`
+}
