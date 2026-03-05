@@ -13,7 +13,7 @@ func (p *Pool) CreateUser(ctx context.Context, username, displayName string, pas
 	row := p.QueryRow(ctx, `
 		INSERT INTO users (username, password_hash, display_name)
 		VALUES ($1, $2, $3)
-		RETURNING id, username, password_hash, display_name, created_at`,
+		RETURNING id, username, password_hash, display_name, role, created_at`,
 		username, passwordHash, displayName,
 	)
 	return scanUser(row)
@@ -22,7 +22,7 @@ func (p *Pool) CreateUser(ctx context.Context, username, displayName string, pas
 // GetUserByID returns the user by ID.
 func (p *Pool) GetUserByID(ctx context.Context, id string) (*models.User, error) {
 	row := p.QueryRow(ctx, `
-		SELECT id, username, password_hash, display_name, created_at
+		SELECT id, username, password_hash, display_name, role, created_at
 		FROM users WHERE id = $1`, id)
 	return scanUser(row)
 }
@@ -30,7 +30,7 @@ func (p *Pool) GetUserByID(ctx context.Context, id string) (*models.User, error)
 // GetUserByUsername returns the user by username.
 func (p *Pool) GetUserByUsername(ctx context.Context, username string) (*models.User, error) {
 	row := p.QueryRow(ctx, `
-		SELECT id, username, password_hash, display_name, created_at
+		SELECT id, username, password_hash, display_name, role, created_at
 		FROM users WHERE username = $1`, username)
 	return scanUser(row)
 }
@@ -38,7 +38,7 @@ func (p *Pool) GetUserByUsername(ctx context.Context, username string) (*models.
 func scanUser(row pgx.Row) (*models.User, error) {
 	var u models.User
 	var passHash *string
-	err := row.Scan(&u.ID, &u.Username, &passHash, &u.DisplayName, &u.CreatedAt)
+	err := row.Scan(&u.ID, &u.Username, &passHash, &u.DisplayName, &u.Role, &u.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
