@@ -73,6 +73,33 @@ func main() {
 		} else {
 			handshakeCache.Set(icfg.Name, icfg.IconURL, icfg.RegistrationMode, icfg.ServerCreationPolicy, icfg.OwnerID != nil)
 		}
+
+		// System message cleanup: prune expired messages every 6 hours.
+		go func() {
+			ticker := time.NewTicker(6 * time.Hour)
+			defer ticker.Stop()
+			for range ticker.C {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				retention, err := pool.GetSystemMessageRetentionDays(ctx)
+				if err != nil {
+					slog.Error("system message cleanup: get retention", "err", err)
+					cancel()
+					continue
+				}
+				if retention == nil {
+					// nil means keep forever — skip purge.
+					cancel()
+					continue
+				}
+				n, err := pool.PurgeExpiredSystemMessages(ctx, *retention)
+				cancel()
+				if err != nil {
+					slog.Error("system message cleanup", "err", err)
+				} else if n > 0 {
+					slog.Info("system messages purged", "count", n)
+				}
+			}
+		}()
 	}
 
 	wsOrigin := api.WSOriginFromCORSOrigin(cfg.CORSOrigin)
