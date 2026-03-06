@@ -100,6 +100,12 @@ type Store interface {
 
 	// User search (admin)
 	SearchUsers(ctx context.Context, query string, limit int) ([]models.UserSearchResult, error)
+
+	// System messages
+	InsertSystemMessage(ctx context.Context, serverID, eventType, actorID string, targetID *string, reason string, metadata map[string]interface{}) (*models.SystemMessage, error)
+	ListSystemMessages(ctx context.Context, serverID string, before time.Time, limit int) ([]models.SystemMessage, error)
+	PurgeExpiredSystemMessages(ctx context.Context, retentionDays int) (int64, error)
+	GetSystemMessageRetentionDays(ctx context.Context) (*int, error)
 }
 
 // InstanceAuditLogFilter filters instance audit log queries.

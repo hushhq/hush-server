@@ -76,6 +76,18 @@ type Message struct {
 	Timestamp   time.Time `json:"timestamp"`
 }
 
+// SystemMessage is an event log entry in a guild's #system channel.
+type SystemMessage struct {
+	ID        string                 `json:"id"`
+	ServerID  string                 `json:"serverId"`
+	EventType string                 `json:"eventType"`
+	ActorID   string                 `json:"actorId"`
+	TargetID  *string                `json:"targetId,omitempty"`
+	Reason    string                 `json:"reason"`
+	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt time.Time              `json:"createdAt"`
+}
+
 // Server is a guild within this Hush instance.
 type Server struct {
 	ID        string    `json:"id"`
