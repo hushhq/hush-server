@@ -212,6 +212,17 @@ func (h *channelsHandler) deleteChannel(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required to delete channel"})
 		return
 	}
+	// Block deletion of system channels.
+	ch, err := h.store.GetChannelByID(r.Context(), channelID)
+	if err != nil {
+		slog.Error("delete channel: get channel", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to get channel"})
+		return
+	}
+	if ch != nil && ch.Type == "system" {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "system channels cannot be deleted"})
+		return
+	}
 	if err := h.store.DeleteChannel(r.Context(), channelID); err != nil {
 		slog.Error("delete channel", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to delete channel"})
@@ -246,6 +257,17 @@ func (h *channelsHandler) moveChannel(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Position < 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "position must be >= 0"})
+		return
+	}
+	// Block moves on system channels.
+	ch, err := h.store.GetChannelByID(r.Context(), channelID)
+	if err != nil {
+		slog.Error("move channel: get channel", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to get channel"})
+		return
+	}
+	if ch != nil && ch.Type == "system" {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "system channels cannot be moved"})
 		return
 	}
 	if req.ParentID != nil {

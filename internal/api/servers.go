@@ -27,9 +27,11 @@ func ServerRoutes(store db.Store, hub GlobalBroadcaster, jwtSecret string) chi.R
 		r.Delete("/", h.deleteServer)
 		r.Get("/members", h.listMembers)
 		r.Put("/members/{userId}/role", h.changeRole)
+		r.Post("/leave", h.leaveServer)
 		r.Mount("/channels", ChannelRoutes(store, hub))
 		r.Mount("/invites", GuildInviteRoutes(store))
 		r.Mount("/moderation", ModerationRoutes(store, hub))
+		r.Mount("/system-messages", SystemMessagesRoutes(store))
 	})
 	return r
 }
@@ -100,6 +102,10 @@ func (h *serversHandler) createServer(w http.ResponseWriter, r *http.Request) {
 		slog.Error("createServer: add server member", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to add creator as guild owner"})
 		return
+	}
+	// Create #system channel for the new guild. Log error but don't fail — guild is still usable.
+	if _, err := h.store.CreateChannel(r.Context(), server.ID, "system", "system", nil, nil, -1); err != nil {
+		slog.Error("createServer: create system channel", "err", err)
 	}
 	writeJSON(w, http.StatusCreated, server)
 }
@@ -241,6 +247,39 @@ func (h *serversHandler) changeRole(w http.ResponseWriter, r *http.Request) {
 		})
 		h.hub.BroadcastToServer(serverID, msg)
 	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// leaveServer handles POST /api/servers/{serverId}/leave.
+// Removes the caller from the guild. Guild owners cannot leave.
+func (h *serversHandler) leaveServer(w http.ResponseWriter, r *http.Request) {
+	serverID := chi.URLParam(r, "serverId")
+	actorID := userIDFromContext(r.Context())
+	if actorID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	role := guildRoleFromContext(r.Context())
+	if role == "owner" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "guild owner cannot leave; transfer ownership first"})
+		return
+	}
+	if err := h.store.RemoveServerMember(r.Context(), serverID, actorID); err != nil {
+		slog.Error("leaveServer: remove member", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to leave guild"})
+		return
+	}
+	// Broadcast member_left.
+	if h.hub != nil {
+		msg, _ := json.Marshal(map[string]interface{}{
+			"type":      "member_left",
+			"server_id": serverID,
+			"user_id":   actorID,
+		})
+		h.hub.BroadcastToServer(serverID, msg)
+	}
+	// Emit system message.
+	EmitSystemMessage(r.Context(), h.store, h.hub, serverID, "member_left", actorID, nil, "", nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 

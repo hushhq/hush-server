@@ -199,6 +199,20 @@ func (m *messageStoreMock) SearchUsers(context.Context, string, int) ([]models.U
 	return nil, nil
 }
 
+// System messages stubs.
+func (m *messageStoreMock) InsertSystemMessage(context.Context, string, string, string, *string, string, map[string]interface{}) (*models.SystemMessage, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) ListSystemMessages(context.Context, string, time.Time, int) ([]models.SystemMessage, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) PurgeExpiredSystemMessages(context.Context, int) (int64, error) {
+	return 0, nil
+}
+func (m *messageStoreMock) GetSystemMessageRetentionDays(context.Context) (*int, error) {
+	return nil, nil
+}
+
 // drainUntilType reads from c.send until a message with the given type is received or timeout.
 func drainUntilType(t *testing.T, c *Client, wantType string, timeout time.Duration) []byte {
 	t.Helper()

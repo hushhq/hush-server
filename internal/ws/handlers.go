@@ -116,6 +116,15 @@ func (h *MessageHandler) handleMessageSend(c *Client, raw []byte) {
 		sendError(c, "forbidden", "not a channel member")
 		return
 	}
+	// Block message sends to system channels.
+	ch, chErr := h.store.GetChannelByID(ctx, payload.ChannelID)
+	if chErr != nil {
+		slog.Warn("ws GetChannelByID failed", "err", chErr, "channelID", payload.ChannelID)
+	}
+	if ch != nil && ch.Type == "system" {
+		sendError(c, "forbidden", "cannot send messages to system channel")
+		return
+	}
 	if len(payload.CiphertextByRecipient) > 0 {
 		if len(payload.CiphertextByRecipient) > maxFanoutRecipients {
 			sendError(c, "bad_request", "too many fan-out recipients")

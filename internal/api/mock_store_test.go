@@ -113,6 +113,12 @@ type mockStore struct {
 
 	// User search
 	searchUsersFn func(ctx context.Context, query string, limit int) ([]models.UserSearchResult, error)
+
+	// System messages
+	insertSystemMessageFn       func(ctx context.Context, serverID, eventType, actorID string, targetID *string, reason string, metadata map[string]interface{}) (*models.SystemMessage, error)
+	listSystemMessagesFn        func(ctx context.Context, serverID string, before time.Time, limit int) ([]models.SystemMessage, error)
+	purgeExpiredSystemMsgsFn    func(ctx context.Context, retentionDays int) (int64, error)
+	getSystemMsgRetentionDaysFn func(ctx context.Context) (*int, error)
 }
 
 // ---------- User/session ----------
@@ -558,6 +564,45 @@ func (m *mockStore) ListInstanceAuditLog(ctx context.Context, limit, offset int,
 func (m *mockStore) SearchUsers(ctx context.Context, query string, limit int) ([]models.UserSearchResult, error) {
 	if m.searchUsersFn != nil {
 		return m.searchUsersFn(ctx, query, limit)
+	}
+	return nil, nil
+}
+
+// ---------- System messages ----------
+
+func (m *mockStore) InsertSystemMessage(ctx context.Context, serverID, eventType, actorID string, targetID *string, reason string, metadata map[string]interface{}) (*models.SystemMessage, error) {
+	if m.insertSystemMessageFn != nil {
+		return m.insertSystemMessageFn(ctx, serverID, eventType, actorID, targetID, reason, metadata)
+	}
+	return &models.SystemMessage{
+		ID:        uuid.New().String(),
+		ServerID:  serverID,
+		EventType: eventType,
+		ActorID:   actorID,
+		TargetID:  targetID,
+		Reason:    reason,
+		Metadata:  metadata,
+		CreatedAt: time.Now(),
+	}, nil
+}
+
+func (m *mockStore) ListSystemMessages(ctx context.Context, serverID string, before time.Time, limit int) ([]models.SystemMessage, error) {
+	if m.listSystemMessagesFn != nil {
+		return m.listSystemMessagesFn(ctx, serverID, before, limit)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) PurgeExpiredSystemMessages(ctx context.Context, retentionDays int) (int64, error) {
+	if m.purgeExpiredSystemMsgsFn != nil {
+		return m.purgeExpiredSystemMsgsFn(ctx, retentionDays)
+	}
+	return 0, nil
+}
+
+func (m *mockStore) GetSystemMessageRetentionDays(ctx context.Context) (*int, error) {
+	if m.getSystemMsgRetentionDaysFn != nil {
+		return m.getSystemMsgRetentionDaysFn(ctx)
 	}
 	return nil, nil
 }
