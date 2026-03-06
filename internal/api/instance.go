@@ -36,8 +36,8 @@ func roleAtLeast(userRole, required string) bool {
 }
 
 // InstanceRoutes returns the router for /api/instance.
-func InstanceRoutes(store db.Store, hub GlobalBroadcaster, jwtSecret string) chi.Router {
-	h := &instanceHandler{store: store, hub: hub}
+func InstanceRoutes(store db.Store, hub GlobalBroadcaster, jwtSecret string, cache *InstanceCache) chi.Router {
+	h := &instanceHandler{store: store, hub: hub, cache: cache}
 	r := chi.NewRouter()
 	r.Use(RequireAuth(jwtSecret, store))
 	r.Get("/", h.getConfig)
@@ -53,6 +53,7 @@ func InstanceRoutes(store db.Store, hub GlobalBroadcaster, jwtSecret string) chi
 type instanceHandler struct {
 	store db.Store
 	hub   GlobalBroadcaster
+	cache *InstanceCache
 }
 
 // instanceConfigResponse extends InstanceConfig with a bootstrapped flag and the caller's role.
@@ -171,6 +172,16 @@ func (h *instanceHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 			if err := h.store.InsertInstanceAuditLog(r.Context(), userID, nil, "config_change", "instance config updated", metadata); err != nil {
 				slog.Error("insert instance audit log for config change", "err", err)
 			}
+		}
+	}
+
+	// Refresh handshake cache so GET /api/handshake reflects the updated config.
+	if h.cache != nil {
+		newCfg, cfgErr := h.store.GetInstanceConfig(r.Context())
+		if cfgErr != nil {
+			slog.Warn("handshake cache refresh failed after config update", "err", cfgErr)
+		} else {
+			h.cache.Set(newCfg.Name, newCfg.IconURL, newCfg.RegistrationMode, newCfg.ServerCreationPolicy, newCfg.OwnerID != nil)
 		}
 	}
 

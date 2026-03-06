@@ -34,6 +34,8 @@ func main() {
 		cfg.CORSOrigin = "*"
 	}
 
+	handshakeCache := api.NewInstanceCache()
+
 	var pool *db.Pool
 	if cfg.DatabaseURL != "" {
 		wd, err := os.Getwd()
@@ -62,6 +64,15 @@ func main() {
 			os.Exit(1)
 		}
 		defer pool.Close()
+
+		// Seed handshake cache from instance_config at startup.
+		icfg, seedErr := pool.GetInstanceConfig(ctx)
+		if seedErr != nil {
+			slog.Warn("handshake cache: no instance_config row at startup", "err", seedErr)
+			// cache stays zero-valued: bootstrapped=false, name="" — valid for fresh instance
+		} else {
+			handshakeCache.Set(icfg.Name, icfg.IconURL, icfg.RegistrationMode, icfg.ServerCreationPolicy, icfg.OwnerID != nil)
+		}
 	}
 
 	wsOrigin := api.WSOriginFromCORSOrigin(cfg.CORSOrigin)
@@ -95,6 +106,10 @@ func main() {
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 
+	// Public instance handshake — no auth, no DB query. Clients discover
+	// capabilities, version requirements, and registration policy here.
+	r.Get("/api/handshake", api.HandshakeHandler(handshakeCache, cfg.LiveKitAPIKey != ""))
+
 	wsHub := ws.NewHub()
 	if pool != nil && cfg.JWTSecret != "" {
 		// Auth endpoints: stricter per-IP limit — 5 requests per minute. SEC-01.
@@ -107,14 +122,14 @@ func main() {
 			sub.Use(api.UserRateLimiter(rate.Limit(10.0/60.0), 10))
 			sub.Mount("/", api.KeysRoutes(pool, wsHub, cfg.JWTSecret))
 		})
-		r.Mount("/api/instance", api.InstanceRoutes(pool, wsHub, cfg.JWTSecret))
+		r.Mount("/api/instance", api.InstanceRoutes(pool, wsHub, cfg.JWTSecret, handshakeCache))
 
 		// Guild-scoped API: auth and RequireGuildMember applied inside ServerRoutes.
 		// Channels, guild invites, and moderation are all mounted under /{serverId}.
 		r.Mount("/api/servers", api.ServerRoutes(pool, wsHub, cfg.JWTSecret))
 
 		// Public invite info (unauthenticated) + claim (authenticated, not guild-scoped).
-		r.Mount("/api/invites", api.PublicInviteRoutes(pool, cfg.JWTSecret))
+		r.Mount("/api/invites", api.PublicInviteRoutes(pool, cfg.JWTSecret, wsHub))
 
 		// Instance-operator admin endpoints.
 		r.Mount("/api/admin", api.AdminRoutes(pool, cfg.JWTSecret))
@@ -129,7 +144,7 @@ func main() {
 		Handler:      r,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 0, // Disabled: WebSocket connections manage their own write deadlines via writeWait.
-		IdleTimeout:  60 * time.Second,
+		IdleTimeout:  0, // Disabled: WebSocket connections are long-lived; the WS layer handles its own keepalive via ping/pong.
 	}
 
 	done := make(chan struct{})

@@ -14,7 +14,7 @@ import (
 )
 
 func instanceRouter(store *mockStore) http.Handler {
-	return InstanceRoutes(store, nil, testJWTSecret)
+	return InstanceRoutes(store, nil, testJWTSecret, NewInstanceCache())
 }
 
 // ---------- GET /instance ----------
