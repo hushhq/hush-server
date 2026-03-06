@@ -709,7 +709,7 @@ func TestClaimInvite_BannedUser(t *testing.T) {
 		},
 	}
 	token := makeAuth(store, userID)
-	router := PublicInviteRoutes(store, testJWTSecret)
+	router := PublicInviteRoutes(store, testJWTSecret, nil)
 
 	rr := postServerJSON(router, "/claim", map[string]string{"code": "ANYCODE"}, token)
 	require.Equal(t, http.StatusForbidden, rr.Code)
@@ -746,7 +746,7 @@ func TestClaimInvite_BannedFromGuild_Rejected(t *testing.T) {
 		},
 	}
 	token := makeAuth(store, userID)
-	router := PublicInviteRoutes(store, testJWTSecret)
+	router := PublicInviteRoutes(store, testJWTSecret, nil)
 
 	rr := postServerJSON(router, "/claim", map[string]string{"code": "GUILD-A-INVITE"}, token)
 	require.Equal(t, http.StatusForbidden, rr.Code)
@@ -806,6 +806,8 @@ func TestKickMember_CallsDisconnectUser(t *testing.T) {
 	require.NoError(t, json.Unmarshal(hub.broadcastCalls[0].message, &payload))
 	assert.Equal(t, "member_kicked", payload["type"])
 
+	// DisconnectUser runs in a goroutine after 500ms flush delay
+	time.Sleep(700 * time.Millisecond)
 	require.Len(t, hub.disconnectCalls, 1, "kickMember must call DisconnectUser once")
 	assert.Equal(t, targetID, hub.disconnectCalls[0])
 }
@@ -839,8 +841,187 @@ func TestBanMember_CallsDisconnectUser(t *testing.T) {
 	require.NoError(t, json.Unmarshal(hub.broadcastCalls[0].message, &payload))
 	assert.Equal(t, "member_banned", payload["type"])
 
+	// DisconnectUser runs in a goroutine after 500ms flush delay
+	time.Sleep(700 * time.Millisecond)
 	require.Len(t, hub.disconnectCalls, 1, "banMember must call DisconnectUser once")
 	assert.Equal(t, targetID, hub.disconnectCalls[0])
+}
+
+// ---------- System Message Emission Tests ----------
+
+// TestKickMember_EmitsSystemMessage verifies kickMember calls EmitSystemMessage
+// with event_type="member_kicked" after the audit log insert.
+func TestKickMember_EmitsSystemMessage(t *testing.T) {
+	actorID := uuid.New().String()
+	targetID := uuid.New().String()
+
+	var sysMsgCalled bool
+	var capturedEventType string
+	var capturedActorID string
+	var capturedTargetID *string
+	store := &mockStore{
+		getServerMemberRoleFn: func(_ context.Context, _, userID string) (string, error) {
+			if userID == targetID {
+				return "member", nil
+			}
+			return "", nil
+		},
+		insertSystemMessageFn: func(_ context.Context, _, eventType, actor string, target *string, _ string, _ map[string]interface{}) (*models.SystemMessage, error) {
+			sysMsgCalled = true
+			capturedEventType = eventType
+			capturedActorID = actor
+			capturedTargetID = target
+			return &models.SystemMessage{ID: uuid.New().String()}, nil
+		},
+	}
+	hub := &mockHub{}
+	router := buildModerationRouterWithHub(store, actorID, "mod", hub)
+
+	rr := postServerJSON(router, "/kick", models.KickRequest{UserID: targetID, Reason: "spamming"}, "")
+	require.Equal(t, http.StatusNoContent, rr.Code)
+	require.True(t, sysMsgCalled, "kickMember must emit system message")
+	assert.Equal(t, "member_kicked", capturedEventType)
+	assert.Equal(t, actorID, capturedActorID)
+	require.NotNil(t, capturedTargetID)
+	assert.Equal(t, targetID, *capturedTargetID)
+}
+
+// TestBanMember_EmitsSystemMessage verifies banMember calls EmitSystemMessage
+// with event_type="member_banned" and metadata containing expires_in.
+func TestBanMember_EmitsSystemMessage(t *testing.T) {
+	actorID := uuid.New().String()
+	targetID := uuid.New().String()
+	expiresIn := 3600
+
+	var sysMsgCalled bool
+	var capturedEventType string
+	var capturedMetadata map[string]interface{}
+	store := &mockStore{
+		getServerMemberRoleFn: func(_ context.Context, _, userID string) (string, error) {
+			if userID == targetID {
+				return "member", nil
+			}
+			return "", nil
+		},
+		insertBanFn: func(_ context.Context, _, _, _, _ string, _ *time.Time) (*models.Ban, error) {
+			return &models.Ban{ID: uuid.New().String()}, nil
+		},
+		insertSystemMessageFn: func(_ context.Context, _, eventType, _ string, _ *string, _ string, metadata map[string]interface{}) (*models.SystemMessage, error) {
+			sysMsgCalled = true
+			capturedEventType = eventType
+			capturedMetadata = metadata
+			return &models.SystemMessage{ID: uuid.New().String()}, nil
+		},
+	}
+	hub := &mockHub{}
+	router := buildModerationRouterWithHub(store, actorID, "admin", hub)
+
+	rr := postServerJSON(router, "/ban", models.BanRequest{UserID: targetID, Reason: "harassment", ExpiresIn: &expiresIn}, "")
+	require.Equal(t, http.StatusNoContent, rr.Code)
+	require.True(t, sysMsgCalled, "banMember must emit system message")
+	assert.Equal(t, "member_banned", capturedEventType)
+	assert.NotNil(t, capturedMetadata)
+	assert.Equal(t, float64(3600), capturedMetadata["expires_in"])
+}
+
+// TestUnbanMember_EmitsSystemMessage verifies unbanMember calls EmitSystemMessage
+// with event_type="member_unbanned".
+func TestUnbanMember_EmitsSystemMessage(t *testing.T) {
+	actorID := uuid.New().String()
+	targetID := uuid.New().String()
+	banID := uuid.New().String()
+
+	var sysMsgCalled bool
+	var capturedEventType string
+	store := &mockStore{
+		getActiveBanFn: func(_ context.Context, _, userID string) (*models.Ban, error) {
+			return &models.Ban{ID: banID, UserID: userID}, nil
+		},
+		liftBanFn: func(_ context.Context, _, _ string) error {
+			return nil
+		},
+		insertSystemMessageFn: func(_ context.Context, _, eventType, _ string, _ *string, _ string, _ map[string]interface{}) (*models.SystemMessage, error) {
+			sysMsgCalled = true
+			capturedEventType = eventType
+			return &models.SystemMessage{ID: uuid.New().String()}, nil
+		},
+	}
+	hub := &mockHub{}
+	router := buildModerationRouterWithHub(store, actorID, "admin", hub)
+
+	rr := postServerJSON(router, "/unban", models.UnbanRequest{UserID: targetID, Reason: "appeals granted"}, "")
+	require.Equal(t, http.StatusNoContent, rr.Code)
+	require.True(t, sysMsgCalled, "unbanMember must emit system message")
+	assert.Equal(t, "member_unbanned", capturedEventType)
+}
+
+// TestMuteMember_EmitsSystemMessage verifies muteMember calls EmitSystemMessage
+// with event_type="member_muted" and metadata containing expires_in.
+func TestMuteMember_EmitsSystemMessage(t *testing.T) {
+	actorID := uuid.New().String()
+	targetID := uuid.New().String()
+	expiresIn := 1800
+
+	var sysMsgCalled bool
+	var capturedEventType string
+	var capturedMetadata map[string]interface{}
+	store := &mockStore{
+		getServerMemberRoleFn: func(_ context.Context, _, userID string) (string, error) {
+			if userID == targetID {
+				return "member", nil
+			}
+			return "", nil
+		},
+		insertMuteFn: func(_ context.Context, _, _, _, _ string, _ *time.Time) (*models.Mute, error) {
+			return &models.Mute{ID: uuid.New().String()}, nil
+		},
+		insertSystemMessageFn: func(_ context.Context, _, eventType, _ string, _ *string, _ string, metadata map[string]interface{}) (*models.SystemMessage, error) {
+			sysMsgCalled = true
+			capturedEventType = eventType
+			capturedMetadata = metadata
+			return &models.SystemMessage{ID: uuid.New().String()}, nil
+		},
+	}
+	hub := &mockHub{}
+	router := buildModerationRouterWithHub(store, actorID, "mod", hub)
+
+	rr := postServerJSON(router, "/mute", models.MuteRequest{UserID: targetID, Reason: "disruptive", ExpiresIn: &expiresIn}, "")
+	require.Equal(t, http.StatusNoContent, rr.Code)
+	require.True(t, sysMsgCalled, "muteMember must emit system message")
+	assert.Equal(t, "member_muted", capturedEventType)
+	assert.NotNil(t, capturedMetadata)
+	assert.Equal(t, float64(1800), capturedMetadata["expires_in"])
+}
+
+// TestUnmuteMember_EmitsSystemMessage verifies unmuteMember calls EmitSystemMessage
+// with event_type="member_unmuted".
+func TestUnmuteMember_EmitsSystemMessage(t *testing.T) {
+	actorID := uuid.New().String()
+	targetID := uuid.New().String()
+	muteID := uuid.New().String()
+
+	var sysMsgCalled bool
+	var capturedEventType string
+	store := &mockStore{
+		getActiveMuteFn: func(_ context.Context, _, userID string) (*models.Mute, error) {
+			return &models.Mute{ID: muteID, UserID: userID}, nil
+		},
+		liftMuteFn: func(_ context.Context, _, _ string) error {
+			return nil
+		},
+		insertSystemMessageFn: func(_ context.Context, _, eventType, _ string, _ *string, _ string, _ map[string]interface{}) (*models.SystemMessage, error) {
+			sysMsgCalled = true
+			capturedEventType = eventType
+			return &models.SystemMessage{ID: uuid.New().String()}, nil
+		},
+	}
+	hub := &mockHub{}
+	router := buildModerationRouterWithHub(store, actorID, "mod", hub)
+
+	rr := postServerJSON(router, "/unmute", models.UnmuteRequest{UserID: targetID, Reason: "time served"}, "")
+	require.Equal(t, http.StatusNoContent, rr.Code)
+	require.True(t, sysMsgCalled, "unmuteMember must emit system message")
+	assert.Equal(t, "member_unmuted", capturedEventType)
 }
 
 // TestClaimInvite_BannedFromOtherGuild_Allowed verifies that a guild-scoped ban does NOT
@@ -875,7 +1056,7 @@ func TestClaimInvite_BannedFromOtherGuild_Allowed(t *testing.T) {
 		},
 	}
 	token := makeAuth(store, userID)
-	router := PublicInviteRoutes(store, testJWTSecret)
+	router := PublicInviteRoutes(store, testJWTSecret, nil)
 
 	rr := postServerJSON(router, "/claim", map[string]string{"code": "GUILD-B-INVITE"}, token)
 	// Guild B invite must succeed even though user is banned from Guild A.

@@ -18,7 +18,7 @@ import (
 
 // publicInvitesRouter returns the public invite router (GET /:code, POST /claim).
 func publicInvitesRouter(store *mockStore) http.Handler {
-	return PublicInviteRoutes(store, testJWTSecret)
+	return PublicInviteRoutes(store, testJWTSecret, nil)
 }
 
 // guildInvitesRouter returns the guild-scoped invite router (POST /).
@@ -261,4 +261,51 @@ func TestCreateInvite_NoAuth_Returns401(t *testing.T) {
 	router := publicInvitesRouter(store)
 	rr := postInviteJSON(router, "/claim", map[string]string{"code": "ANYCODE"}, "")
 	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+}
+
+// ---------- System Message Emission ----------
+
+// TestClaimInvite_EmitsSystemMessage verifies claimInvite calls EmitSystemMessage
+// with event_type="member_joined" after the member_joined broadcast.
+func TestClaimInvite_EmitsSystemMessage(t *testing.T) {
+	userID := uuid.New().String()
+	serverID := uuid.New().String()
+
+	var sysMsgCalled bool
+	var capturedEventType string
+	var capturedActorID string
+	var capturedTargetID *string
+	store := &mockStore{
+		getInviteByCodeFn: func(_ context.Context, code string) (*models.InviteCode, error) {
+			return &models.InviteCode{
+				Code:      code,
+				ServerID:  &serverID,
+				ExpiresAt: time.Now().Add(time.Hour),
+				MaxUses:   10,
+			}, nil
+		},
+		claimInviteUseFn: func(_ context.Context, _ string) (bool, error) {
+			return true, nil
+		},
+		getServerByIDFn: func(_ context.Context, _ string) (*models.Server, error) {
+			return &models.Server{ID: serverID, Name: "Test Guild"}, nil
+		},
+		insertSystemMessageFn: func(_ context.Context, _, eventType, actorID string, targetID *string, _ string, _ map[string]interface{}) (*models.SystemMessage, error) {
+			sysMsgCalled = true
+			capturedEventType = eventType
+			capturedActorID = actorID
+			capturedTargetID = targetID
+			return &models.SystemMessage{ID: uuid.New().String()}, nil
+		},
+	}
+	token := makeAuth(store, userID)
+	hub := &mockHub{}
+	router := PublicInviteRoutes(store, testJWTSecret, hub)
+
+	rr := postInviteJSON(router, "/claim", map[string]string{"code": "TESTCODE"}, token)
+	require.Equal(t, http.StatusOK, rr.Code)
+	require.True(t, sysMsgCalled, "claimInvite must emit system message")
+	assert.Equal(t, "member_joined", capturedEventType)
+	assert.Equal(t, userID, capturedActorID)
+	assert.Nil(t, capturedTargetID, "member_joined has no target (the actor IS the joiner)")
 }

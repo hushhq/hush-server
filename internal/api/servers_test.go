@@ -394,6 +394,49 @@ func TestChangeRole_CannotPromoteAboveSelf(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, rr.Code)
 }
 
+// TestChangeRole_EmitsSystemMessage verifies changeRole calls EmitSystemMessage
+// with event_type="role_changed" and metadata containing old_role/new_role.
+func TestChangeRole_EmitsSystemMessage(t *testing.T) {
+	actorID := uuid.New().String()
+	targetID := uuid.New().String()
+	serverID := uuid.New().String()
+
+	var sysMsgCalled bool
+	var capturedEventType string
+	var capturedMetadata map[string]interface{}
+	store := &mockStore{
+		getServerMemberRoleFn: func(_ context.Context, _, userID string) (string, error) {
+			switch userID {
+			case actorID:
+				return "admin", nil
+			case targetID:
+				return "member", nil
+			}
+			return "", nil
+		},
+		updateServerMemberRoleFn: func(_ context.Context, _, _, _ string) error {
+			return nil
+		},
+		insertSystemMessageFn: func(_ context.Context, _, eventType, _ string, _ *string, _ string, metadata map[string]interface{}) (*models.SystemMessage, error) {
+			sysMsgCalled = true
+			capturedEventType = eventType
+			capturedMetadata = metadata
+			return &models.SystemMessage{ID: uuid.New().String()}, nil
+		},
+	}
+	token := makeAuth(store, actorID)
+	router := ServerRoutes(store, &mockHub{}, testJWTSecret)
+
+	rr := putServerJSON(router, "/"+serverID+"/members/"+targetID+"/role",
+		changeRoleRequest{NewRole: "mod"}, token)
+	require.Equal(t, http.StatusNoContent, rr.Code)
+	require.True(t, sysMsgCalled, "changeRole must emit system message")
+	assert.Equal(t, "role_changed", capturedEventType)
+	require.NotNil(t, capturedMetadata)
+	assert.Equal(t, "member", capturedMetadata["old_role"])
+	assert.Equal(t, "mod", capturedMetadata["new_role"])
+}
+
 // ---------- GET /admin/guilds (listGuildBillingStats) ----------
 
 func TestListGuildBillingStats_OwnerOnly(t *testing.T) {
