@@ -801,9 +801,10 @@ func TestKickMember_CallsDisconnectUser(t *testing.T) {
 	rr := postServerJSON(router, "/kick", models.KickRequest{UserID: targetID, Reason: "spamming"}, "")
 	require.Equal(t, http.StatusNoContent, rr.Code)
 
-	require.Len(t, hub.broadcastCalls, 1, "kickMember must broadcast member_kicked")
+	// 2 broadcasts: system_message (from EmitSystemMessage) + member_kicked
+	require.Len(t, hub.broadcastCalls, 2, "kickMember must broadcast system_message and member_kicked")
 	var payload map[string]interface{}
-	require.NoError(t, json.Unmarshal(hub.broadcastCalls[0].message, &payload))
+	require.NoError(t, json.Unmarshal(hub.broadcastCalls[1].message, &payload))
 	assert.Equal(t, "member_kicked", payload["type"])
 
 	// DisconnectUser runs in a goroutine after 500ms flush delay
@@ -836,9 +837,10 @@ func TestBanMember_CallsDisconnectUser(t *testing.T) {
 	rr := postServerJSON(router, "/ban", models.BanRequest{UserID: targetID, Reason: "harassment"}, "")
 	require.Equal(t, http.StatusNoContent, rr.Code)
 
-	require.Len(t, hub.broadcastCalls, 1, "banMember must broadcast member_banned")
+	// 2 broadcasts: system_message (from EmitSystemMessage) + member_banned
+	require.Len(t, hub.broadcastCalls, 2, "banMember must broadcast system_message and member_banned")
 	var payload map[string]interface{}
-	require.NoError(t, json.Unmarshal(hub.broadcastCalls[0].message, &payload))
+	require.NoError(t, json.Unmarshal(hub.broadcastCalls[1].message, &payload))
 	assert.Equal(t, "member_banned", payload["type"])
 
 	// DisconnectUser runs in a goroutine after 500ms flush delay
@@ -921,7 +923,7 @@ func TestBanMember_EmitsSystemMessage(t *testing.T) {
 	require.True(t, sysMsgCalled, "banMember must emit system message")
 	assert.Equal(t, "member_banned", capturedEventType)
 	assert.NotNil(t, capturedMetadata)
-	assert.Equal(t, float64(3600), capturedMetadata["expires_in"])
+	assert.Equal(t, 3600, capturedMetadata["expires_in"])
 }
 
 // TestUnbanMember_EmitsSystemMessage verifies unbanMember calls EmitSystemMessage
@@ -990,7 +992,7 @@ func TestMuteMember_EmitsSystemMessage(t *testing.T) {
 	require.True(t, sysMsgCalled, "muteMember must emit system message")
 	assert.Equal(t, "member_muted", capturedEventType)
 	assert.NotNil(t, capturedMetadata)
-	assert.Equal(t, float64(1800), capturedMetadata["expires_in"])
+	assert.Equal(t, 1800, capturedMetadata["expires_in"])
 }
 
 // TestUnmuteMember_EmitsSystemMessage verifies unmuteMember calls EmitSystemMessage

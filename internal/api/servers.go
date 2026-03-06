@@ -238,6 +238,7 @@ func (h *serversHandler) changeRole(w http.ResponseWriter, r *http.Request) {
 	if err := h.store.InsertAuditLog(r.Context(), serverID, actorID, &targetUserID, "role_change", "role changed via guild management", metadata); err != nil {
 		slog.Error("changeRole: insert audit log", "err", err)
 	}
+	EmitSystemMessage(r.Context(), h.store, h.hub, serverID, "role_changed", actorID, &targetUserID, "role changed", metadata)
 	if h.hub != nil {
 		msg, _ := json.Marshal(map[string]interface{}{
 			"type":      "member_role_changed",

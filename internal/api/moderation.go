@@ -91,6 +91,7 @@ func (h *moderationHandler) kickMember(w http.ResponseWriter, r *http.Request) {
 	if err := h.store.InsertAuditLog(r.Context(), serverID, actorID, &targetID, "kick", req.Reason, nil); err != nil {
 		slog.Error("kick: insert audit log", "err", err)
 	}
+	EmitSystemMessage(r.Context(), h.store, h.hub, serverID, "member_kicked", actorID, &targetID, req.Reason, nil)
 	if h.hub != nil {
 		msg, _ := json.Marshal(map[string]interface{}{
 			"type":      "member_kicked",
@@ -98,7 +99,11 @@ func (h *moderationHandler) kickMember(w http.ResponseWriter, r *http.Request) {
 			"user_id":   req.UserID,
 		})
 		h.hub.BroadcastToServer(serverID, msg)
-		h.hub.DisconnectUser(req.UserID)
+		kickedUID := req.UserID
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			h.hub.DisconnectUser(kickedUID)
+		}()
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -165,6 +170,7 @@ func (h *moderationHandler) banMember(w http.ResponseWriter, r *http.Request) {
 	if err := h.store.InsertAuditLog(r.Context(), serverID, actorID, &targetID, "ban", req.Reason, metadata); err != nil {
 		slog.Error("ban: insert audit log", "err", err)
 	}
+	EmitSystemMessage(r.Context(), h.store, h.hub, serverID, "member_banned", actorID, &targetID, req.Reason, metadata)
 	if h.hub != nil {
 		msg, _ := json.Marshal(map[string]interface{}{
 			"type":      "member_banned",
@@ -172,7 +178,13 @@ func (h *moderationHandler) banMember(w http.ResponseWriter, r *http.Request) {
 			"user_id":   req.UserID,
 		})
 		h.hub.BroadcastToServer(serverID, msg)
-		h.hub.DisconnectUser(req.UserID)
+		// Delay disconnect so the writePump has time to deliver the broadcast
+		// to the banned user before the connection is torn down.
+		bannedUID := req.UserID
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			h.hub.DisconnectUser(bannedUID)
+		}()
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -223,6 +235,7 @@ func (h *moderationHandler) unbanMember(w http.ResponseWriter, r *http.Request) 
 	if err := h.store.InsertAuditLog(r.Context(), serverID, actorID, &targetID, "unban", req.Reason, nil); err != nil {
 		slog.Error("unban: insert audit log", "err", err)
 	}
+	EmitSystemMessage(r.Context(), h.store, h.hub, serverID, "member_unbanned", actorID, &targetID, req.Reason, nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -284,6 +297,7 @@ func (h *moderationHandler) muteMember(w http.ResponseWriter, r *http.Request) {
 	if err := h.store.InsertAuditLog(r.Context(), serverID, actorID, &targetID, "mute", req.Reason, metadata); err != nil {
 		slog.Error("mute: insert audit log", "err", err)
 	}
+	EmitSystemMessage(r.Context(), h.store, h.hub, serverID, "member_muted", actorID, &targetID, req.Reason, metadata)
 	if h.hub != nil {
 		msg, _ := json.Marshal(map[string]interface{}{
 			"type":      "member_muted",
@@ -341,6 +355,7 @@ func (h *moderationHandler) unmuteMember(w http.ResponseWriter, r *http.Request)
 	if err := h.store.InsertAuditLog(r.Context(), serverID, actorID, &targetID, "unmute", req.Reason, nil); err != nil {
 		slog.Error("unmute: insert audit log", "err", err)
 	}
+	EmitSystemMessage(r.Context(), h.store, h.hub, serverID, "member_unmuted", actorID, &targetID, req.Reason, nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 

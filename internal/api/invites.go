@@ -32,8 +32,8 @@ func GuildInviteRoutes(store db.Store) chi.Router {
 
 // PublicInviteRoutes returns the router for invite resolution and claiming.
 // Mounted at /api/invites. Auth is applied inside for the claim route.
-func PublicInviteRoutes(store db.Store, jwtSecret string) chi.Router {
-	h := &inviteHandler{store: store}
+func PublicInviteRoutes(store db.Store, jwtSecret string, hub GlobalBroadcaster) chi.Router {
+	h := &inviteHandler{store: store, hub: hub}
 	r := chi.NewRouter()
 	// Public: resolve invite info before login (unauthenticated).
 	r.Get("/{code}", h.getInviteInfo)
@@ -47,6 +47,7 @@ func PublicInviteRoutes(store db.Store, jwtSecret string) chi.Router {
 
 type inviteHandler struct {
 	store db.Store
+	hub   GlobalBroadcaster
 }
 
 // inviteInfoResponse is returned for public GET /api/invites/:code.
@@ -232,6 +233,27 @@ func (h *inviteHandler) claimInvite(w http.ResponseWriter, r *http.Request) {
 	if err == nil && guild != nil {
 		guildName = guild.Name
 	}
+
+	// Broadcast member_joined so other connected users see the new member.
+	if h.hub != nil {
+		member := map[string]interface{}{
+			"id":   userID,
+			"role": "member",
+		}
+		if u, err := h.store.GetUserByID(r.Context(), userID); err == nil && u != nil {
+			member["username"] = u.Username
+			member["displayName"] = u.DisplayName
+		}
+		msg, _ := json.Marshal(map[string]interface{}{
+			"type":      "member_joined",
+			"server_id": serverID,
+			"member":    member,
+		})
+		h.hub.BroadcastToServer(serverID, msg)
+	}
+
+	// Emit system message: the joining user is the actor, no target.
+	EmitSystemMessage(r.Context(), h.store, h.hub, serverID, "member_joined", userID, nil, "", nil)
 
 	writeJSON(w, http.StatusOK, claimInviteResponse{
 		ServerID:  serverID,
