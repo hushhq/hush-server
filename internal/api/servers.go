@@ -12,6 +12,16 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// defaultTemplate returns the 3-channel template used when instance_config.server_template is NULL.
+func defaultTemplate() []models.TemplateChannel {
+	quality := "quality"
+	return []models.TemplateChannel{
+		{Name: "system", Type: "system", Position: -1},
+		{Name: "general", Type: "text", Position: 0},
+		{Name: "General", Type: "voice", VoiceMode: &quality, Position: 1},
+	}
+}
+
 // ServerRoutes mounts guild CRUD, member management, and nested sub-routes
 // (channels, guild invites, moderation). Auth is applied at the top level;
 // RequireGuildMember is applied to all /{serverId} sub-routes.
@@ -103,11 +113,109 @@ func (h *serversHandler) createServer(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to add creator as guild owner"})
 		return
 	}
-	// Create #system channel for the new guild. Log error but don't fail — guild is still usable.
-	if _, err := h.store.CreateChannel(r.Context(), server.ID, "system", "system", nil, nil, -1); err != nil {
-		slog.Error("createServer: create system channel", "err", err)
-	}
+	// Server creation itself succeeded — respond immediately. Template channels are fire-and-forget.
 	writeJSON(w, http.StatusCreated, server)
+
+	// Apply server template channels from instance_config.
+	template := cfg.ServerTemplate
+	if len(template) == 0 {
+		template = defaultTemplate()
+	}
+	// Ensure #system channel is always present in the template.
+	hasSystem := false
+	for _, tc := range template {
+		if tc.Type == "system" {
+			hasSystem = true
+			break
+		}
+	}
+	if !hasSystem {
+		template = append([]models.TemplateChannel{{Name: "system", Type: "system", Position: -1}}, template...)
+	}
+
+	ctx := r.Context()
+	failures := 0
+
+	// Pass 1: Create entries with no ParentRef (categories, top-level channels, system).
+	// Build a map of category name -> created UUID for pass 2.
+	categoryMap := map[string]string{}
+	for _, tc := range template {
+		if tc.ParentRef != nil {
+			continue // handled in pass 2
+		}
+		// Idempotency: skip if channel already exists
+		existing, err := h.store.GetChannelByNameAndType(ctx, server.ID, tc.Name, tc.Type)
+		if err != nil {
+			slog.Error("createServer: idempotency check", "err", err, "channel", tc.Name)
+			failures++
+			continue
+		}
+		if existing != nil {
+			if tc.Type == "category" {
+				categoryMap[tc.Name] = existing.ID
+			}
+			continue
+		}
+		ch, err := h.store.CreateChannel(ctx, server.ID, tc.Name, tc.Type, tc.VoiceMode, nil, tc.Position)
+		if err != nil {
+			slog.Error("createServer: create template channel", "err", err, "channel", tc.Name)
+			failures++
+			continue
+		}
+		if tc.Type == "category" {
+			categoryMap[tc.Name] = ch.ID
+		}
+		// Broadcast channel_created.
+		if h.hub != nil {
+			msg, _ := json.Marshal(map[string]interface{}{
+				"type":    "channel_created",
+				"channel": ch,
+			})
+			h.hub.BroadcastToServer(server.ID, msg)
+		}
+	}
+
+	// Pass 2: Create entries with ParentRef (channels under categories).
+	for _, tc := range template {
+		if tc.ParentRef == nil {
+			continue
+		}
+		parentID, ok := categoryMap[*tc.ParentRef]
+		if !ok {
+			slog.Error("createServer: parent category not found", "parentRef", *tc.ParentRef, "channel", tc.Name)
+			failures++
+			continue
+		}
+		existing, err := h.store.GetChannelByNameAndType(ctx, server.ID, tc.Name, tc.Type)
+		if err != nil {
+			slog.Error("createServer: idempotency check", "err", err, "channel", tc.Name)
+			failures++
+			continue
+		}
+		if existing != nil {
+			continue
+		}
+		ch, err := h.store.CreateChannel(ctx, server.ID, tc.Name, tc.Type, tc.VoiceMode, &parentID, tc.Position)
+		if err != nil {
+			slog.Error("createServer: create template channel", "err", err, "channel", tc.Name)
+			failures++
+			continue
+		}
+		if h.hub != nil {
+			msg, _ := json.Marshal(map[string]interface{}{
+				"type":    "channel_created",
+				"channel": ch,
+			})
+			h.hub.BroadcastToServer(server.ID, msg)
+		}
+	}
+
+	// Emit system message: server_created
+	EmitSystemMessage(ctx, h.store, h.hub, server.ID, "server_created", userID, nil, "", nil)
+	// If any template channels failed, emit partial failure system message.
+	if failures > 0 {
+		EmitSystemMessage(ctx, h.store, h.hub, server.ID, "template_partial_failure", userID, nil, "Some default channels could not be created", nil)
+	}
 }
 
 // listMyServers handles GET /api/servers — returns guilds the caller belongs to.

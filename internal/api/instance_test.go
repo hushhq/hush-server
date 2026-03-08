@@ -178,3 +178,130 @@ func TestListMembers_Unauthenticated_Returns401(t *testing.T) {
 	rr := getServer(router, "/members", "")
 	assert.Equal(t, http.StatusUnauthorized, rr.Code)
 }
+
+// ---------- PUT /instance/server-template ----------
+
+func TestUpdateServerTemplate_Success(t *testing.T) {
+	userID := uuid.New().String()
+	store := &mockStore{}
+	token := makeAuth(store, userID)
+	store.getUserRoleFn = func(_ context.Context, _ string) (string, error) { return "owner", nil }
+	var capturedTemplate json.RawMessage
+	store.updateServerTemplateFn = func(_ context.Context, tmpl json.RawMessage) error {
+		capturedTemplate = tmpl
+		return nil
+	}
+
+	quality := "quality"
+	body := updateServerTemplateRequest{
+		Template: []models.TemplateChannel{
+			{Name: "system", Type: "system", Position: -1},
+			{Name: "general", Type: "text", Position: 0},
+			{Name: "Lounge", Type: "voice", VoiceMode: &quality, Position: 1},
+		},
+	}
+	router := instanceRouter(store)
+	rr := putServerJSON(router, "/server-template", body, token)
+	require.Equal(t, http.StatusNoContent, rr.Code)
+	require.NotNil(t, capturedTemplate, "UpdateServerTemplate must be called")
+
+	// Verify the stored JSON has 3 entries
+	var stored []models.TemplateChannel
+	require.NoError(t, json.Unmarshal(capturedTemplate, &stored))
+	require.Len(t, stored, 3)
+	assert.Equal(t, "system", stored[0].Name)
+	assert.Equal(t, "general", stored[1].Name)
+	assert.Equal(t, "Lounge", stored[2].Name)
+}
+
+func TestUpdateServerTemplate_SystemRequired(t *testing.T) {
+	userID := uuid.New().String()
+	store := &mockStore{}
+	token := makeAuth(store, userID)
+	store.getUserRoleFn = func(_ context.Context, _ string) (string, error) { return "owner", nil }
+
+	// Template without system channel
+	body := updateServerTemplateRequest{
+		Template: []models.TemplateChannel{
+			{Name: "general", Type: "text", Position: 0},
+		},
+	}
+	router := instanceRouter(store)
+	rr := putServerJSON(router, "/server-template", body, token)
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+	errBody := decodeError(t, rr)
+	assert.Contains(t, errBody["error"], "system channel is required")
+}
+
+func TestUpdateServerTemplate_Forbidden(t *testing.T) {
+	userID := uuid.New().String()
+	store := &mockStore{}
+	token := makeAuth(store, userID)
+	store.getUserRoleFn = func(_ context.Context, _ string) (string, error) { return "admin", nil }
+
+	body := updateServerTemplateRequest{
+		Template: []models.TemplateChannel{
+			{Name: "system", Type: "system", Position: -1},
+		},
+	}
+	router := instanceRouter(store)
+	rr := putServerJSON(router, "/server-template", body, token)
+	require.Equal(t, http.StatusForbidden, rr.Code)
+}
+
+func TestUpdateServerTemplate_InvalidType(t *testing.T) {
+	userID := uuid.New().String()
+	store := &mockStore{}
+	token := makeAuth(store, userID)
+	store.getUserRoleFn = func(_ context.Context, _ string) (string, error) { return "owner", nil }
+
+	body := updateServerTemplateRequest{
+		Template: []models.TemplateChannel{
+			{Name: "system", Type: "system", Position: -1},
+			{Name: "weird", Type: "banana", Position: 0}, // invalid type
+		},
+	}
+	router := instanceRouter(store)
+	rr := putServerJSON(router, "/server-template", body, token)
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+	errBody := decodeError(t, rr)
+	assert.Contains(t, errBody["error"], "invalid channel type")
+}
+
+func TestUpdateServerTemplate_VoiceRequiresMode(t *testing.T) {
+	userID := uuid.New().String()
+	store := &mockStore{}
+	token := makeAuth(store, userID)
+	store.getUserRoleFn = func(_ context.Context, _ string) (string, error) { return "owner", nil }
+
+	body := updateServerTemplateRequest{
+		Template: []models.TemplateChannel{
+			{Name: "system", Type: "system", Position: -1},
+			{Name: "voice-ch", Type: "voice", Position: 0}, // no voiceMode
+		},
+	}
+	router := instanceRouter(store)
+	rr := putServerJSON(router, "/server-template", body, token)
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+	errBody := decodeError(t, rr)
+	assert.Contains(t, errBody["error"], "voiceMode")
+}
+
+func TestUpdateServerTemplate_CategoryCannotHaveParentRef(t *testing.T) {
+	userID := uuid.New().String()
+	store := &mockStore{}
+	token := makeAuth(store, userID)
+	store.getUserRoleFn = func(_ context.Context, _ string) (string, error) { return "owner", nil }
+
+	body := updateServerTemplateRequest{
+		Template: []models.TemplateChannel{
+			{Name: "system", Type: "system", Position: -1},
+			{Name: "Category", Type: "category", ParentRef: ptrString("other"), Position: 0},
+		},
+	}
+	router := instanceRouter(store)
+	rr := putServerJSON(router, "/server-template", body, token)
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+	errBody := decodeError(t, rr)
+	assert.Contains(t, errBody["error"], "categories cannot have parentRef")
+}
