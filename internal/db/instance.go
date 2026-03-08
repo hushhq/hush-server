@@ -16,24 +16,132 @@ import (
 // GetInstanceConfig returns the single instance configuration row.
 func (p *Pool) GetInstanceConfig(ctx context.Context) (*models.InstanceConfig, error) {
 	row := p.QueryRow(ctx, `
-		SELECT id, name, icon_url, owner_id, registration_mode, server_creation_policy, server_template, created_at
+		SELECT id, name, icon_url, owner_id, registration_mode, server_creation_policy, created_at
 		FROM instance_config LIMIT 1`)
 	var c models.InstanceConfig
-	var templateBytes []byte
-	if err := row.Scan(&c.ID, &c.Name, &c.IconURL, &c.OwnerID, &c.RegistrationMode, &c.ServerCreationPolicy, &templateBytes, &c.CreatedAt); err != nil {
+	if err := row.Scan(&c.ID, &c.Name, &c.IconURL, &c.OwnerID, &c.RegistrationMode, &c.ServerCreationPolicy, &c.CreatedAt); err != nil {
 		return nil, err
-	}
-	if templateBytes != nil {
-		if err := json.Unmarshal(templateBytes, &c.ServerTemplate); err != nil {
-			return nil, fmt.Errorf("unmarshal server_template: %w", err)
-		}
 	}
 	return &c, nil
 }
 
-// UpdateServerTemplate replaces the server_template JSONB column in instance_config.
-func (p *Pool) UpdateServerTemplate(ctx context.Context, template json.RawMessage) error {
-	_, err := p.Exec(ctx, `UPDATE instance_config SET server_template = $1`, template)
+// ListServerTemplates returns all server templates ordered by position.
+func (p *Pool) ListServerTemplates(ctx context.Context) ([]models.ServerTemplate, error) {
+	rows, err := p.Query(ctx, `
+		SELECT id, name, channels, is_default, position, created_at, updated_at
+		FROM server_templates ORDER BY position, created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []models.ServerTemplate
+	for rows.Next() {
+		var t models.ServerTemplate
+		var channelsBytes []byte
+		if err := rows.Scan(&t.ID, &t.Name, &channelsBytes, &t.IsDefault, &t.Position, &t.CreatedAt, &t.UpdatedAt); err != nil {
+			return nil, err
+		}
+		if channelsBytes != nil {
+			if err := json.Unmarshal(channelsBytes, &t.Channels); err != nil {
+				return nil, fmt.Errorf("unmarshal template channels: %w", err)
+			}
+		}
+		out = append(out, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		out = []models.ServerTemplate{}
+	}
+	return out, nil
+}
+
+// GetServerTemplateByID returns a single server template by ID.
+func (p *Pool) GetServerTemplateByID(ctx context.Context, id string) (*models.ServerTemplate, error) {
+	row := p.QueryRow(ctx, `
+		SELECT id, name, channels, is_default, position, created_at, updated_at
+		FROM server_templates WHERE id = $1`, id)
+	var t models.ServerTemplate
+	var channelsBytes []byte
+	if err := row.Scan(&t.ID, &t.Name, &channelsBytes, &t.IsDefault, &t.Position, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		return nil, err
+	}
+	if channelsBytes != nil {
+		if err := json.Unmarshal(channelsBytes, &t.Channels); err != nil {
+			return nil, fmt.Errorf("unmarshal template channels: %w", err)
+		}
+	}
+	return &t, nil
+}
+
+// GetDefaultServerTemplate returns the template marked as default, or nil.
+func (p *Pool) GetDefaultServerTemplate(ctx context.Context) (*models.ServerTemplate, error) {
+	row := p.QueryRow(ctx, `
+		SELECT id, name, channels, is_default, position, created_at, updated_at
+		FROM server_templates WHERE is_default = true LIMIT 1`)
+	var t models.ServerTemplate
+	var channelsBytes []byte
+	err := row.Scan(&t.ID, &t.Name, &channelsBytes, &t.IsDefault, &t.Position, &t.CreatedAt, &t.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if channelsBytes != nil {
+		if err := json.Unmarshal(channelsBytes, &t.Channels); err != nil {
+			return nil, fmt.Errorf("unmarshal template channels: %w", err)
+		}
+	}
+	return &t, nil
+}
+
+// CreateServerTemplate inserts a new server template. If isDefault is true, clears default on all others.
+func (p *Pool) CreateServerTemplate(ctx context.Context, name string, channels json.RawMessage, isDefault bool) (*models.ServerTemplate, error) {
+	if isDefault {
+		if _, err := p.Exec(ctx, `UPDATE server_templates SET is_default = false WHERE is_default = true`); err != nil {
+			return nil, err
+		}
+	}
+	// Position = count of existing templates
+	var pos int
+	_ = p.QueryRow(ctx, `SELECT COALESCE(MAX(position), -1) + 1 FROM server_templates`).Scan(&pos)
+
+	row := p.QueryRow(ctx, `
+		INSERT INTO server_templates (name, channels, is_default, position)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id, name, channels, is_default, position, created_at, updated_at`,
+		name, channels, isDefault, pos)
+	var t models.ServerTemplate
+	var channelsBytes []byte
+	if err := row.Scan(&t.ID, &t.Name, &channelsBytes, &t.IsDefault, &t.Position, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		return nil, err
+	}
+	if channelsBytes != nil {
+		if err := json.Unmarshal(channelsBytes, &t.Channels); err != nil {
+			return nil, fmt.Errorf("unmarshal template channels: %w", err)
+		}
+	}
+	return &t, nil
+}
+
+// UpdateServerTemplate updates a server template by ID. If isDefault is true, clears default on all others.
+func (p *Pool) UpdateServerTemplate(ctx context.Context, id string, name string, channels json.RawMessage, isDefault bool) error {
+	if isDefault {
+		if _, err := p.Exec(ctx, `UPDATE server_templates SET is_default = false WHERE is_default = true AND id != $1`, id); err != nil {
+			return err
+		}
+	}
+	_, err := p.Exec(ctx, `
+		UPDATE server_templates SET name = $2, channels = $3, is_default = $4, updated_at = now()
+		WHERE id = $1`, id, name, channels, isDefault)
+	return err
+}
+
+// DeleteServerTemplate deletes a server template by ID.
+func (p *Pool) DeleteServerTemplate(ctx context.Context, id string) error {
+	_, err := p.Exec(ctx, `DELETE FROM server_templates WHERE id = $1`, id)
 	return err
 }
 

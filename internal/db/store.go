@@ -49,8 +49,13 @@ type Store interface {
 	DeleteChannel(ctx context.Context, channelID string) error
 	MoveChannel(ctx context.Context, channelID string, parentID *string, position int) error
 
-	// Server template
-	UpdateServerTemplate(ctx context.Context, template json.RawMessage) error
+	// Server templates
+	ListServerTemplates(ctx context.Context) ([]models.ServerTemplate, error)
+	GetServerTemplateByID(ctx context.Context, id string) (*models.ServerTemplate, error)
+	GetDefaultServerTemplate(ctx context.Context) (*models.ServerTemplate, error)
+	CreateServerTemplate(ctx context.Context, name string, channels json.RawMessage, isDefault bool) (*models.ServerTemplate, error)
+	UpdateServerTemplate(ctx context.Context, id string, name string, channels json.RawMessage, isDefault bool) error
+	DeleteServerTemplate(ctx context.Context, id string) error
 
 	// Invite operations
 	CreateInvite(ctx context.Context, serverID, code, createdBy string, maxUses int, expiresAt time.Time) (*models.InviteCode, error)

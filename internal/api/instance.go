@@ -47,8 +47,10 @@ func InstanceRoutes(store db.Store, hub GlobalBroadcaster, jwtSecret string, cac
 	r.Post("/bans", h.instanceBan)
 	r.Post("/unban", h.instanceUnban)
 	r.Get("/audit-log", h.instanceAuditLog)
-	r.Get("/server-template", h.getServerTemplate)
-	r.Put("/server-template", h.updateServerTemplate)
+	r.Get("/server-templates", h.listServerTemplates)
+	r.Post("/server-templates", h.createServerTemplate)
+	r.Put("/server-templates/{templateId}", h.updateServerTemplate)
+	r.Delete("/server-templates/{templateId}", h.deleteServerTemplate)
 	return r
 }
 
@@ -444,31 +446,16 @@ func (h *instanceHandler) instanceAuditLog(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, entries)
 }
 
-// getServerTemplate handles GET /api/instance/server-template.
-// Owner-only. Returns the server template from instance_config (or default if nil).
-func (h *instanceHandler) getServerTemplate(w http.ResponseWriter, r *http.Request) {
-	userID := userIDFromContext(r.Context())
-	role, err := h.store.GetUserRole(r.Context(), userID)
+// listServerTemplates handles GET /api/instance/server-templates.
+// Available to all authenticated users (needed for template picker in guild creation).
+func (h *instanceHandler) listServerTemplates(w http.ResponseWriter, r *http.Request) {
+	templates, err := h.store.ListServerTemplates(r.Context())
 	if err != nil {
-		slog.Error("get user role", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify role"})
+		slog.Error("list server templates", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list templates"})
 		return
 	}
-	if !roleAtLeast(role, "owner") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "owner role required"})
-		return
-	}
-	cfg, err := h.store.GetInstanceConfig(r.Context())
-	if err != nil {
-		slog.Error("get instance config for server template", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load instance config"})
-		return
-	}
-	template := cfg.ServerTemplate
-	if len(template) == 0 {
-		template = defaultTemplate()
-	}
-	writeJSON(w, http.StatusOK, template)
+	writeJSON(w, http.StatusOK, templates)
 }
 
 // validChannelTypes enumerates allowed channel types in the server template.
@@ -479,14 +466,51 @@ var validChannelTypes = map[string]bool{
 	"system":   true,
 }
 
-// updateServerTemplateRequest is the JSON body for PUT /api/instance/server-template.
-type updateServerTemplateRequest struct {
-	Template []models.TemplateChannel `json:"template"`
+// validateTemplateChannels validates a slice of template channels.
+func validateTemplateChannels(channels []models.TemplateChannel) string {
+	if len(channels) == 0 {
+		return "channels must not be empty"
+	}
+	hasSystem := false
+	for _, tc := range channels {
+		if strings.TrimSpace(tc.Name) == "" {
+			return "channel name must not be empty"
+		}
+		if !validChannelTypes[tc.Type] {
+			return "invalid channel type: " + tc.Type
+		}
+		if tc.Type == "voice" {
+			if tc.VoiceMode == nil {
+				return "voice channel must have voiceMode"
+			}
+			if *tc.VoiceMode != "quality" && *tc.VoiceMode != "low-latency" {
+				return "voiceMode must be quality or low-latency"
+			}
+		} else if tc.VoiceMode != nil {
+			return "only voice channels may have voiceMode"
+		}
+		if tc.Type == "category" && tc.ParentRef != nil {
+			return "categories cannot have parentRef"
+		}
+		if tc.Type == "system" {
+			hasSystem = true
+		}
+	}
+	if !hasSystem {
+		return "system channel is required in template"
+	}
+	return ""
 }
 
-// updateServerTemplate handles PUT /api/instance/server-template.
-// Owner-only. Validates the template and stores it in instance_config.
-func (h *instanceHandler) updateServerTemplate(w http.ResponseWriter, r *http.Request) {
+// serverTemplateRequest is the JSON body for POST/PUT server templates.
+type serverTemplateRequest struct {
+	Name      string                   `json:"name"`
+	Channels  []models.TemplateChannel `json:"channels"`
+	IsDefault bool                     `json:"isDefault"`
+}
+
+// createServerTemplate handles POST /api/instance/server-templates.
+func (h *instanceHandler) createServerTemplate(w http.ResponseWriter, r *http.Request) {
 	userID := userIDFromContext(r.Context())
 	role, err := h.store.GetUserRole(r.Context(), userID)
 	if err != nil {
@@ -498,65 +522,112 @@ func (h *instanceHandler) updateServerTemplate(w http.ResponseWriter, r *http.Re
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "owner role required"})
 		return
 	}
-	var req updateServerTemplateRequest
+	var req serverTemplateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
 	}
-	if len(req.Template) == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "template must not be empty"})
+	if strings.TrimSpace(req.Name) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
 		return
 	}
-	// Validate each entry.
-	hasSystem := false
-	for _, tc := range req.Template {
-		if strings.TrimSpace(tc.Name) == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "channel name must not be empty"})
-			return
-		}
-		if !validChannelTypes[tc.Type] {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid channel type: " + tc.Type})
-			return
-		}
-		if tc.Type == "voice" {
-			if tc.VoiceMode == nil {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "voice channel must have voiceMode"})
-				return
-			}
-			if *tc.VoiceMode != "quality" && *tc.VoiceMode != "low-latency" {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "voiceMode must be quality or low-latency"})
-				return
-			}
-		} else if tc.VoiceMode != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "only voice channels may have voiceMode"})
-			return
-		}
-		if tc.Type == "category" && tc.ParentRef != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "categories cannot have parentRef"})
-			return
-		}
-		if tc.Type == "system" {
-			hasSystem = true
-		}
-	}
-	if !hasSystem {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "system channel is required in template"})
+	if errMsg := validateTemplateChannels(req.Channels); errMsg != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": errMsg})
 		return
 	}
-	templateJSON, err := json.Marshal(req.Template)
+	channelsJSON, err := json.Marshal(req.Channels)
 	if err != nil {
-		slog.Error("marshal server template", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to encode template"})
+		slog.Error("marshal template channels", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to encode channels"})
 		return
 	}
-	if err := h.store.UpdateServerTemplate(r.Context(), templateJSON); err != nil {
+	tmpl, err := h.store.CreateServerTemplate(r.Context(), strings.TrimSpace(req.Name), channelsJSON, req.IsDefault)
+	if err != nil {
+		slog.Error("create server template", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create template"})
+		return
+	}
+	if err := h.store.InsertInstanceAuditLog(r.Context(), userID, nil, "template_created", "server template created: "+tmpl.Name, nil); err != nil {
+		slog.Error("insert instance audit log for template create", "err", err)
+	}
+	writeJSON(w, http.StatusCreated, tmpl)
+}
+
+// updateServerTemplate handles PUT /api/instance/server-templates/{templateId}.
+func (h *instanceHandler) updateServerTemplate(w http.ResponseWriter, r *http.Request) {
+	userID := userIDFromContext(r.Context())
+	templateID := chi.URLParam(r, "templateId")
+	role, err := h.store.GetUserRole(r.Context(), userID)
+	if err != nil {
+		slog.Error("get user role", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify role"})
+		return
+	}
+	if !roleAtLeast(role, "owner") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "owner role required"})
+		return
+	}
+	var req serverTemplateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
+		return
+	}
+	if errMsg := validateTemplateChannels(req.Channels); errMsg != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": errMsg})
+		return
+	}
+	channelsJSON, err := json.Marshal(req.Channels)
+	if err != nil {
+		slog.Error("marshal template channels", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to encode channels"})
+		return
+	}
+	if err := h.store.UpdateServerTemplate(r.Context(), templateID, strings.TrimSpace(req.Name), channelsJSON, req.IsDefault); err != nil {
 		slog.Error("update server template", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update server template"})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update template"})
 		return
 	}
-	// Audit log.
-	if err := h.store.InsertInstanceAuditLog(r.Context(), userID, nil, "template_updated", "server template updated", nil); err != nil {
+	if err := h.store.InsertInstanceAuditLog(r.Context(), userID, nil, "template_updated", "server template updated: "+req.Name, nil); err != nil {
 		slog.Error("insert instance audit log for template update", "err", err)
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// deleteServerTemplate handles DELETE /api/instance/server-templates/{templateId}.
+func (h *instanceHandler) deleteServerTemplate(w http.ResponseWriter, r *http.Request) {
+	userID := userIDFromContext(r.Context())
+	templateID := chi.URLParam(r, "templateId")
+	role, err := h.store.GetUserRole(r.Context(), userID)
+	if err != nil {
+		slog.Error("get user role", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify role"})
+		return
+	}
+	if !roleAtLeast(role, "owner") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "owner role required"})
+		return
+	}
+	// Prevent deleting the default template
+	existing, err := h.store.GetServerTemplateByID(r.Context(), templateID)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "template not found"})
+		return
+	}
+	if existing.IsDefault {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cannot delete the default template"})
+		return
+	}
+	if err := h.store.DeleteServerTemplate(r.Context(), templateID); err != nil {
+		slog.Error("delete server template", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to delete template"})
+		return
+	}
+	if err := h.store.InsertInstanceAuditLog(r.Context(), userID, nil, "template_deleted", "server template deleted: "+existing.Name, nil); err != nil {
+		slog.Error("insert instance audit log for template delete", "err", err)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

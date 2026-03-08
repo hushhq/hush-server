@@ -116,8 +116,20 @@ func (h *serversHandler) createServer(w http.ResponseWriter, r *http.Request) {
 	// Server creation itself succeeded — respond immediately. Template channels are fire-and-forget.
 	writeJSON(w, http.StatusCreated, server)
 
-	// Apply server template channels from instance_config.
-	template := cfg.ServerTemplate
+	// Resolve the channel template: explicit templateId > default template > hardcoded default.
+	var template []models.TemplateChannel
+	if req.TemplateID != nil {
+		tmpl, err := h.store.GetServerTemplateByID(r.Context(), *req.TemplateID)
+		if err == nil && tmpl != nil {
+			template = tmpl.Channels
+		}
+	}
+	if len(template) == 0 {
+		tmpl, err := h.store.GetDefaultServerTemplate(r.Context())
+		if err == nil && tmpl != nil {
+			template = tmpl.Channels
+		}
+	}
 	if len(template) == 0 {
 		template = defaultTemplate()
 	}

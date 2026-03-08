@@ -548,7 +548,14 @@ func TestCreateServer_Template(t *testing.T) {
 		getInstanceConfigFn: func(_ context.Context) (*models.InstanceConfig, error) {
 			return &models.InstanceConfig{
 				ServerCreationPolicy: "any_member",
-				ServerTemplate: []models.TemplateChannel{
+			}, nil
+		},
+		getDefaultServerTemplateFn: func(_ context.Context) (*models.ServerTemplate, error) {
+			return &models.ServerTemplate{
+				ID:        uuid.New().String(),
+				Name:      "Default",
+				IsDefault: true,
+				Channels: []models.TemplateChannel{
 					{Name: "system", Type: "system", Position: -1},
 					{Name: "general", Type: "text", Position: 0},
 					{Name: "General", Type: "voice", VoiceMode: &quality, Position: 1},
@@ -634,7 +641,12 @@ func TestCreateServer_PartialFail(t *testing.T) {
 		getInstanceConfigFn: func(_ context.Context) (*models.InstanceConfig, error) {
 			return &models.InstanceConfig{
 				ServerCreationPolicy: "any_member",
-				ServerTemplate: []models.TemplateChannel{
+			}, nil
+		},
+		getDefaultServerTemplateFn: func(_ context.Context) (*models.ServerTemplate, error) {
+			return &models.ServerTemplate{
+				ID: uuid.New().String(), Name: "Default", IsDefault: true,
+				Channels: []models.TemplateChannel{
 					{Name: "system", Type: "system", Position: -1},
 					{Name: "general", Type: "text", Position: 0},
 				},
@@ -693,7 +705,12 @@ func TestCreateServer_Idempotent(t *testing.T) {
 		getInstanceConfigFn: func(_ context.Context) (*models.InstanceConfig, error) {
 			return &models.InstanceConfig{
 				ServerCreationPolicy: "any_member",
-				ServerTemplate: []models.TemplateChannel{
+			}, nil
+		},
+		getDefaultServerTemplateFn: func(_ context.Context) (*models.ServerTemplate, error) {
+			return &models.ServerTemplate{
+				ID: uuid.New().String(), Name: "Default", IsDefault: true,
+				Channels: []models.TemplateChannel{
 					{Name: "system", Type: "system", Position: -1},
 					{Name: "general", Type: "text", Position: 0},
 				},
@@ -737,8 +754,8 @@ func TestCreateServer_Idempotent(t *testing.T) {
 	assert.Equal(t, 1, createCount, "system channel should have been skipped; only general should be created")
 }
 
-// TestCreateServer_TemplateNil verifies that when ServerTemplate is nil, default 3-channel template is used.
-func TestCreateServer_TemplateNil(t *testing.T) {
+// TestCreateServer_NoTemplate verifies that when no default template exists, hardcoded 3-channel template is used.
+func TestCreateServer_NoTemplate(t *testing.T) {
 	userID := uuid.New().String()
 	serverID := uuid.New().String()
 
@@ -749,8 +766,10 @@ func TestCreateServer_TemplateNil(t *testing.T) {
 		getInstanceConfigFn: func(_ context.Context) (*models.InstanceConfig, error) {
 			return &models.InstanceConfig{
 				ServerCreationPolicy: "any_member",
-				ServerTemplate:       nil, // nil template -> use default
 			}, nil
+		},
+		getDefaultServerTemplateFn: func(_ context.Context) (*models.ServerTemplate, error) {
+			return nil, nil // no default template
 		},
 		createServerFn: func(_ context.Context, name, ownerID string) (*models.Server, error) {
 			return &models.Server{ID: serverID, Name: name, OwnerID: ownerID}, nil
@@ -778,7 +797,7 @@ func TestCreateServer_TemplateNil(t *testing.T) {
 	rr := postServerJSON(router, "/", models.CreateServerRequest{Name: "Default Template Guild"}, token)
 	require.Equal(t, http.StatusCreated, rr.Code)
 
-	require.Len(t, createdNames, 3, "default template should create 3 channels")
+	require.Len(t, createdNames, 3, "hardcoded default template should create 3 channels")
 	assert.Equal(t, "system", createdNames[0])
 	assert.Equal(t, "general", createdNames[1])
 	assert.Equal(t, "General", createdNames[2])
@@ -797,7 +816,12 @@ func TestCreateServer_SystemAlwaysIncluded(t *testing.T) {
 		getInstanceConfigFn: func(_ context.Context) (*models.InstanceConfig, error) {
 			return &models.InstanceConfig{
 				ServerCreationPolicy: "any_member",
-				ServerTemplate: []models.TemplateChannel{
+			}, nil
+		},
+		getDefaultServerTemplateFn: func(_ context.Context) (*models.ServerTemplate, error) {
+			return &models.ServerTemplate{
+				ID: uuid.New().String(), Name: "Default", IsDefault: true,
+				Channels: []models.TemplateChannel{
 					// Template without system channel
 					{Name: "general", Type: "text", Position: 0},
 				},

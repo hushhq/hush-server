@@ -109,9 +109,22 @@ func (m *messageStoreMock) GetChannelByNameAndType(context.Context, string, stri
 }
 func (m *messageStoreMock) DeleteChannel(context.Context, string) error             { return nil }
 func (m *messageStoreMock) MoveChannel(context.Context, string, *string, int) error { return nil }
-func (m *messageStoreMock) UpdateServerTemplate(context.Context, json.RawMessage) error {
+func (m *messageStoreMock) ListServerTemplates(context.Context) ([]models.ServerTemplate, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) GetServerTemplateByID(context.Context, string) (*models.ServerTemplate, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) GetDefaultServerTemplate(context.Context) (*models.ServerTemplate, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) CreateServerTemplate(context.Context, string, json.RawMessage, bool) (*models.ServerTemplate, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) UpdateServerTemplate(context.Context, string, string, json.RawMessage, bool) error {
 	return nil
 }
+func (m *messageStoreMock) DeleteServerTemplate(context.Context, string) error { return nil }
 
 // Invite stubs (guild-scoped — serverID param).
 func (m *messageStoreMock) CreateInvite(context.Context, string, string, string, int, time.Time) (*models.InviteCode, error) {

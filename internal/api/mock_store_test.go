@@ -61,8 +61,13 @@ type mockStore struct {
 	deleteChannelFn          func(ctx context.Context, channelID string) error
 	moveChannelFn            func(ctx context.Context, channelID string, parentID *string, position int) error
 
-	// Server template
-	updateServerTemplateFn func(ctx context.Context, template json.RawMessage) error
+	// Server templates
+	listServerTemplatesFn      func(ctx context.Context) ([]models.ServerTemplate, error)
+	getServerTemplateByIDFn    func(ctx context.Context, id string) (*models.ServerTemplate, error)
+	getDefaultServerTemplateFn func(ctx context.Context) (*models.ServerTemplate, error)
+	createServerTemplateFn     func(ctx context.Context, name string, channels json.RawMessage, isDefault bool) (*models.ServerTemplate, error)
+	updateServerTemplateFn     func(ctx context.Context, id string, name string, channels json.RawMessage, isDefault bool) error
+	deleteServerTemplateFn     func(ctx context.Context, id string) error
 
 	// Invites (guild-scoped — serverID param)
 	createInviteFn    func(ctx context.Context, serverID, code, createdBy string, maxUses int, expiresAt time.Time) (*models.InviteCode, error)
@@ -327,9 +332,44 @@ func (m *mockStore) GetChannelByNameAndType(ctx context.Context, serverID, name,
 	return nil, nil
 }
 
-func (m *mockStore) UpdateServerTemplate(ctx context.Context, template json.RawMessage) error {
+func (m *mockStore) ListServerTemplates(ctx context.Context) ([]models.ServerTemplate, error) {
+	if m.listServerTemplatesFn != nil {
+		return m.listServerTemplatesFn(ctx)
+	}
+	return []models.ServerTemplate{}, nil
+}
+
+func (m *mockStore) GetServerTemplateByID(ctx context.Context, id string) (*models.ServerTemplate, error) {
+	if m.getServerTemplateByIDFn != nil {
+		return m.getServerTemplateByIDFn(ctx, id)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) GetDefaultServerTemplate(ctx context.Context) (*models.ServerTemplate, error) {
+	if m.getDefaultServerTemplateFn != nil {
+		return m.getDefaultServerTemplateFn(ctx)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) CreateServerTemplate(ctx context.Context, name string, channels json.RawMessage, isDefault bool) (*models.ServerTemplate, error) {
+	if m.createServerTemplateFn != nil {
+		return m.createServerTemplateFn(ctx, name, channels, isDefault)
+	}
+	return &models.ServerTemplate{ID: uuid.New().String(), Name: name, IsDefault: isDefault}, nil
+}
+
+func (m *mockStore) UpdateServerTemplate(ctx context.Context, id string, name string, channels json.RawMessage, isDefault bool) error {
 	if m.updateServerTemplateFn != nil {
-		return m.updateServerTemplateFn(ctx, template)
+		return m.updateServerTemplateFn(ctx, id, name, channels, isDefault)
+	}
+	return nil
+}
+
+func (m *mockStore) DeleteServerTemplate(ctx context.Context, id string) error {
+	if m.deleteServerTemplateFn != nil {
+		return m.deleteServerTemplateFn(ctx, id)
 	}
 	return nil
 }

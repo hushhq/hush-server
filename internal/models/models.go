@@ -127,10 +127,11 @@ type GuildBillingStats struct {
 
 // CreateServerRequest is the body for POST /api/servers.
 type CreateServerRequest struct {
-	Name string `json:"name"`
+	Name       string  `json:"name"`
+	TemplateID *string `json:"templateId,omitempty"`
 }
 
-// TemplateChannel describes a single channel in the server creation template.
+// TemplateChannel describes a single channel in a server creation template.
 type TemplateChannel struct {
 	Name      string  `json:"name"`
 	Type      string  `json:"type"`
@@ -139,16 +140,26 @@ type TemplateChannel struct {
 	Position  int     `json:"position"`
 }
 
+// ServerTemplate is a named, reusable channel template for guild creation.
+type ServerTemplate struct {
+	ID        string            `json:"id"`
+	Name      string            `json:"name"`
+	Channels  []TemplateChannel `json:"channels"`
+	IsDefault bool              `json:"isDefault"`
+	Position  int               `json:"position"`
+	CreatedAt time.Time         `json:"createdAt"`
+	UpdatedAt time.Time         `json:"updatedAt"`
+}
+
 // InstanceConfig is the single-row table that describes this Hush instance.
 type InstanceConfig struct {
-	ID                   string            `json:"id"`
-	Name                 string            `json:"name"`
-	IconURL              *string           `json:"iconUrl"`
-	OwnerID              *string           `json:"ownerId"`
-	RegistrationMode     string            `json:"registrationMode"`
-	ServerCreationPolicy string            `json:"serverCreationPolicy"`
-	ServerTemplate       []TemplateChannel `json:"serverTemplate,omitempty"`
-	CreatedAt            time.Time         `json:"createdAt"`
+	ID                   string    `json:"id"`
+	Name                 string    `json:"name"`
+	IconURL              *string   `json:"iconUrl"`
+	OwnerID              *string   `json:"ownerId"`
+	RegistrationMode     string    `json:"registrationMode"`
+	ServerCreationPolicy string    `json:"serverCreationPolicy"`
+	CreatedAt            time.Time `json:"createdAt"`
 }
 
 // Member is a user with their instance role, used for member list responses.
