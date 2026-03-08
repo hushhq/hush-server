@@ -12,13 +12,10 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// defaultTemplate returns the 3-channel template used when instance_config.server_template is NULL.
-func defaultTemplate() []models.TemplateChannel {
-	quality := "quality"
+// fallbackTemplate returns only the #system channel — used when no server template exists.
+func fallbackTemplate() []models.TemplateChannel {
 	return []models.TemplateChannel{
 		{Name: "system", Type: "system", Position: -1},
-		{Name: "general", Type: "text", Position: 0},
-		{Name: "General", Type: "voice", VoiceMode: &quality, Position: 1},
 	}
 }
 
@@ -131,7 +128,7 @@ func (h *serversHandler) createServer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if len(template) == 0 {
-		template = defaultTemplate()
+		template = fallbackTemplate()
 	}
 	// Ensure #system channel is always present in the template.
 	hasSystem := false

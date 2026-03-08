@@ -611,14 +611,9 @@ func (h *instanceHandler) deleteServerTemplate(w http.ResponseWriter, r *http.Re
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "owner role required"})
 		return
 	}
-	// Prevent deleting the default template
 	existing, err := h.store.GetServerTemplateByID(r.Context(), templateID)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "template not found"})
-		return
-	}
-	if existing.IsDefault {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cannot delete the default template"})
 		return
 	}
 	if err := h.store.DeleteServerTemplate(r.Context(), templateID); err != nil {

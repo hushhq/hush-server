@@ -754,7 +754,7 @@ func TestCreateServer_Idempotent(t *testing.T) {
 	assert.Equal(t, 1, createCount, "system channel should have been skipped; only general should be created")
 }
 
-// TestCreateServer_NoTemplate verifies that when no default template exists, hardcoded 3-channel template is used.
+// TestCreateServer_NoTemplate verifies that when no default template exists, only #system is created.
 func TestCreateServer_NoTemplate(t *testing.T) {
 	userID := uuid.New().String()
 	serverID := uuid.New().String()
@@ -797,10 +797,8 @@ func TestCreateServer_NoTemplate(t *testing.T) {
 	rr := postServerJSON(router, "/", models.CreateServerRequest{Name: "Default Template Guild"}, token)
 	require.Equal(t, http.StatusCreated, rr.Code)
 
-	require.Len(t, createdNames, 3, "hardcoded default template should create 3 channels")
+	require.Len(t, createdNames, 1, "fallback should only create #system channel")
 	assert.Equal(t, "system", createdNames[0])
-	assert.Equal(t, "general", createdNames[1])
-	assert.Equal(t, "General", createdNames[2])
 }
 
 // TestCreateServer_SystemAlwaysIncluded verifies that when template has no system entry,
