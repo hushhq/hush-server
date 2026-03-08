@@ -104,8 +104,14 @@ func (m *messageStoreMock) ListChannels(context.Context, string) ([]models.Chann
 func (m *messageStoreMock) GetChannelByID(context.Context, string) (*models.Channel, error) {
 	return nil, nil
 }
+func (m *messageStoreMock) GetChannelByNameAndType(context.Context, string, string, string) (*models.Channel, error) {
+	return nil, nil
+}
 func (m *messageStoreMock) DeleteChannel(context.Context, string) error             { return nil }
 func (m *messageStoreMock) MoveChannel(context.Context, string, *string, int) error { return nil }
+func (m *messageStoreMock) UpdateServerTemplate(context.Context, json.RawMessage) error {
+	return nil
+}
 
 // Invite stubs (guild-scoped — serverID param).
 func (m *messageStoreMock) CreateInvite(context.Context, string, string, string, int, time.Time) (*models.InviteCode, error) {

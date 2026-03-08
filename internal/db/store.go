@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"hush.app/server/internal/models"
@@ -44,8 +45,12 @@ type Store interface {
 	CreateChannel(ctx context.Context, serverID, name, channelType string, voiceMode *string, parentID *string, position int) (*models.Channel, error)
 	ListChannels(ctx context.Context, serverID string) ([]models.Channel, error)
 	GetChannelByID(ctx context.Context, channelID string) (*models.Channel, error)
+	GetChannelByNameAndType(ctx context.Context, serverID, name, channelType string) (*models.Channel, error)
 	DeleteChannel(ctx context.Context, channelID string) error
 	MoveChannel(ctx context.Context, channelID string, parentID *string, position int) error
+
+	// Server template
+	UpdateServerTemplate(ctx context.Context, template json.RawMessage) error
 
 	// Invite operations
 	CreateInvite(ctx context.Context, serverID, code, createdBy string, maxUses int, expiresAt time.Time) (*models.InviteCode, error)

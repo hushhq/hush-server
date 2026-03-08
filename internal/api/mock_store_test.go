@@ -54,11 +54,15 @@ type mockStore struct {
 	listMembersFn          func(ctx context.Context) ([]models.Member, error)
 
 	// Channels (guild-scoped — serverID param)
-	createChannelFn  func(ctx context.Context, serverID, name, channelType string, voiceMode *string, parentID *string, position int) (*models.Channel, error)
-	listChannelsFn   func(ctx context.Context, serverID string) ([]models.Channel, error)
-	getChannelByIDFn func(ctx context.Context, channelID string) (*models.Channel, error)
-	deleteChannelFn  func(ctx context.Context, channelID string) error
-	moveChannelFn    func(ctx context.Context, channelID string, parentID *string, position int) error
+	createChannelFn          func(ctx context.Context, serverID, name, channelType string, voiceMode *string, parentID *string, position int) (*models.Channel, error)
+	listChannelsFn           func(ctx context.Context, serverID string) ([]models.Channel, error)
+	getChannelByIDFn         func(ctx context.Context, channelID string) (*models.Channel, error)
+	getChannelByNameAndTypeFn func(ctx context.Context, serverID, name, channelType string) (*models.Channel, error)
+	deleteChannelFn          func(ctx context.Context, channelID string) error
+	moveChannelFn            func(ctx context.Context, channelID string, parentID *string, position int) error
+
+	// Server template
+	updateServerTemplateFn func(ctx context.Context, template json.RawMessage) error
 
 	// Invites (guild-scoped — serverID param)
 	createInviteFn    func(ctx context.Context, serverID, code, createdBy string, maxUses int, expiresAt time.Time) (*models.InviteCode, error)
@@ -314,6 +318,20 @@ func (m *mockStore) GetChannelByID(ctx context.Context, channelID string) (*mode
 		return m.getChannelByIDFn(ctx, channelID)
 	}
 	return nil, nil
+}
+
+func (m *mockStore) GetChannelByNameAndType(ctx context.Context, serverID, name, channelType string) (*models.Channel, error) {
+	if m.getChannelByNameAndTypeFn != nil {
+		return m.getChannelByNameAndTypeFn(ctx, serverID, name, channelType)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) UpdateServerTemplate(ctx context.Context, template json.RawMessage) error {
+	if m.updateServerTemplateFn != nil {
+		return m.updateServerTemplateFn(ctx, template)
+	}
+	return nil
 }
 
 func (m *mockStore) DeleteChannel(ctx context.Context, channelID string) error {

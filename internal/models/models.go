@@ -130,15 +130,25 @@ type CreateServerRequest struct {
 	Name string `json:"name"`
 }
 
+// TemplateChannel describes a single channel in the server creation template.
+type TemplateChannel struct {
+	Name      string  `json:"name"`
+	Type      string  `json:"type"`
+	VoiceMode *string `json:"voiceMode,omitempty"`
+	ParentRef *string `json:"parentRef,omitempty"`
+	Position  int     `json:"position"`
+}
+
 // InstanceConfig is the single-row table that describes this Hush instance.
 type InstanceConfig struct {
-	ID                   string    `json:"id"`
-	Name                 string    `json:"name"`
-	IconURL              *string   `json:"iconUrl"`
-	OwnerID              *string   `json:"ownerId"`
-	RegistrationMode     string    `json:"registrationMode"`
-	ServerCreationPolicy string    `json:"serverCreationPolicy"`
-	CreatedAt            time.Time `json:"createdAt"`
+	ID                   string            `json:"id"`
+	Name                 string            `json:"name"`
+	IconURL              *string           `json:"iconUrl"`
+	OwnerID              *string           `json:"ownerId"`
+	RegistrationMode     string            `json:"registrationMode"`
+	ServerCreationPolicy string            `json:"serverCreationPolicy"`
+	ServerTemplate       []TemplateChannel `json:"serverTemplate,omitempty"`
+	CreatedAt            time.Time         `json:"createdAt"`
 }
 
 // Member is a user with their instance role, used for member list responses.

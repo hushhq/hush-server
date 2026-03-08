@@ -43,6 +43,23 @@ func (p *Pool) ListChannels(ctx context.Context, serverID string) ([]models.Chan
 	return out, rows.Err()
 }
 
+// GetChannelByNameAndType returns the channel matching both name and type within a guild,
+// or nil if not found. Used for idempotency checks during template channel creation.
+func (p *Pool) GetChannelByNameAndType(ctx context.Context, serverID, name, channelType string) (*models.Channel, error) {
+	row := p.QueryRow(ctx, `
+		SELECT id, server_id, name, type, voice_mode, parent_id, position
+		FROM channels WHERE server_id = $1 AND name = $2 AND type = $3 LIMIT 1`,
+		serverID, name, channelType)
+	c, err := scanChannel(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return c, nil
+}
+
 // GetChannelByID returns the channel by ID, or nil if not found.
 func (p *Pool) GetChannelByID(ctx context.Context, channelID string) (*models.Channel, error) {
 	row := p.QueryRow(ctx, `

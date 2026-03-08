@@ -16,13 +16,25 @@ import (
 // GetInstanceConfig returns the single instance configuration row.
 func (p *Pool) GetInstanceConfig(ctx context.Context) (*models.InstanceConfig, error) {
 	row := p.QueryRow(ctx, `
-		SELECT id, name, icon_url, owner_id, registration_mode, server_creation_policy, created_at
+		SELECT id, name, icon_url, owner_id, registration_mode, server_creation_policy, server_template, created_at
 		FROM instance_config LIMIT 1`)
 	var c models.InstanceConfig
-	if err := row.Scan(&c.ID, &c.Name, &c.IconURL, &c.OwnerID, &c.RegistrationMode, &c.ServerCreationPolicy, &c.CreatedAt); err != nil {
+	var templateBytes []byte
+	if err := row.Scan(&c.ID, &c.Name, &c.IconURL, &c.OwnerID, &c.RegistrationMode, &c.ServerCreationPolicy, &templateBytes, &c.CreatedAt); err != nil {
 		return nil, err
 	}
+	if templateBytes != nil {
+		if err := json.Unmarshal(templateBytes, &c.ServerTemplate); err != nil {
+			return nil, fmt.Errorf("unmarshal server_template: %w", err)
+		}
+	}
 	return &c, nil
+}
+
+// UpdateServerTemplate replaces the server_template JSONB column in instance_config.
+func (p *Pool) UpdateServerTemplate(ctx context.Context, template json.RawMessage) error {
+	_, err := p.Exec(ctx, `UPDATE instance_config SET server_template = $1`, template)
+	return err
 }
 
 // UpdateInstanceConfig updates only the non-nil fields of instance_config.
