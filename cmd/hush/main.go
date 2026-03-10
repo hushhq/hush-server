@@ -166,8 +166,13 @@ func main() {
 		r.Post("/api/livekit/webhook", api.LiveKitWebhookHandler(wsHub, pool, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret))
 	}
 
+	host := os.Getenv("HOST")
+	if host == "" {
+		host = "127.0.0.1"
+	}
+
 	srv := &http.Server{
-		Addr:         ":" + strconv.Itoa(cfg.Port),
+		Addr:         host + ":" + strconv.Itoa(cfg.Port),
 		Handler:      r,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 0, // Disabled: WebSocket connections manage their own write deadlines via writeWait.
