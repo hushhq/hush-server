@@ -51,6 +51,14 @@ sed "s|^JWT_SECRET=.*|JWT_SECRET=$JWT_SECRET|" .env > "$_env_tmp" && mv "$_env_t
 sed "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$POSTGRES_PASSWORD|" .env > "$_env_tmp" && mv "$_env_tmp" .env
 rm -f "$_env_tmp"
 
+# 4b. Sync livekit.yaml keys to match .env
+LIVEKIT_YAML="$PROJECT_ROOT/livekit/livekit.yaml"
+if [ "$domain" != "localhost" ] && [ -f "$LIVEKIT_YAML" ]; then
+  sed "s|^  devkey: devsecret|  $LIVEKIT_API_KEY: $LIVEKIT_API_SECRET|" "$LIVEKIT_YAML" > "${LIVEKIT_YAML}.tmp" && mv "${LIVEKIT_YAML}.tmp" "$LIVEKIT_YAML"
+  sed "s|^  api_key: devkey|  api_key: $LIVEKIT_API_KEY|" "$LIVEKIT_YAML" > "${LIVEKIT_YAML}.tmp" && mv "${LIVEKIT_YAML}.tmp" "$LIVEKIT_YAML"
+  echo "  Updated livekit/livekit.yaml with generated credentials"
+fi
+
 # 5. Summary
 echo ""
 echo "=== Hush setup complete ==="
