@@ -51,6 +51,9 @@ func (m *messageStoreMock) InsertOneTimePreKeys(context.Context, string, string,
 func (m *messageStoreMock) GetIdentityAndSignedPreKey(context.Context, string, string) ([]byte, []byte, []byte, int, error) {
 	return nil, nil, nil, 0, nil
 }
+func (m *messageStoreMock) GetIdentityAndSignedPreKeyWithID(context.Context, string, string) ([]byte, []byte, []byte, int, int, time.Time, error) {
+	return nil, nil, nil, 0, 0, time.Time{}, nil
+}
 func (m *messageStoreMock) ConsumeOneTimePreKey(context.Context, string, string) (int, []byte, error) {
 	return 0, nil, nil
 }
@@ -61,6 +64,16 @@ func (m *messageStoreMock) ListDeviceIDsForUser(context.Context, string) ([]stri
 	return nil, nil
 }
 func (m *messageStoreMock) UpsertDevice(context.Context, string, string, string) error { return nil }
+
+// SPK lifecycle stubs.
+func (m *messageStoreMock) RotateSPK(context.Context, string, string, int, []byte, []byte, int, []byte, []byte, []byte) error {
+	return nil
+}
+func (m *messageStoreMock) GetHistoricalSPK(context.Context, string, string, int) ([]byte, []byte, []byte, error) {
+	return nil, nil, nil, nil
+}
+func (m *messageStoreMock) PurgeExpiredSPKPrivateKeys(context.Context) (int64, error)        { return 0, nil }
+func (m *messageStoreMock) PurgeConsumedOneTimePreKeys(context.Context, int) (int64, error) { return 0, nil }
 
 // Message methods (actually used).
 func (m *messageStoreMock) InsertMessage(ctx context.Context, channelID, senderID string, recipientID *string, ciphertext []byte) (*models.Message, error) {

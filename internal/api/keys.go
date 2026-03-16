@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"hush.app/server/internal/db"
 	"hush.app/server/internal/models"
@@ -16,6 +17,7 @@ import (
 
 const lowPreKeyThreshold = 10
 const maxOneTimePreKeysPerUpload = 200
+const spkStaleThreshold = 14 * 24 * time.Hour
 
 // KeysBroadcaster is satisfied by *ws.Hub. Used for dependency injection in tests.
 type KeysBroadcaster interface {
@@ -28,6 +30,7 @@ func KeysRoutes(store db.Store, hub KeysBroadcaster, jwtSecret string) chi.Route
 	h := &keysHandler{store: store, hub: hub}
 	r.Use(RequireAuth(jwtSecret, store))
 	r.Post("/upload", h.upload)
+	r.Get("/count", h.getOPKCount)
 	r.Get("/{userId}/{deviceId}", h.getByUserDevice)
 	r.Get("/{userId}", h.getByUser)
 	return r
@@ -79,6 +82,27 @@ func (h *keysHandler) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// getOPKCount returns the number of unused one-time pre-keys for the authenticated
+// user's device. Query parameter: deviceId (required).
+func (h *keysHandler) getOPKCount(w http.ResponseWriter, r *http.Request) {
+	userID := userIDFromContext(r.Context())
+	if userID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	deviceID := r.URL.Query().Get("deviceId")
+	if deviceID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "deviceId required"})
+		return
+	}
+	count, err := h.store.CountUnusedOneTimePreKeys(r.Context(), userID, deviceID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to count keys"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"count": count})
 }
 
 func (h *keysHandler) getByUser(w http.ResponseWriter, r *http.Request) {
@@ -149,8 +173,12 @@ func (h *keysHandler) getByUserDevice(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, bundle)
 }
 
+// buildBundle assembles a PreKeyBundle for the given user+device. It uses
+// GetIdentityAndSignedPreKeyWithID so the bundle carries the current SPK key ID,
+// and fires a keys.spk_stale broadcast when the SPK is older than spkStaleThreshold.
 func (h *keysHandler) buildBundle(ctx context.Context, userID, deviceID string) (*models.PreKeyBundle, error) {
-	identityKey, signedPreKey, sig, regID, err := h.store.GetIdentityAndSignedPreKey(ctx, userID, deviceID)
+	identityKey, signedPreKey, sig, regID, spkKeyID, spkUploadedAt, err :=
+		h.store.GetIdentityAndSignedPreKeyWithID(ctx, userID, deviceID)
 	if err != nil {
 		return nil, err
 	}
@@ -161,6 +189,7 @@ func (h *keysHandler) buildBundle(ctx context.Context, userID, deviceID string) 
 		IdentityKey:           identityKey,
 		SignedPreKey:          signedPreKey,
 		SignedPreKeySignature: sig,
+		SignedPreKeyID:        spkKeyID,
 		RegistrationID:        regID,
 	}
 	keyID, pubKey, err := h.store.ConsumeOneTimePreKey(ctx, userID, deviceID)
@@ -168,9 +197,13 @@ func (h *keysHandler) buildBundle(ctx context.Context, userID, deviceID string) 
 		bundle.OneTimePreKeyID = &keyID
 		bundle.OneTimePreKey = pubKey
 	}
+	h.maybeSendSPKStale(userID, spkUploadedAt)
 	return bundle, nil
 }
 
+// maybeSendKeysLow broadcasts keys.low to the user when their unused OPK count drops
+// below the low-prekey threshold. Fire-and-forget — errors and above-threshold counts
+// are silently ignored.
 func (h *keysHandler) maybeSendKeysLow(ctx context.Context, userID, deviceID string) {
 	count, err := h.store.CountUnusedOneTimePreKeys(ctx, userID, deviceID)
 	if err != nil || count >= lowPreKeyThreshold {
@@ -180,3 +213,13 @@ func (h *keysHandler) maybeSendKeysLow(ctx context.Context, userID, deviceID str
 	h.hub.BroadcastToUser(userID, msg)
 }
 
+// maybeSendSPKStale broadcasts keys.spk_stale to the user when their signed pre-key
+// has not been rotated for more than spkStaleThreshold. Fire-and-forget, non-blocking.
+// A zero uploadedAt (e.g. from a nil-row response) is treated as "no staleness warning".
+func (h *keysHandler) maybeSendSPKStale(userID string, uploadedAt time.Time) {
+	if uploadedAt.IsZero() || time.Since(uploadedAt) < spkStaleThreshold {
+		return
+	}
+	msg, _ := json.Marshal(map[string]string{"type": "keys.spk_stale"})
+	h.hub.BroadcastToUser(userID, msg)
+}

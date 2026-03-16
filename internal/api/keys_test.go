@@ -135,11 +135,11 @@ func TestKeysGetByUser_ValidUser_ReturnsBundles(t *testing.T) {
 			}
 			return []string{"dev1"}, nil
 		},
-		getIdentityAndSignedPreKeyFn: func(_ context.Context, uid, did string) ([]byte, []byte, []byte, int, error) {
+		getIdentityAndSignedPreKeyWithIDFn: func(_ context.Context, uid, did string) ([]byte, []byte, []byte, int, int, time.Time, error) {
 			if uid == targetID && did == "dev1" {
-				return identityKey, signedPreKey, sig, 99, nil
+				return identityKey, signedPreKey, sig, 99, 1, time.Now(), nil
 			}
-			return nil, nil, nil, 0, nil
+			return nil, nil, nil, 0, 0, time.Time{}, nil
 		},
 		consumeOneTimePreKeyFn: func(_ context.Context, uid, did string) (int, []byte, error) {
 			if uid == targetID && did == "dev1" {
@@ -201,11 +201,11 @@ func TestKeysGetByUserDevice_Valid_ReturnsSingleBundle(t *testing.T) {
 			}
 			return &models.Session{ID: sessionID, UserID: callerID, ExpiresAt: time.Now().Add(time.Hour)}, nil
 		},
-		getIdentityAndSignedPreKeyFn: func(_ context.Context, uid, did string) ([]byte, []byte, []byte, int, error) {
+		getIdentityAndSignedPreKeyWithIDFn: func(_ context.Context, uid, did string) ([]byte, []byte, []byte, int, int, time.Time, error) {
 			if uid == targetID && did == "dev1" {
-				return identityKey, []byte("spk"), []byte("sig"), 1, nil
+				return identityKey, []byte("spk"), []byte("sig"), 1, 1, time.Now(), nil
 			}
-			return nil, nil, nil, 0, nil
+			return nil, nil, nil, 0, 0, time.Time{}, nil
 		},
 		consumeOneTimePreKeyFn: func(_ context.Context, _, _ string) (int, []byte, error) {
 			return 2, []byte("otpk"), nil
@@ -262,11 +262,11 @@ func TestKeys_LowPreKeys_AfterRetrieve_BroadcastsKeysLow(t *testing.T) {
 			}
 			return nil, nil
 		},
-		getIdentityAndSignedPreKeyFn: func(_ context.Context, uid, did string) ([]byte, []byte, []byte, int, error) {
+		getIdentityAndSignedPreKeyWithIDFn: func(_ context.Context, uid, did string) ([]byte, []byte, []byte, int, int, time.Time, error) {
 			if uid == targetID && did == "dev1" {
-				return []byte("ik"), []byte("spk"), []byte("sig"), 1, nil
+				return []byte("ik"), []byte("spk"), []byte("sig"), 1, 1, time.Now(), nil
 			}
-			return nil, nil, nil, 0, nil
+			return nil, nil, nil, 0, 0, time.Time{}, nil
 		},
 		consumeOneTimePreKeyFn: func(_ context.Context, uid, did string) (int, []byte, error) {
 			if uid == targetID && did == "dev1" {
@@ -298,13 +298,155 @@ func TestKeys_LowPreKeys_AfterRetrieve_BroadcastsKeysLow(t *testing.T) {
 	assert.Equal(t, "keys.low", payload.Type)
 }
 
+// TestKeys_OPKCount: GET /api/keys/count returns {"count": N} for authenticated user.
+func TestKeys_OPKCount(t *testing.T) {
+	userID := uuid.New().String()
+	sessionID := uuid.New().String()
+	token, err := auth.SignJWT(userID, sessionID, testJWTSecret, time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	tokenHash := auth.TokenHash(token)
+
+	store := &mockStore{
+		getSessionByTokenHashFn: func(_ context.Context, th string) (*models.Session, error) {
+			if th != tokenHash {
+				return nil, nil
+			}
+			return &models.Session{ID: sessionID, UserID: userID, ExpiresAt: time.Now().Add(time.Hour)}, nil
+		},
+		countUnusedOneTimePreKeysFn: func(_ context.Context, uid, did string) (int, error) {
+			if uid == userID && did == "dev1" {
+				return 42, nil
+			}
+			return 0, nil
+		},
+	}
+	router := keysRouter(store, &mockKeysHub{})
+
+	// Happy path: valid auth + deviceId.
+	rr := getKeys(router, "/count?deviceId=dev1", token)
+	require.Equal(t, http.StatusOK, rr.Code)
+	var resp map[string]int
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.Equal(t, 42, resp["count"])
+
+	// Missing deviceId → 400.
+	rr2 := getKeys(router, "/count", token)
+	assert.Equal(t, http.StatusBadRequest, rr2.Code)
+
+	// No auth → 401.
+	rr3 := getKeys(router, "/count?deviceId=dev1", "")
+	assert.Equal(t, http.StatusUnauthorized, rr3.Code)
+}
+
+// TestKeys_SPKStale: buildBundle fires keys.spk_stale when SPK is older than 14 days,
+// and does NOT fire it when the SPK is fresh.
+func TestKeys_SPKStale(t *testing.T) {
+	callerID := uuid.New().String()
+	sessionID := uuid.New().String()
+	targetID := uuid.New().String()
+	token, _ := auth.SignJWT(callerID, sessionID, testJWTSecret, time.Now().Add(time.Hour))
+	tokenHash := auth.TokenHash(token)
+
+	staleAge := time.Now().Add(-15 * 24 * time.Hour)
+	freshAge := time.Now().Add(-1 * 24 * time.Hour)
+
+	// Returns count well above lowPreKeyThreshold so keys.low is never triggered,
+	// letting us isolate the keys.spk_stale behaviour in isolation.
+	const highOPKCount = 50
+
+	makeStoreWithAge := func(uploadedAt time.Time) *mockStore {
+		return &mockStore{
+			getSessionByTokenHashFn: func(_ context.Context, th string) (*models.Session, error) {
+				if th != tokenHash {
+					return nil, nil
+				}
+				return &models.Session{ID: sessionID, UserID: callerID, ExpiresAt: time.Now().Add(time.Hour)}, nil
+			},
+			getIdentityAndSignedPreKeyWithIDFn: func(_ context.Context, uid, did string) ([]byte, []byte, []byte, int, int, time.Time, error) {
+				if uid == targetID && did == "dev1" {
+					return []byte("ik"), []byte("spk"), []byte("sig"), 1, 1, uploadedAt, nil
+				}
+				return nil, nil, nil, 0, 0, time.Time{}, nil
+			},
+			countUnusedOneTimePreKeysFn: func(_ context.Context, _, _ string) (int, error) {
+				return highOPKCount, nil
+			},
+		}
+	}
+
+	broadcastTypes := func(hub *mockKeysHub) []string {
+		hub.mu.Lock()
+		defer hub.mu.Unlock()
+		var types []string
+		for _, c := range hub.broadcastCalls {
+			var p struct {
+				Type string `json:"type"`
+			}
+			if json.Unmarshal(c.message, &p) == nil {
+				types = append(types, p.Type)
+			}
+		}
+		return types
+	}
+
+	// Stale SPK: expect keys.spk_stale broadcast.
+	hub := &mockKeysHub{}
+	rr := getKeys(keysRouter(makeStoreWithAge(staleAge), hub), "/"+targetID+"/dev1", token)
+	require.Equal(t, http.StatusOK, rr.Code)
+	types := broadcastTypes(hub)
+	assert.Contains(t, types, "keys.spk_stale", "expected keys.spk_stale for stale SPK")
+
+	// Fresh SPK: expect NO keys.spk_stale broadcast.
+	hub2 := &mockKeysHub{}
+	rr2 := getKeys(keysRouter(makeStoreWithAge(freshAge), hub2), "/"+targetID+"/dev1", token)
+	require.Equal(t, http.StatusOK, rr2.Code)
+	types2 := broadcastTypes(hub2)
+	assert.NotContains(t, types2, "keys.spk_stale", "expected no keys.spk_stale for fresh SPK")
+}
+
+// TestKeys_BuildBundle_IncludesSignedPreKeyID: bundle response includes signedPreKeyId.
+func TestKeys_BuildBundle_IncludesSignedPreKeyID(t *testing.T) {
+	callerID := uuid.New().String()
+	sessionID := uuid.New().String()
+	targetID := uuid.New().String()
+	token, _ := auth.SignJWT(callerID, sessionID, testJWTSecret, time.Now().Add(time.Hour))
+	tokenHash := auth.TokenHash(token)
+
+	store := &mockStore{
+		getSessionByTokenHashFn: func(_ context.Context, th string) (*models.Session, error) {
+			if th != tokenHash {
+				return nil, nil
+			}
+			return &models.Session{ID: sessionID, UserID: callerID, ExpiresAt: time.Now().Add(time.Hour)}, nil
+		},
+		getIdentityAndSignedPreKeyWithIDFn: func(_ context.Context, uid, did string) ([]byte, []byte, []byte, int, int, time.Time, error) {
+			if uid == targetID && did == "dev1" {
+				return []byte("ik"), []byte("spk"), []byte("sig"), 1, 3, time.Now(), nil
+			}
+			return nil, nil, nil, 0, 0, time.Time{}, nil
+		},
+	}
+
+	rr := getKeys(keysRouter(store, &mockKeysHub{}), "/"+targetID+"/dev1", token)
+	require.Equal(t, http.StatusOK, rr.Code)
+	var bundle models.PreKeyBundle
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&bundle))
+	assert.Equal(t, 3, bundle.SignedPreKeyID)
+}
+
 type mockKeysHub struct {
-	mu            sync.Mutex
-	broadcastCalls []struct{ userID string; message []byte }
+	mu             sync.Mutex
+	broadcastCalls []struct {
+		userID  string
+		message []byte
+	}
 }
 
 func (m *mockKeysHub) BroadcastToUser(userID string, message []byte) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.broadcastCalls = append(m.broadcastCalls, struct{ userID string; message []byte }{userID, message})
+	m.broadcastCalls = append(m.broadcastCalls, struct {
+		userID  string
+		message []byte
+	}{userID, message})
 }

@@ -100,6 +100,38 @@ func main() {
 				}
 			}
 		}()
+
+		// SPK grace period cleanup: NULL out private keys whose 48h window has elapsed.
+		go func() {
+			ticker := time.NewTicker(24 * time.Hour)
+			defer ticker.Stop()
+			for range ticker.C {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				n, err := pool.PurgeExpiredSPKPrivateKeys(ctx)
+				cancel()
+				if err != nil {
+					slog.Error("spk private key cleanup", "err", err)
+				} else if n > 0 {
+					slog.Info("spk private keys nulled", "count", n)
+				}
+			}
+		}()
+
+		// Consumed OPK cleanup: delete used one-time pre-key rows older than 30 days.
+		go func() {
+			ticker := time.NewTicker(24 * time.Hour)
+			defer ticker.Stop()
+			for range ticker.C {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				n, err := pool.PurgeConsumedOneTimePreKeys(ctx, 30)
+				cancel()
+				if err != nil {
+					slog.Error("consumed opk cleanup", "err", err)
+				} else if n > 0 {
+					slog.Info("consumed opks purged", "count", n)
+				}
+			}
+		}()
 	}
 
 	wsOrigin := api.WSOriginFromCORSOrigin(cfg.CORSOrigin)
