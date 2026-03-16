@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"hush.app/server/internal/db"
 	"hush.app/server/internal/models"
 
 	"github.com/google/uuid"
@@ -299,4 +302,327 @@ func TestCreateServerTemplate_CategoryCannotHaveParentRef(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, rr.Code)
 	errBody := decodeError(t, rr)
 	assert.Contains(t, errBody["error"], "categories cannot have parentRef")
+}
+
+// ---------- POST /instance/bans ----------
+
+func TestInstanceBan_Success_CascadesGuilds(t *testing.T) {
+	actorID := uuid.New().String()
+	targetID := uuid.New().String()
+	guild1ID := uuid.New().String()
+	guild2ID := uuid.New().String()
+
+	store := &mockStore{}
+	token := makeAuth(store, actorID)
+
+	// actor is admin, target is member
+	store.getUserRoleFn = func(_ context.Context, uid string) (string, error) {
+		if uid == actorID {
+			return "admin", nil
+		}
+		return "member", nil
+	}
+
+	var deleteSessionsCalled int32
+	store.deleteSessionsByUserIDFn = func(_ context.Context, uid string) error {
+		if uid == targetID {
+			atomic.AddInt32(&deleteSessionsCalled, 1)
+		}
+		return nil
+	}
+
+	var insertBanCalled int32
+	store.insertInstanceBanFn = func(_ context.Context, uid, actor, reason string, _ *time.Time) (*models.InstanceBan, error) {
+		assert.Equal(t, targetID, uid)
+		assert.Equal(t, actorID, actor)
+		atomic.AddInt32(&insertBanCalled, 1)
+		return &models.InstanceBan{ID: uuid.New().String(), UserID: uid, ActorID: actor, Reason: reason}, nil
+	}
+
+	store.listServersForUserFn = func(_ context.Context, uid string) ([]models.Server, error) {
+		assert.Equal(t, targetID, uid)
+		return []models.Server{
+			{ID: guild1ID, Name: "G1"},
+			{ID: guild2ID, Name: "G2"},
+		}, nil
+	}
+
+	var removeCalls []string
+	store.removeServerMemberFn = func(_ context.Context, serverID, uid string) error {
+		assert.Equal(t, targetID, uid)
+		removeCalls = append(removeCalls, serverID)
+		return nil
+	}
+
+	var auditLogCalled int32
+	store.insertInstanceAuditLogFn = func(_ context.Context, actor string, tid *string, action, _ string, _ map[string]interface{}) error {
+		assert.Equal(t, actorID, actor)
+		require.NotNil(t, tid)
+		assert.Equal(t, targetID, *tid)
+		assert.Equal(t, "instance_ban", action)
+		atomic.AddInt32(&auditLogCalled, 1)
+		return nil
+	}
+
+	router := instanceRouter(store)
+	rr := postServerJSON(router, "/bans", models.InstanceBanRequest{
+		UserID: targetID,
+		Reason: "spam",
+	}, token)
+
+	require.Equal(t, http.StatusNoContent, rr.Code)
+	assert.EqualValues(t, 1, atomic.LoadInt32(&deleteSessionsCalled), "DeleteSessionsByUserID must be called")
+	assert.EqualValues(t, 1, atomic.LoadInt32(&insertBanCalled), "InsertInstanceBan must be called")
+	assert.EqualValues(t, 1, atomic.LoadInt32(&auditLogCalled), "InsertInstanceAuditLog must be called")
+	assert.ElementsMatch(t, []string{guild1ID, guild2ID}, removeCalls, "RemoveServerMember must be called for each guild")
+}
+
+func TestInstanceBan_SelfBan_Returns400(t *testing.T) {
+	actorID := uuid.New().String()
+	store := &mockStore{}
+	token := makeAuth(store, actorID)
+	store.getUserRoleFn = func(_ context.Context, _ string) (string, error) { return "admin", nil }
+
+	router := instanceRouter(store)
+	rr := postServerJSON(router, "/bans", models.InstanceBanRequest{
+		UserID: actorID,
+		Reason: "self-ban attempt",
+	}, token)
+
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+	errBody := decodeError(t, rr)
+	assert.Contains(t, errBody["error"], "cannot ban yourself")
+}
+
+func TestInstanceBan_CannotBanOwner_Returns403(t *testing.T) {
+	actorID := uuid.New().String()
+	ownerID := uuid.New().String()
+	store := &mockStore{}
+	token := makeAuth(store, actorID)
+	store.getUserRoleFn = func(_ context.Context, uid string) (string, error) {
+		if uid == actorID {
+			return "admin", nil
+		}
+		return "owner", nil
+	}
+
+	router := instanceRouter(store)
+	rr := postServerJSON(router, "/bans", models.InstanceBanRequest{
+		UserID: ownerID,
+		Reason: "test",
+	}, token)
+
+	require.Equal(t, http.StatusForbidden, rr.Code)
+	errBody := decodeError(t, rr)
+	assert.Contains(t, errBody["error"], "cannot ban the instance owner")
+}
+
+func TestInstanceBan_AdminCannotBanAdmin_Returns403(t *testing.T) {
+	actorID := uuid.New().String()
+	targetAdminID := uuid.New().String()
+	store := &mockStore{}
+	token := makeAuth(store, actorID)
+	store.getUserRoleFn = func(_ context.Context, _ string) (string, error) {
+		// both actor and target are admin
+		return "admin", nil
+	}
+
+	router := instanceRouter(store)
+	rr := postServerJSON(router, "/bans", models.InstanceBanRequest{
+		UserID: targetAdminID,
+		Reason: "test",
+	}, token)
+
+	require.Equal(t, http.StatusForbidden, rr.Code)
+	errBody := decodeError(t, rr)
+	assert.Contains(t, errBody["error"], "admin cannot ban another admin")
+}
+
+func TestInstanceBan_AuditLogEntry(t *testing.T) {
+	actorID := uuid.New().String()
+	targetID := uuid.New().String()
+	store := &mockStore{}
+	token := makeAuth(store, actorID)
+	store.getUserRoleFn = func(_ context.Context, uid string) (string, error) {
+		if uid == actorID {
+			return "admin", nil
+		}
+		return "member", nil
+	}
+	store.insertInstanceBanFn = func(_ context.Context, uid, actor, reason string, _ *time.Time) (*models.InstanceBan, error) {
+		return &models.InstanceBan{ID: uuid.New().String(), UserID: uid, ActorID: actor, Reason: reason}, nil
+	}
+
+	var capturedAction string
+	store.insertInstanceAuditLogFn = func(_ context.Context, _ string, _ *string, action, _ string, _ map[string]interface{}) error {
+		capturedAction = action
+		return nil
+	}
+
+	router := instanceRouter(store)
+	rr := postServerJSON(router, "/bans", models.InstanceBanRequest{
+		UserID: targetID,
+		Reason: "tos violation",
+	}, token)
+
+	require.Equal(t, http.StatusNoContent, rr.Code)
+	assert.Equal(t, "instance_ban", capturedAction)
+}
+
+// ---------- POST /instance/unban ----------
+
+func TestInstanceUnban_Success(t *testing.T) {
+	actorID := uuid.New().String()
+	targetID := uuid.New().String()
+	banID := uuid.New().String()
+	store := &mockStore{}
+	token := makeAuth(store, actorID)
+	store.getUserRoleFn = func(_ context.Context, _ string) (string, error) { return "admin", nil }
+
+	store.getActiveInstanceBanFn = func(_ context.Context, uid string) (*models.InstanceBan, error) {
+		assert.Equal(t, targetID, uid)
+		return &models.InstanceBan{ID: banID, UserID: uid, Reason: "spam"}, nil
+	}
+
+	var liftBanCalledWith string
+	store.liftInstanceBanFn = func(_ context.Context, bid, liftedBy string) error {
+		liftBanCalledWith = bid
+		assert.Equal(t, actorID, liftedBy)
+		return nil
+	}
+
+	var auditAction string
+	store.insertInstanceAuditLogFn = func(_ context.Context, _ string, _ *string, action, _ string, _ map[string]interface{}) error {
+		auditAction = action
+		return nil
+	}
+
+	router := instanceRouter(store)
+	rr := postServerJSON(router, "/unban", models.InstanceUnbanRequest{
+		UserID: targetID,
+		Reason: "appeal accepted",
+	}, token)
+
+	require.Equal(t, http.StatusNoContent, rr.Code)
+	assert.Equal(t, banID, liftBanCalledWith, "LiftInstanceBan must be called with correct ban ID")
+	assert.Equal(t, "instance_unban", auditAction)
+}
+
+// ---------- GET /instance/users ----------
+
+func TestSearchUsers_ReturnsBanStatus(t *testing.T) {
+	actorID := uuid.New().String()
+	store := &mockStore{}
+	token := makeAuth(store, actorID)
+	store.getUserRoleFn = func(_ context.Context, _ string) (string, error) { return "admin", nil }
+
+	bannedReason := "tos violation"
+	store.searchUsersFn = func(_ context.Context, query string, limit int) ([]models.UserSearchResult, error) {
+		assert.Equal(t, "alice", query)
+		assert.Equal(t, 25, limit)
+		return []models.UserSearchResult{
+			{
+				ID:        uuid.New().String(),
+				Username:  "alice",
+				Role:      "member",
+				IsBanned:  true,
+				BanReason: &bannedReason,
+			},
+		}, nil
+	}
+
+	router := instanceRouter(store)
+	rr := getServer(router, "/users?q=alice", token)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	var results []models.UserSearchResult
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&results))
+	require.Len(t, results, 1)
+	assert.True(t, results[0].IsBanned)
+	require.NotNil(t, results[0].BanReason)
+	assert.Equal(t, "tos violation", *results[0].BanReason)
+}
+
+// ---------- GET /instance/audit-log ----------
+
+func TestInstanceAuditLog_AdminDenied_Returns403(t *testing.T) {
+	actorID := uuid.New().String()
+	store := &mockStore{}
+	token := makeAuth(store, actorID)
+	store.getUserRoleFn = func(_ context.Context, _ string) (string, error) { return "admin", nil }
+
+	router := instanceRouter(store)
+	rr := getServer(router, "/audit-log", token)
+
+	assert.Equal(t, http.StatusForbidden, rr.Code)
+	errBody := decodeError(t, rr)
+	assert.Contains(t, errBody["error"], "owner")
+}
+
+func TestInstanceAuditLog_OwnerReturnsEntries(t *testing.T) {
+	ownerID := uuid.New().String()
+	store := &mockStore{}
+	token := makeAuth(store, ownerID)
+	store.getUserRoleFn = func(_ context.Context, _ string) (string, error) { return "owner", nil }
+
+	store.listInstanceAuditLogFn = func(_ context.Context, limit, offset int, _ *db.InstanceAuditLogFilter) ([]models.InstanceAuditLogEntry, error) {
+		return []models.InstanceAuditLogEntry{
+			{ID: uuid.New().String(), ActorID: ownerID, Action: "instance_ban", Reason: "spam"},
+			{ID: uuid.New().String(), ActorID: ownerID, Action: "config_change", Reason: "updated name"},
+		}, nil
+	}
+
+	router := instanceRouter(store)
+	rr := getServer(router, "/audit-log", token)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	var entries []models.InstanceAuditLogEntry
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&entries))
+	assert.Len(t, entries, 2)
+}
+
+// ---------- PUT /instance (audit log) ----------
+
+func TestUpdateConfig_AuditLogEntry(t *testing.T) {
+	ownerID := uuid.New().String()
+	store := &mockStore{}
+	token := makeAuth(store, ownerID)
+	store.getUserRoleFn = func(_ context.Context, _ string) (string, error) { return "owner", nil }
+
+	// Provide old config so the handler can diff
+	store.getInstanceConfigFn = func(_ context.Context) (*models.InstanceConfig, error) {
+		return &models.InstanceConfig{
+			ID:               "inst-1",
+			Name:             "Old Name",
+			RegistrationMode: "open",
+		}, nil
+	}
+
+	var capturedAction string
+	var capturedMetadata map[string]interface{}
+	store.insertInstanceAuditLogFn = func(_ context.Context, actor string, tid *string, action, _ string, metadata map[string]interface{}) error {
+		capturedAction = action
+		capturedMetadata = metadata
+		return nil
+	}
+
+	router := instanceRouter(store)
+	rr := putServerJSON(router, "/", map[string]string{"name": "New Name"}, token)
+
+	require.Equal(t, http.StatusNoContent, rr.Code)
+	assert.Equal(t, "config_change", capturedAction)
+	require.NotNil(t, capturedMetadata)
+	nameChange, ok := capturedMetadata["name"]
+	require.True(t, ok, "metadata must contain 'name' key")
+	// The handler stores map[string]string; assert the old/new values regardless of map concrete type.
+	switch nameMap := nameChange.(type) {
+	case map[string]string:
+		assert.Equal(t, "Old Name", nameMap["old"])
+		assert.Equal(t, "New Name", nameMap["new"])
+	case map[string]interface{}:
+		assert.Equal(t, "Old Name", nameMap["old"])
+		assert.Equal(t, "New Name", nameMap["new"])
+	default:
+		t.Fatalf("unexpected type for metadata name change: %T", nameChange)
+	}
 }

@@ -354,6 +354,82 @@ func TestRegister_FirstUserBecomesOwner(t *testing.T) {
 	assert.Equal(t, "owner", resp.User.Role)
 }
 
+// ---------- Instance ban checks ----------
+
+func TestLogin_BannedUser_Returns403(t *testing.T) {
+	hash, err := auth.HashPassword("securepass")
+	require.NoError(t, err)
+
+	userID := uuid.New().String()
+	banReason := "spam and abuse"
+	store := &mockStore{
+		getUserByUsernameFn: func(_ context.Context, _ string) (*models.User, error) {
+			return &models.User{
+				ID:           userID,
+				Username:     "alice",
+				PasswordHash: &hash,
+				DisplayName:  "Alice",
+				CreatedAt:    time.Now(),
+			}, nil
+		},
+		getActiveInstanceBanFn: func(_ context.Context, uid string) (*models.InstanceBan, error) {
+			assert.Equal(t, userID, uid)
+			return &models.InstanceBan{
+				ID:     uuid.New().String(),
+				UserID: uid,
+				Reason: banReason,
+			}, nil
+		},
+	}
+	router := newTestRouter(store)
+
+	rr := postJSON(router, "/login", models.LoginRequest{
+		Username: "alice",
+		Password: "securepass",
+	})
+
+	assert.Equal(t, http.StatusForbidden, rr.Code)
+	resp := decodeErrorResponse(t, rr)
+	assert.Contains(t, resp["error"], "suspended")
+	assert.Contains(t, resp["error"], banReason)
+}
+
+func TestRegister_BannedUsername_Returns403(t *testing.T) {
+	existingUserID := uuid.New().String()
+	banReason := "prior violation"
+	store := &mockStore{
+		getUserByUsernameFn: func(_ context.Context, username string) (*models.User, error) {
+			// username already exists (owned by a banned user)
+			return &models.User{
+				ID:          existingUserID,
+				Username:    username,
+				DisplayName: username,
+				Role:        "member",
+				CreatedAt:   time.Now(),
+			}, nil
+		},
+		getActiveInstanceBanFn: func(_ context.Context, uid string) (*models.InstanceBan, error) {
+			assert.Equal(t, existingUserID, uid)
+			return &models.InstanceBan{
+				ID:     uuid.New().String(),
+				UserID: uid,
+				Reason: banReason,
+			}, nil
+		},
+	}
+	router := newTestRouter(store)
+
+	rr := postJSON(router, "/register", models.RegisterRequest{
+		Username: "alice",
+		Password: "securepass",
+	})
+
+	assert.Equal(t, http.StatusForbidden, rr.Code)
+	resp := decodeErrorResponse(t, rr)
+	assert.Contains(t, resp["error"], "Registration blocked")
+	assert.Contains(t, resp["error"], banReason)
+}
+
 func TestRegister_SubsequentUserIsMember(t *testing.T) {
 	store := &mockStore{
 		createUserFn: func(_ context.Context, username, displayName string, _ *string) (*models.User, error) {
