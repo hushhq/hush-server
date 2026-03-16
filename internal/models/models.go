@@ -60,6 +60,7 @@ type PreKeyBundle struct {
 	IdentityKey           []byte `json:"identityKey"`
 	SignedPreKey          []byte `json:"signedPreKey"`
 	SignedPreKeySignature []byte `json:"signedPreKeySignature"`
+	SignedPreKeyID        int    `json:"signedPreKeyId"`
 	RegistrationID        int    `json:"registrationId"`
 	OneTimePreKeyID       *int   `json:"oneTimePreKeyId,omitempty"`
 	OneTimePreKey         []byte `json:"oneTimePreKey,omitempty"`

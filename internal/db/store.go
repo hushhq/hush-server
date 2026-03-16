@@ -23,10 +23,17 @@ type Store interface {
 	UpsertIdentityKeys(ctx context.Context, userID, deviceID string, identityKey, signedPreKey, signedPreKeySignature []byte, registrationID int) error
 	InsertOneTimePreKeys(ctx context.Context, userID, deviceID string, keys []models.OneTimePreKeyRow) error
 	GetIdentityAndSignedPreKey(ctx context.Context, userID, deviceID string) (identityKey, signedPreKey, signedPreKeySignature []byte, registrationID int, err error)
+	GetIdentityAndSignedPreKeyWithID(ctx context.Context, userID, deviceID string) (identityKey, signedPreKey, signedPreKeySignature []byte, registrationID, spkKeyID int, spkUploadedAt time.Time, err error)
 	ConsumeOneTimePreKey(ctx context.Context, userID, deviceID string) (keyID int, publicKey []byte, err error)
 	CountUnusedOneTimePreKeys(ctx context.Context, userID, deviceID string) (int, error)
 	ListDeviceIDsForUser(ctx context.Context, userID string) ([]string, error)
 	UpsertDevice(ctx context.Context, userID, deviceID, label string) error
+
+	// SPK lifecycle methods
+	RotateSPK(ctx context.Context, userID, deviceID string, newSPKKeyID int, newSPKPublic, newSPKSig []byte, oldSPKKeyID int, oldSPKPublic, oldSPKSig, oldSPKPrivate []byte) error
+	GetHistoricalSPK(ctx context.Context, userID, deviceID string, spkKeyID int) (publicKey, privateKey, signature []byte, err error)
+	PurgeExpiredSPKPrivateKeys(ctx context.Context) (int64, error)
+	PurgeConsumedOneTimePreKeys(ctx context.Context, olderThanDays int) (int64, error)
 
 	// Message methods
 	InsertMessage(ctx context.Context, channelID, senderID string, recipientID *string, ciphertext []byte) (*models.Message, error)
