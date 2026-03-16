@@ -179,21 +179,27 @@ func (h *instanceHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Fetch updated config for cache refresh and WS broadcast payload.
+	newCfg, cfgErr := h.store.GetInstanceConfig(r.Context())
+	if cfgErr != nil {
+		slog.Warn("config refresh failed after update", "err", cfgErr)
+		newCfg = nil
+	}
+
 	// Refresh handshake cache so GET /api/handshake reflects the updated config.
-	if h.cache != nil {
-		newCfg, cfgErr := h.store.GetInstanceConfig(r.Context())
-		if cfgErr != nil {
-			slog.Warn("handshake cache refresh failed after config update", "err", cfgErr)
-		} else {
-			h.cache.Set(newCfg.Name, newCfg.IconURL, newCfg.RegistrationMode, newCfg.ServerCreationPolicy, newCfg.OwnerID != nil)
-		}
+	if h.cache != nil && newCfg != nil {
+		h.cache.Set(newCfg.Name, newCfg.IconURL, newCfg.RegistrationMode, newCfg.ServerCreationPolicy, newCfg.OwnerID != nil)
 	}
 
 	w.WriteHeader(http.StatusNoContent)
 	if h.hub != nil {
-		msg, _ := json.Marshal(map[string]interface{}{
-			"type": "instance_updated",
-		})
+		payload := map[string]interface{}{"type": "instance_updated"}
+		if newCfg != nil {
+			payload["name"] = newCfg.Name
+			payload["icon_url"] = newCfg.IconURL
+			payload["registration_mode"] = newCfg.RegistrationMode
+		}
+		msg, _ := json.Marshal(payload)
 		h.hub.BroadcastToAll(msg)
 	}
 }

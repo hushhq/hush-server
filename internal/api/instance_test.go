@@ -581,6 +581,51 @@ func TestInstanceAuditLog_OwnerReturnsEntries(t *testing.T) {
 	assert.Len(t, entries, 2)
 }
 
+// ---------- PUT /instance (broadcast payload) ----------
+
+// broadcastAllCapture implements GlobalBroadcaster and records BroadcastToAll calls.
+type broadcastAllCapture struct {
+	calls [][]byte
+}
+
+func (b *broadcastAllCapture) BroadcastToAll(msg []byte)                { b.calls = append(b.calls, msg) }
+func (b *broadcastAllCapture) BroadcastToServer(_ string, _ []byte)     {}
+func (b *broadcastAllCapture) BroadcastToUser(_ string, _ []byte)       {}
+func (b *broadcastAllCapture) DisconnectUser(_ string)                  {}
+
+func TestUpdateConfig_BroadcastPayload(t *testing.T) {
+	ownerID := uuid.New().String()
+	store := &mockStore{}
+	token := makeAuth(store, ownerID)
+	store.getUserRoleFn = func(_ context.Context, _ string) (string, error) { return "owner", nil }
+	store.updateInstanceConfigFn = func(_ context.Context, _ *string, _ *string, _ *string, _ *string) error {
+		return nil
+	}
+	iconURL := "https://example.com/icon.png"
+	store.getInstanceConfigFn = func(_ context.Context) (*models.InstanceConfig, error) {
+		return &models.InstanceConfig{
+			ID:               "inst-1",
+			Name:             "Updated Name",
+			IconURL:          &iconURL,
+			RegistrationMode: "open",
+		}, nil
+	}
+
+	hub := &broadcastAllCapture{}
+	router := InstanceRoutes(store, hub, testJWTSecret, NewInstanceCache())
+
+	rr := putServerJSON(router, "/", map[string]string{"name": "Updated Name"}, token)
+	require.Equal(t, http.StatusNoContent, rr.Code)
+
+	require.Len(t, hub.calls, 1, "BroadcastToAll must be called exactly once")
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(hub.calls[0], &payload))
+	assert.Equal(t, "instance_updated", payload["type"])
+	assert.Equal(t, "Updated Name", payload["name"], "broadcast must include updated name")
+	assert.Equal(t, iconURL, payload["icon_url"], "broadcast must include icon_url")
+	assert.Equal(t, "open", payload["registration_mode"], "broadcast must include registration_mode")
+}
+
 // ---------- PUT /instance (audit log) ----------
 
 func TestUpdateConfig_AuditLogEntry(t *testing.T) {
