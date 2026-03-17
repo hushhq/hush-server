@@ -80,7 +80,7 @@ func TestHandshake_ContainsAllRequiredFields(t *testing.T) {
 	assert.Contains(t, resp, "server_version")
 	assert.Contains(t, resp, "api_version")
 	assert.Contains(t, resp, "min_client_version")
-	assert.Contains(t, resp, "opk_low_threshold")
+	assert.Contains(t, resp, "key_package_low_threshold")
 
 	// Capabilities
 	assert.Contains(t, resp, "capabilities")
@@ -107,7 +107,7 @@ func TestHandshake_ServerVersionDefaultsDev(t *testing.T) {
 	assert.Equal(t, version.ServerVersion, resp.ServerVersion)
 }
 
-func TestHandshake_OPKLowThresholdIs10(t *testing.T) {
+func TestHandshake_KeyPackageLowThresholdIs10(t *testing.T) {
 	cache := NewInstanceCache()
 	handler := HandshakeHandler(cache, false)
 
@@ -117,7 +117,7 @@ func TestHandshake_OPKLowThresholdIs10(t *testing.T) {
 
 	var resp handshakeResponse
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
-	assert.Equal(t, 10, resp.OPKLowThreshold)
+	assert.Equal(t, 10, resp.KeyPackageLowThreshold)
 }
 
 func TestHandshake_E2EEChatAlwaysTrue(t *testing.T) {

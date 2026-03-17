@@ -1,0 +1,401 @@
+package api
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// mlsRouter builds the MLS chi router with the given store and hub.
+func mlsRouter(store *mockStore, hub MLSBroadcaster) http.Handler {
+	return MLSRoutes(store, hub, testJWTSecret)
+}
+
+func postMLS(handler http.Handler, path, token string, body interface{}) *httptest.ResponseRecorder {
+	var buf []byte
+	if body != nil {
+		var err error
+		buf, err = json.Marshal(body)
+		if err != nil {
+			panic(err)
+		}
+	}
+	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(buf))
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	return rr
+}
+
+func getMLS(handler http.Handler, path, token string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	return rr
+}
+
+// ---------- POST /credentials ----------
+
+func TestMLS_UploadCredential_ValidRequest_Returns204(t *testing.T) {
+	store := &mockStore{}
+	userID := uuid.New().String()
+	token := makeAuth(store, userID)
+
+	var storedUserID, storedDeviceID string
+	var storedCredBytes, storedSigKey []byte
+	store.upsertMLSCredentialFn = func(_ context.Context, uid, did string, cred, sig []byte, _ int) error {
+		storedUserID = uid
+		storedDeviceID = did
+		storedCredBytes = cred
+		storedSigKey = sig
+		return nil
+	}
+	router := mlsRouter(store, &mockMLSHub{})
+
+	rr := postMLS(router, "/credentials", token, map[string]interface{}{
+		"deviceId":        "device1",
+		"credentialBytes": []byte("cred-bytes"),
+		"signingPublicKey": []byte("sig-pub-key"),
+	})
+
+	require.Equal(t, http.StatusNoContent, rr.Code)
+	assert.Equal(t, userID, storedUserID)
+	assert.Equal(t, "device1", storedDeviceID)
+	assert.Equal(t, []byte("cred-bytes"), storedCredBytes)
+	assert.Equal(t, []byte("sig-pub-key"), storedSigKey)
+}
+
+func TestMLS_UploadCredential_EmptyCredentialBytes_Returns400(t *testing.T) {
+	store := &mockStore{}
+	userID := uuid.New().String()
+	token := makeAuth(store, userID)
+	router := mlsRouter(store, &mockMLSHub{})
+
+	rr := postMLS(router, "/credentials", token, map[string]interface{}{
+		"deviceId":        "device1",
+		"credentialBytes": []byte{},
+		"signingPublicKey": []byte("sig-pub-key"),
+	})
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestMLS_UploadCredential_MissingDeviceID_Returns400(t *testing.T) {
+	store := &mockStore{}
+	token := makeAuth(store, uuid.New().String())
+	router := mlsRouter(store, &mockMLSHub{})
+
+	rr := postMLS(router, "/credentials", token, map[string]interface{}{
+		"deviceId":        "",
+		"credentialBytes": []byte("cred"),
+		"signingPublicKey": []byte("sig"),
+	})
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestMLS_UploadCredential_NoAuth_Returns401(t *testing.T) {
+	store := &mockStore{}
+	router := mlsRouter(store, &mockMLSHub{})
+
+	rr := postMLS(router, "/credentials", "", map[string]interface{}{
+		"deviceId":        "device1",
+		"credentialBytes": []byte("cred"),
+		"signingPublicKey": []byte("sig"),
+	})
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+}
+
+// ---------- POST /key-packages ----------
+
+func TestMLS_UploadKeyPackages_ValidBatch_Returns204(t *testing.T) {
+	store := &mockStore{}
+	userID := uuid.New().String()
+	token := makeAuth(store, userID)
+
+	var storedPackages [][]byte
+	store.insertMLSKeyPackagesFn = func(_ context.Context, _, _ string, pkgs [][]byte, _ time.Time) error {
+		storedPackages = pkgs
+		return nil
+	}
+	router := mlsRouter(store, &mockMLSHub{})
+
+	expiresAt := time.Now().Add(30 * 24 * time.Hour)
+	rr := postMLS(router, "/key-packages", token, map[string]interface{}{
+		"deviceId":    "device1",
+		"keyPackages": [][]byte{[]byte("pkg1"), []byte("pkg2"), []byte("pkg3")},
+		"expiresAt":   expiresAt,
+		"lastResort":  false,
+	})
+
+	require.Equal(t, http.StatusNoContent, rr.Code)
+	require.Len(t, storedPackages, 3)
+}
+
+func TestMLS_UploadKeyPackages_LastResort_UsesLastResortStore(t *testing.T) {
+	store := &mockStore{}
+	userID := uuid.New().String()
+	token := makeAuth(store, userID)
+
+	lastResortCalled := false
+	var lastResortBytes []byte
+	store.insertMLSLastResortKeyPackageFn = func(_ context.Context, _, _ string, kpBytes []byte) error {
+		lastResortCalled = true
+		lastResortBytes = kpBytes
+		return nil
+	}
+	regularCalled := false
+	store.insertMLSKeyPackagesFn = func(_ context.Context, _, _ string, _ [][]byte, _ time.Time) error {
+		regularCalled = true
+		return nil
+	}
+	router := mlsRouter(store, &mockMLSHub{})
+
+	rr := postMLS(router, "/key-packages", token, map[string]interface{}{
+		"deviceId":    "device1",
+		"keyPackages": [][]byte{[]byte("last-resort-pkg")},
+		"expiresAt":   time.Now().Add(30 * 24 * time.Hour),
+		"lastResort":  true,
+	})
+
+	require.Equal(t, http.StatusNoContent, rr.Code)
+	assert.True(t, lastResortCalled, "InsertMLSLastResortKeyPackage should have been called")
+	assert.Equal(t, []byte("last-resort-pkg"), lastResortBytes)
+	assert.False(t, regularCalled, "InsertMLSKeyPackages should NOT have been called for last-resort")
+}
+
+func TestMLS_UploadKeyPackages_EmptyPackages_Returns400(t *testing.T) {
+	store := &mockStore{}
+	token := makeAuth(store, uuid.New().String())
+	router := mlsRouter(store, &mockMLSHub{})
+
+	rr := postMLS(router, "/key-packages", token, map[string]interface{}{
+		"deviceId":    "device1",
+		"keyPackages": [][]byte{},
+		"expiresAt":   time.Now().Add(30 * 24 * time.Hour),
+	})
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestMLS_UploadKeyPackages_TooManyPackages_Returns400(t *testing.T) {
+	store := &mockStore{}
+	token := makeAuth(store, uuid.New().String())
+	router := mlsRouter(store, &mockMLSHub{})
+
+	pkgs := make([][]byte, 201)
+	for i := range pkgs {
+		pkgs[i] = []byte("pkg")
+	}
+	rr := postMLS(router, "/key-packages", token, map[string]interface{}{
+		"deviceId":    "device1",
+		"keyPackages": pkgs,
+		"expiresAt":   time.Now().Add(30 * 24 * time.Hour),
+	})
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+// ---------- GET /key-packages/count ----------
+
+func TestMLS_GetKeyPackageCount_Returns_Count(t *testing.T) {
+	store := &mockStore{}
+	userID := uuid.New().String()
+	token := makeAuth(store, userID)
+	store.countUnusedMLSKeyPackagesFn = func(_ context.Context, uid, did string) (int, error) {
+		if uid == userID && did == "device1" {
+			return 42, nil
+		}
+		return 0, nil
+	}
+	router := mlsRouter(store, &mockMLSHub{})
+
+	rr := getMLS(router, "/key-packages/count?deviceId=device1", token)
+	require.Equal(t, http.StatusOK, rr.Code)
+	var resp map[string]int
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.Equal(t, 42, resp["count"])
+}
+
+func TestMLS_GetKeyPackageCount_MissingDeviceID_Returns400(t *testing.T) {
+	store := &mockStore{}
+	token := makeAuth(store, uuid.New().String())
+	router := mlsRouter(store, &mockMLSHub{})
+
+	rr := getMLS(router, "/key-packages/count", token)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestMLS_GetKeyPackageCount_NoAuth_Returns401(t *testing.T) {
+	store := &mockStore{}
+	router := mlsRouter(store, &mockMLSHub{})
+
+	rr := getMLS(router, "/key-packages/count?deviceId=device1", "")
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+}
+
+// ---------- GET /key-packages/:userId/:deviceId ----------
+
+func TestMLS_ConsumeKeyPackage_Returns_Package(t *testing.T) {
+	store := &mockStore{}
+	callerID := uuid.New().String()
+	targetID := uuid.New().String()
+	token := makeAuth(store, callerID)
+
+	kpBytes := []byte("key-package-data")
+	store.consumeMLSKeyPackageFn = func(_ context.Context, uid, did string) ([]byte, error) {
+		if uid == targetID && did == "device1" {
+			return kpBytes, nil
+		}
+		return nil, nil
+	}
+	store.countUnusedMLSKeyPackagesFn = func(_ context.Context, uid, _ string) (int, error) {
+		return 50, nil // above threshold — no low event
+	}
+	router := mlsRouter(store, &mockMLSHub{})
+
+	rr := getMLS(router, "/key-packages/"+targetID+"/device1", token)
+	require.Equal(t, http.StatusOK, rr.Code)
+	var resp map[string]string
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.NotEmpty(t, resp["keyPackage"], "keyPackage field should be present and non-empty")
+}
+
+func TestMLS_ConsumeKeyPackage_NoPackageAvailable_Returns404(t *testing.T) {
+	store := &mockStore{}
+	callerID := uuid.New().String()
+	targetID := uuid.New().String()
+	token := makeAuth(store, callerID)
+
+	store.consumeMLSKeyPackageFn = func(_ context.Context, _, _ string) ([]byte, error) {
+		return nil, nil // no package
+	}
+	router := mlsRouter(store, &mockMLSHub{})
+
+	rr := getMLS(router, "/key-packages/"+targetID+"/device1", token)
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+}
+
+func TestMLS_ConsumeKeyPackage_InvalidUserID_Returns400(t *testing.T) {
+	store := &mockStore{}
+	token := makeAuth(store, uuid.New().String())
+	router := mlsRouter(store, &mockMLSHub{})
+
+	rr := getMLS(router, "/key-packages/not-a-uuid/device1", token)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestMLS_ConsumeKeyPackage_FiresLowEvent_WhenCountBelowThreshold(t *testing.T) {
+	store := &mockStore{}
+	callerID := uuid.New().String()
+	targetID := uuid.New().String()
+	token := makeAuth(store, callerID)
+	hub := &mockMLSHub{}
+
+	kpBytes := []byte("key-package-data")
+	store.consumeMLSKeyPackageFn = func(_ context.Context, uid, _ string) ([]byte, error) {
+		if uid == targetID {
+			return kpBytes, nil
+		}
+		return nil, nil
+	}
+	store.countUnusedMLSKeyPackagesFn = func(_ context.Context, uid, _ string) (int, error) {
+		if uid == targetID {
+			return 5, nil // below threshold of 10
+		}
+		return 50, nil
+	}
+	router := mlsRouter(store, hub)
+
+	rr := getMLS(router, "/key-packages/"+targetID+"/device1", token)
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	// Give the goroutine time to fire.
+	time.Sleep(50 * time.Millisecond)
+
+	hub.mu.Lock()
+	calls := hub.broadcastCalls
+	hub.mu.Unlock()
+
+	require.Len(t, calls, 1)
+	assert.Equal(t, targetID, calls[0].userID)
+	var payload struct {
+		Type string `json:"type"`
+	}
+	require.NoError(t, json.Unmarshal(calls[0].message, &payload))
+	assert.Equal(t, "key_packages.low", payload.Type)
+}
+
+func TestMLS_ConsumeKeyPackage_NoLowEvent_WhenCountAboveThreshold(t *testing.T) {
+	store := &mockStore{}
+	callerID := uuid.New().String()
+	targetID := uuid.New().String()
+	token := makeAuth(store, callerID)
+	hub := &mockMLSHub{}
+
+	store.consumeMLSKeyPackageFn = func(_ context.Context, _, _ string) ([]byte, error) {
+		return []byte("kp"), nil
+	}
+	store.countUnusedMLSKeyPackagesFn = func(_ context.Context, _, _ string) (int, error) {
+		return 50, nil // above threshold
+	}
+	router := mlsRouter(store, hub)
+
+	rr := getMLS(router, "/key-packages/"+targetID+"/device1", token)
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	time.Sleep(50 * time.Millisecond)
+
+	hub.mu.Lock()
+	calls := hub.broadcastCalls
+	hub.mu.Unlock()
+	assert.Empty(t, calls, "no key_packages.low event should fire when count is above threshold")
+}
+
+// ---------- Handshake: key_package_low_threshold ----------
+
+func TestHandshake_ContainsKeyPackageLowThreshold(t *testing.T) {
+	cache := NewInstanceCache()
+	handler := HandshakeHandler(cache, false)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/handshake", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	var resp map[string]interface{}
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.Contains(t, resp, "key_package_low_threshold", "handshake should contain key_package_low_threshold, not opk_low_threshold")
+	assert.NotContains(t, resp, "opk_low_threshold", "old Signal field opk_low_threshold must not appear")
+}
+
+// ---------- Mock hub ----------
+
+// mockMLSHub records BroadcastToUser calls for assertions.
+type mockMLSHub struct {
+	mu             sync.Mutex
+	broadcastCalls []struct {
+		userID  string
+		message []byte
+	}
+}
+
+func (m *mockMLSHub) BroadcastToUser(userID string, message []byte) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.broadcastCalls = append(m.broadcastCalls, struct {
+		userID  string
+		message []byte
+	}{userID, message})
+}
+

@@ -56,16 +56,16 @@ func (c *InstanceCache) snapshot() (name string, iconURL *string, regMode string
 
 // handshakeResponse is the JSON shape returned by GET /api/handshake.
 type handshakeResponse struct {
-	ServerVersion        string          `json:"server_version"`
-	APIVersion           string          `json:"api_version"`
-	MinClientVersion     string          `json:"min_client_version"`
-	OPKLowThreshold      int             `json:"opk_low_threshold"`
-	ServerCreationPolicy string          `json:"server_creation_policy"`
-	Capabilities         map[string]bool `json:"capabilities"`
-	Name                 string          `json:"name"`
-	IconURL              *string         `json:"iconUrl,omitempty"`
-	RegistrationMode     string          `json:"registrationMode"`
-	Bootstrapped         bool            `json:"bootstrapped"`
+	ServerVersion          string          `json:"server_version"`
+	APIVersion             string          `json:"api_version"`
+	MinClientVersion       string          `json:"min_client_version"`
+	KeyPackageLowThreshold int             `json:"key_package_low_threshold"`
+	ServerCreationPolicy   string          `json:"server_creation_policy"`
+	Capabilities           map[string]bool `json:"capabilities"`
+	Name                   string          `json:"name"`
+	IconURL                *string         `json:"iconUrl,omitempty"`
+	RegistrationMode       string          `json:"registrationMode"`
+	Bootstrapped           bool            `json:"bootstrapped"`
 }
 
 // HandshakeHandler returns an http.HandlerFunc that serves GET /api/handshake.
@@ -76,11 +76,11 @@ func HandshakeHandler(cache *InstanceCache, voiceEnabled bool) http.HandlerFunc 
 		name, iconURL, regMode, scp, bootstrapped := cache.snapshot()
 
 		resp := handshakeResponse{
-			ServerVersion:        version.ServerVersion,
-			APIVersion:           version.APIVersion,
-			MinClientVersion:     version.MinClientVersion,
-			OPKLowThreshold:      version.OPKLowThreshold,
-			ServerCreationPolicy: scp,
+			ServerVersion:          version.ServerVersion,
+			APIVersion:             version.APIVersion,
+			MinClientVersion:       version.MinClientVersion,
+			KeyPackageLowThreshold: version.KeyPackageLowThreshold,
+			ServerCreationPolicy:   scp,
 			Capabilities: map[string]bool{
 				"e2ee.chat":      true,
 				"e2ee.media":     true,

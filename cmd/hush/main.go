@@ -101,34 +101,19 @@ func main() {
 			}
 		}()
 
-		// SPK grace period cleanup: NULL out private keys whose 48h window has elapsed.
+		// MLS KeyPackage cleanup: purge consumed rows older than 30 days and
+		// unconsumed rows whose expiry has passed. Last-resort packages are never deleted.
 		go func() {
 			ticker := time.NewTicker(24 * time.Hour)
 			defer ticker.Stop()
 			for range ticker.C {
 				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-				n, err := pool.PurgeExpiredSPKPrivateKeys(ctx)
+				n, err := pool.PurgeExpiredMLSKeyPackages(ctx)
 				cancel()
 				if err != nil {
-					slog.Error("spk private key cleanup", "err", err)
+					slog.Error("mls key package cleanup", "err", err)
 				} else if n > 0 {
-					slog.Info("spk private keys nulled", "count", n)
-				}
-			}
-		}()
-
-		// Consumed OPK cleanup: delete used one-time pre-key rows older than 30 days.
-		go func() {
-			ticker := time.NewTicker(24 * time.Hour)
-			defer ticker.Stop()
-			for range ticker.C {
-				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-				n, err := pool.PurgeConsumedOneTimePreKeys(ctx, 30)
-				cancel()
-				if err != nil {
-					slog.Error("consumed opk cleanup", "err", err)
-				} else if n > 0 {
-					slog.Info("consumed opks purged", "count", n)
+					slog.Info("expired mls key packages purged", "count", n)
 				}
 			}
 		}()
@@ -176,10 +161,10 @@ func main() {
 			sub.Use(api.IPRateLimiter(rate.Limit(5.0/60.0), 5))
 			sub.Mount("/", api.AuthRoutes(pool, cfg.JWTSecret, cfg.JWTExpiry))
 		})
-		// Key upload: per-user limit — 10 requests per minute. SEC-03.
-		r.Route("/api/keys", func(sub chi.Router) {
+		// MLS key management: per-user limit — 10 requests per minute.
+		r.Route("/api/mls", func(sub chi.Router) {
 			sub.Use(api.UserRateLimiter(rate.Limit(10.0/60.0), 10))
-			sub.Mount("/", api.KeysRoutes(pool, wsHub, cfg.JWTSecret))
+			sub.Mount("/", api.MLSRoutes(pool, wsHub, cfg.JWTSecret))
 		})
 		r.Mount("/api/instance", api.InstanceRoutes(pool, wsHub, cfg.JWTSecret, handshakeCache))
 

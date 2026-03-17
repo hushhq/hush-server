@@ -31,21 +31,20 @@ type mockStore struct {
 	getSessionByTokenHashFn func(ctx context.Context, tokenHash string) (*models.Session, error)
 	deleteSessionByIDFn     func(ctx context.Context, sessionID string) error
 
-	// Signal keys
-	upsertIdentityKeysFn                   func(ctx context.Context, userID, deviceID string, identityKey, signedPreKey, signedPreKeySignature []byte, registrationID int) error
-	insertOneTimePreKeysFn                  func(ctx context.Context, userID, deviceID string, keys []models.OneTimePreKeyRow) error
-	getIdentityAndSignedPreKeyFn           func(ctx context.Context, userID, deviceID string) (identityKey, signedPreKey, signedPreKeySignature []byte, registrationID int, err error)
-	getIdentityAndSignedPreKeyWithIDFn     func(ctx context.Context, userID, deviceID string) (identityKey, signedPreKey, signedPreKeySignature []byte, registrationID, spkKeyID int, spkUploadedAt time.Time, err error)
-	consumeOneTimePreKeyFn                  func(ctx context.Context, userID, deviceID string) (keyID int, publicKey []byte, err error)
-	countUnusedOneTimePreKeysFn             func(ctx context.Context, userID, deviceID string) (int, error)
-	listDeviceIDsForUserFn                  func(ctx context.Context, userID string) ([]string, error)
-	upsertDeviceFn                          func(ctx context.Context, userID, deviceID, label string) error
+	// MLS credentials
+	upsertMLSCredentialFn func(ctx context.Context, userID, deviceID string, credentialBytes, signingPublicKey []byte, identityVersion int) error
+	getMLSCredentialFn    func(ctx context.Context, userID, deviceID string) (credentialBytes, signingPublicKey []byte, identityVersion int, err error)
 
-	// SPK lifecycle
-	rotateSPKFn                  func(ctx context.Context, userID, deviceID string, newSPKKeyID int, newSPKPublic, newSPKSig []byte, oldSPKKeyID int, oldSPKPublic, oldSPKSig, oldSPKPrivate []byte) error
-	getHistoricalSPKFn           func(ctx context.Context, userID, deviceID string, spkKeyID int) (publicKey, privateKey, signature []byte, err error)
-	purgeExpiredSPKPrivateKeysFn func(ctx context.Context) (int64, error)
-	purgeConsumedOneTimePreKeysFn func(ctx context.Context, olderThanDays int) (int64, error)
+	// MLS key packages
+	insertMLSKeyPackagesFn          func(ctx context.Context, userID, deviceID string, packages [][]byte, expiresAt time.Time) error
+	insertMLSLastResortKeyPackageFn func(ctx context.Context, userID, deviceID string, keyPackageBytes []byte) error
+	consumeMLSKeyPackageFn          func(ctx context.Context, userID, deviceID string) (keyPackageBytes []byte, err error)
+	countUnusedMLSKeyPackagesFn     func(ctx context.Context, userID, deviceID string) (int, error)
+	purgeExpiredMLSKeyPackagesFn    func(ctx context.Context) (int64, error)
+
+	// Device enumeration
+	listDeviceIDsForUserFn func(ctx context.Context, userID string) ([]string, error)
+	upsertDeviceFn         func(ctx context.Context, userID, deviceID, label string) error
 
 	// Messages
 	insertMessageFn   func(ctx context.Context, channelID, senderID string, recipientID *string, ciphertext []byte) (*models.Message, error)
@@ -186,49 +185,60 @@ func (m *mockStore) DeleteSessionByID(ctx context.Context, sessionID string) err
 	return nil
 }
 
-// ---------- Signal keys ----------
+// ---------- MLS credentials ----------
 
-func (m *mockStore) UpsertIdentityKeys(ctx context.Context, userID, deviceID string, identityKey, signedPreKey, signedPreKeySignature []byte, registrationID int) error {
-	if m.upsertIdentityKeysFn != nil {
-		return m.upsertIdentityKeysFn(ctx, userID, deviceID, identityKey, signedPreKey, signedPreKeySignature, registrationID)
+func (m *mockStore) UpsertMLSCredential(ctx context.Context, userID, deviceID string, credentialBytes, signingPublicKey []byte, identityVersion int) error {
+	if m.upsertMLSCredentialFn != nil {
+		return m.upsertMLSCredentialFn(ctx, userID, deviceID, credentialBytes, signingPublicKey, identityVersion)
 	}
 	return nil
 }
 
-func (m *mockStore) InsertOneTimePreKeys(ctx context.Context, userID, deviceID string, keys []models.OneTimePreKeyRow) error {
-	if m.insertOneTimePreKeysFn != nil {
-		return m.insertOneTimePreKeysFn(ctx, userID, deviceID, keys)
+func (m *mockStore) GetMLSCredential(ctx context.Context, userID, deviceID string) ([]byte, []byte, int, error) {
+	if m.getMLSCredentialFn != nil {
+		return m.getMLSCredentialFn(ctx, userID, deviceID)
+	}
+	return nil, nil, 0, nil
+}
+
+// ---------- MLS key packages ----------
+
+func (m *mockStore) InsertMLSKeyPackages(ctx context.Context, userID, deviceID string, packages [][]byte, expiresAt time.Time) error {
+	if m.insertMLSKeyPackagesFn != nil {
+		return m.insertMLSKeyPackagesFn(ctx, userID, deviceID, packages, expiresAt)
 	}
 	return nil
 }
 
-func (m *mockStore) GetIdentityAndSignedPreKey(ctx context.Context, userID, deviceID string) ([]byte, []byte, []byte, int, error) {
-	if m.getIdentityAndSignedPreKeyFn != nil {
-		return m.getIdentityAndSignedPreKeyFn(ctx, userID, deviceID)
+func (m *mockStore) InsertMLSLastResortKeyPackage(ctx context.Context, userID, deviceID string, keyPackageBytes []byte) error {
+	if m.insertMLSLastResortKeyPackageFn != nil {
+		return m.insertMLSLastResortKeyPackageFn(ctx, userID, deviceID, keyPackageBytes)
 	}
-	return nil, nil, nil, 0, nil
+	return nil
 }
 
-func (m *mockStore) GetIdentityAndSignedPreKeyWithID(ctx context.Context, userID, deviceID string) ([]byte, []byte, []byte, int, int, time.Time, error) {
-	if m.getIdentityAndSignedPreKeyWithIDFn != nil {
-		return m.getIdentityAndSignedPreKeyWithIDFn(ctx, userID, deviceID)
+func (m *mockStore) ConsumeMLSKeyPackage(ctx context.Context, userID, deviceID string) ([]byte, error) {
+	if m.consumeMLSKeyPackageFn != nil {
+		return m.consumeMLSKeyPackageFn(ctx, userID, deviceID)
 	}
-	return nil, nil, nil, 0, 0, time.Time{}, nil
+	return nil, nil
 }
 
-func (m *mockStore) ConsumeOneTimePreKey(ctx context.Context, userID, deviceID string) (int, []byte, error) {
-	if m.consumeOneTimePreKeyFn != nil {
-		return m.consumeOneTimePreKeyFn(ctx, userID, deviceID)
-	}
-	return 0, nil, nil
-}
-
-func (m *mockStore) CountUnusedOneTimePreKeys(ctx context.Context, userID, deviceID string) (int, error) {
-	if m.countUnusedOneTimePreKeysFn != nil {
-		return m.countUnusedOneTimePreKeysFn(ctx, userID, deviceID)
+func (m *mockStore) CountUnusedMLSKeyPackages(ctx context.Context, userID, deviceID string) (int, error) {
+	if m.countUnusedMLSKeyPackagesFn != nil {
+		return m.countUnusedMLSKeyPackagesFn(ctx, userID, deviceID)
 	}
 	return 0, nil
 }
+
+func (m *mockStore) PurgeExpiredMLSKeyPackages(ctx context.Context) (int64, error) {
+	if m.purgeExpiredMLSKeyPackagesFn != nil {
+		return m.purgeExpiredMLSKeyPackagesFn(ctx)
+	}
+	return 0, nil
+}
+
+// ---------- Device enumeration ----------
 
 func (m *mockStore) ListDeviceIDsForUser(ctx context.Context, userID string) ([]string, error) {
 	if m.listDeviceIDsForUserFn != nil {
@@ -242,34 +252,6 @@ func (m *mockStore) UpsertDevice(ctx context.Context, userID, deviceID, label st
 		return m.upsertDeviceFn(ctx, userID, deviceID, label)
 	}
 	return nil
-}
-
-func (m *mockStore) RotateSPK(ctx context.Context, userID, deviceID string, newSPKKeyID int, newSPKPublic, newSPKSig []byte, oldSPKKeyID int, oldSPKPublic, oldSPKSig, oldSPKPrivate []byte) error {
-	if m.rotateSPKFn != nil {
-		return m.rotateSPKFn(ctx, userID, deviceID, newSPKKeyID, newSPKPublic, newSPKSig, oldSPKKeyID, oldSPKPublic, oldSPKSig, oldSPKPrivate)
-	}
-	return nil
-}
-
-func (m *mockStore) GetHistoricalSPK(ctx context.Context, userID, deviceID string, spkKeyID int) ([]byte, []byte, []byte, error) {
-	if m.getHistoricalSPKFn != nil {
-		return m.getHistoricalSPKFn(ctx, userID, deviceID, spkKeyID)
-	}
-	return nil, nil, nil, nil
-}
-
-func (m *mockStore) PurgeExpiredSPKPrivateKeys(ctx context.Context) (int64, error) {
-	if m.purgeExpiredSPKPrivateKeysFn != nil {
-		return m.purgeExpiredSPKPrivateKeysFn(ctx)
-	}
-	return 0, nil
-}
-
-func (m *mockStore) PurgeConsumedOneTimePreKeys(ctx context.Context, olderThanDays int) (int64, error) {
-	if m.purgeConsumedOneTimePreKeysFn != nil {
-		return m.purgeConsumedOneTimePreKeysFn(ctx, olderThanDays)
-	}
-	return 0, nil
 }
 
 // ---------- Messages ----------

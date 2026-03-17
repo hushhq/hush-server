@@ -41,39 +41,34 @@ func (m *messageStoreMock) GetSessionByTokenHash(context.Context, string) (*mode
 }
 func (m *messageStoreMock) DeleteSessionByID(context.Context, string) error { return nil }
 
-// Signal key stubs.
-func (m *messageStoreMock) UpsertIdentityKeys(context.Context, string, string, []byte, []byte, []byte, int) error {
+// MLS credential stubs.
+func (m *messageStoreMock) UpsertMLSCredential(context.Context, string, string, []byte, []byte, int) error {
 	return nil
 }
-func (m *messageStoreMock) InsertOneTimePreKeys(context.Context, string, string, []models.OneTimePreKeyRow) error {
+func (m *messageStoreMock) GetMLSCredential(context.Context, string, string) ([]byte, []byte, int, error) {
+	return nil, nil, 0, nil
+}
+
+// MLS key package stubs.
+func (m *messageStoreMock) InsertMLSKeyPackages(context.Context, string, string, [][]byte, time.Time) error {
 	return nil
 }
-func (m *messageStoreMock) GetIdentityAndSignedPreKey(context.Context, string, string) ([]byte, []byte, []byte, int, error) {
-	return nil, nil, nil, 0, nil
+func (m *messageStoreMock) InsertMLSLastResortKeyPackage(context.Context, string, string, []byte) error {
+	return nil
 }
-func (m *messageStoreMock) GetIdentityAndSignedPreKeyWithID(context.Context, string, string) ([]byte, []byte, []byte, int, int, time.Time, error) {
-	return nil, nil, nil, 0, 0, time.Time{}, nil
+func (m *messageStoreMock) ConsumeMLSKeyPackage(context.Context, string, string) ([]byte, error) {
+	return nil, nil
 }
-func (m *messageStoreMock) ConsumeOneTimePreKey(context.Context, string, string) (int, []byte, error) {
-	return 0, nil, nil
-}
-func (m *messageStoreMock) CountUnusedOneTimePreKeys(context.Context, string, string) (int, error) {
+func (m *messageStoreMock) CountUnusedMLSKeyPackages(context.Context, string, string) (int, error) {
 	return 0, nil
 }
+func (m *messageStoreMock) PurgeExpiredMLSKeyPackages(context.Context) (int64, error) { return 0, nil }
+
+// Device enumeration stubs.
 func (m *messageStoreMock) ListDeviceIDsForUser(context.Context, string) ([]string, error) {
 	return nil, nil
 }
 func (m *messageStoreMock) UpsertDevice(context.Context, string, string, string) error { return nil }
-
-// SPK lifecycle stubs.
-func (m *messageStoreMock) RotateSPK(context.Context, string, string, int, []byte, []byte, int, []byte, []byte, []byte) error {
-	return nil
-}
-func (m *messageStoreMock) GetHistoricalSPK(context.Context, string, string, int) ([]byte, []byte, []byte, error) {
-	return nil, nil, nil, nil
-}
-func (m *messageStoreMock) PurgeExpiredSPKPrivateKeys(context.Context) (int64, error)        { return 0, nil }
-func (m *messageStoreMock) PurgeConsumedOneTimePreKeys(context.Context, int) (int64, error) { return 0, nil }
 
 // Message methods (actually used).
 func (m *messageStoreMock) InsertMessage(ctx context.Context, channelID, senderID string, recipientID *string, ciphertext []byte) (*models.Message, error) {

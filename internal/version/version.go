@@ -19,8 +19,8 @@ var APIVersion = "v1"
 // Override via: -ldflags "-X hush.app/server/internal/version.MinClientVersion=x.y.z"
 var MinClientVersion = "0.0.0"
 
-// OPKLowThreshold is the minimum number of one-time pre-keys the server should
-// maintain per device. When the count drops below this value, the server emits
-// a keys.low event prompting the client to upload more OPKs. This matches the
-// well-established Signal Protocol default and is not user-configurable.
-const OPKLowThreshold = 10
+// KeyPackageLowThreshold is the minimum number of unused MLS KeyPackages the server
+// should maintain per device. When the count drops below this value, the server emits
+// a key_packages.low WS event prompting the client to upload more KeyPackages.
+// Value of 10 is the well-established default carried over from the Signal OPK threshold.
+const KeyPackageLowThreshold = 10
