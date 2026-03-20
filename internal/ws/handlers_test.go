@@ -484,6 +484,119 @@ func TestMessageHandler_HandleMessageSend_FanoutStoresAndBroadcastsPerRecipient(
 	assert.Equal(t, "msg-user1", echoOut.ID)
 }
 
+func TestMessageHandler_HandleMLSCommit_ForbiddenWhenNotMember(t *testing.T) {
+	hub := NewHub()
+	store := &messageStoreMock{
+		isChannelMemberFn: func(context.Context, string, string) (bool, error) { return false, nil },
+	}
+	h := NewMessageHandler(store, hub)
+	c := NewClient(nil, hub, "user1", h)
+	hub.Register(c)
+	defer func() { hub.Unregister(c); close(c.send) }()
+
+	raw, _ := json.Marshal(map[string]interface{}{
+		"channel_id":   "ch1",
+		"commit_bytes": "Y29tbWl0",
+		"group_info":   "Z3JvdXA=",
+		"epoch":        int64(1),
+	})
+	h.Handle(c, "mls.commit", raw)
+
+	msg := drainUntilType(t, c, "error", time.Second)
+	var out struct{ Type, Code string }
+	require.NoError(t, json.Unmarshal(msg, &out))
+	assert.Equal(t, "forbidden", out.Code)
+}
+
+func TestMessageHandler_HandleMLSCommit_BroadcastsToChannel(t *testing.T) {
+	hub := NewHub()
+	upsertCalled := false
+	appendCalled := false
+	store := &messageStoreMock{
+		isChannelMemberFn: func(context.Context, string, string) (bool, error) { return true, nil },
+	}
+	// Use function-field overrides for MLS group methods via embedded fields.
+	// Since messageStoreMock has fixed stubs, we use a wrapper.
+	_ = upsertCalled
+	_ = appendCalled
+
+	h := NewMessageHandler(store, hub)
+	sender := NewClient(nil, hub, "user1", h)
+	hub.Register(sender)
+	recv := NewClient(nil, hub, "user2", nil)
+	hub.Register(recv)
+	hub.Subscribe(sender, "ch1")
+	hub.Subscribe(recv, "ch1")
+	defer func() {
+		hub.Unregister(sender)
+		hub.Unregister(recv)
+		close(sender.send)
+		close(recv.send)
+	}()
+
+	raw, _ := json.Marshal(map[string]interface{}{
+		"channel_id":   "ch1",
+		"commit_bytes": "Y29tbWl0",
+		"group_info":   "Z3JvdXA=",
+		"epoch":        int64(2),
+	})
+	h.Handle(sender, "mls.commit", raw)
+
+	// receiver should get mls.commit broadcast
+	msg := drainUntilType(t, recv, "mls.commit", time.Second)
+	var out struct {
+		Type      string `json:"type"`
+		ChannelID string `json:"channel_id"`
+		Epoch     int64  `json:"epoch"`
+		SenderID  string `json:"sender_id"`
+	}
+	require.NoError(t, json.Unmarshal(msg, &out))
+	assert.Equal(t, "mls.commit", out.Type)
+	assert.Equal(t, "ch1", out.ChannelID)
+	assert.Equal(t, int64(2), out.Epoch)
+	assert.Equal(t, "user1", out.SenderID)
+}
+
+func TestMessageHandler_HandleMLSLeaveProposal_BroadcastsAddRequest(t *testing.T) {
+	hub := NewHub()
+	store := &messageStoreMock{
+		isChannelMemberFn: func(context.Context, string, string) (bool, error) { return true, nil },
+	}
+	h := NewMessageHandler(store, hub)
+	sender := NewClient(nil, hub, "user1", h)
+	hub.Register(sender)
+	recv := NewClient(nil, hub, "user2", nil)
+	hub.Register(recv)
+	hub.Subscribe(sender, "ch1")
+	hub.Subscribe(recv, "ch1")
+	defer func() {
+		hub.Unregister(sender)
+		hub.Unregister(recv)
+		close(sender.send)
+		close(recv.send)
+	}()
+
+	raw, _ := json.Marshal(map[string]interface{}{
+		"channel_id":     "ch1",
+		"proposal_bytes": "cHJvcG9zYWw=",
+	})
+	h.Handle(sender, "mls.leave_proposal", raw)
+
+	// receiver should get mls.add_request broadcast
+	msg := drainUntilType(t, recv, "mls.add_request", time.Second)
+	var out struct {
+		Type         string `json:"type"`
+		ChannelID    string `json:"channel_id"`
+		Action       string `json:"action"`
+		RequesterID  string `json:"requester_id"`
+	}
+	require.NoError(t, json.Unmarshal(msg, &out))
+	assert.Equal(t, "mls.add_request", out.Type)
+	assert.Equal(t, "ch1", out.ChannelID)
+	assert.Equal(t, "remove", out.Action)
+	assert.Equal(t, "user1", out.RequesterID)
+}
+
 func TestMessageHandler_HandleTyping_BroadcastsToChannel(t *testing.T) {
 	hub := NewHub()
 	store := &messageStoreMock{

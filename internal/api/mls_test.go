@@ -3,12 +3,15 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
+
+	"hush.app/server/internal/db"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -379,14 +382,309 @@ func TestHandshake_ContainsKeyPackageLowThreshold(t *testing.T) {
 	assert.NotContains(t, resp, "opk_low_threshold", "old Signal field opk_low_threshold must not appear")
 }
 
+// ---------- Group info helpers ----------
+
+func putMLS(handler http.Handler, path, token string, body interface{}) *httptest.ResponseRecorder {
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPut, path, bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	return rr
+}
+
+func deleteMLS(handler http.Handler, path, token string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodDelete, path, nil)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	return rr
+}
+
+// ---------- GET /groups/:channelId/info ----------
+
+func TestMLS_GetGroupInfo_Found_Returns200(t *testing.T) {
+	store := &mockStore{}
+	userID := uuid.New().String()
+	channelID := uuid.New().String()
+	token := makeAuth(store, userID)
+
+	groupBytes := []byte("group-info-bytes")
+	store.getMLSGroupInfoFn = func(_ context.Context, cid string) ([]byte, int64, error) {
+		if cid == channelID {
+			return groupBytes, 7, nil
+		}
+		return nil, 0, nil
+	}
+	router := mlsRouter(store, &mockMLSHub{})
+
+	rr := getMLS(router, "/groups/"+channelID+"/info", token)
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	var resp struct {
+		GroupInfo string `json:"groupInfo"`
+		Epoch     int64  `json:"epoch"`
+	}
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.NotEmpty(t, resp.GroupInfo)
+	assert.Equal(t, int64(7), resp.Epoch)
+}
+
+func TestMLS_GetGroupInfo_NotFound_Returns404(t *testing.T) {
+	store := &mockStore{}
+	userID := uuid.New().String()
+	channelID := uuid.New().String()
+	token := makeAuth(store, userID)
+
+	store.getMLSGroupInfoFn = func(_ context.Context, _ string) ([]byte, int64, error) {
+		return nil, 0, nil
+	}
+	router := mlsRouter(store, &mockMLSHub{})
+
+	rr := getMLS(router, "/groups/"+channelID+"/info", token)
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+}
+
+// ---------- PUT /groups/:channelId/info ----------
+
+func TestMLS_PutGroupInfo_Valid_Returns204(t *testing.T) {
+	store := &mockStore{}
+	userID := uuid.New().String()
+	channelID := uuid.New().String()
+	token := makeAuth(store, userID)
+
+	var upsertedBytes []byte
+	var upsertedEpoch int64
+	store.upsertMLSGroupInfoFn = func(_ context.Context, cid string, b []byte, epoch int64) error {
+		upsertedBytes = b
+		upsertedEpoch = epoch
+		return nil
+	}
+	router := mlsRouter(store, &mockMLSHub{})
+
+	encoded := base64.StdEncoding.EncodeToString([]byte("group-info-bytes"))
+	rr := putMLS(router, "/groups/"+channelID+"/info", token, map[string]interface{}{
+		"groupInfo": encoded,
+		"epoch":     int64(3),
+	})
+	require.Equal(t, http.StatusNoContent, rr.Code)
+	assert.Equal(t, []byte("group-info-bytes"), upsertedBytes)
+	assert.Equal(t, int64(3), upsertedEpoch)
+}
+
+func TestMLS_PutGroupInfo_EmptyBytes_Returns400(t *testing.T) {
+	store := &mockStore{}
+	userID := uuid.New().String()
+	channelID := uuid.New().String()
+	token := makeAuth(store, userID)
+	router := mlsRouter(store, &mockMLSHub{})
+
+	rr := putMLS(router, "/groups/"+channelID+"/info", token, map[string]interface{}{
+		"groupInfo": "",
+		"epoch":     int64(0),
+	})
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestMLS_PutGroupInfo_NoAuth_Returns401(t *testing.T) {
+	store := &mockStore{}
+	channelID := uuid.New().String()
+	router := mlsRouter(store, &mockMLSHub{})
+
+	rr := putMLS(router, "/groups/"+channelID+"/info", "", map[string]interface{}{
+		"groupInfo": base64.StdEncoding.EncodeToString([]byte("gi")),
+		"epoch":     int64(1),
+	})
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+}
+
+// ---------- POST /groups/:channelId/commit ----------
+
+func TestMLS_PostCommit_Valid_Returns204(t *testing.T) {
+	store := &mockStore{}
+	userID := uuid.New().String()
+	channelID := uuid.New().String()
+	token := makeAuth(store, userID)
+	hub := &mockMLSHub{}
+
+	upsertCalled := false
+	appendCalled := false
+	store.upsertMLSGroupInfoFn = func(_ context.Context, _ string, _ []byte, _ int64) error {
+		upsertCalled = true
+		return nil
+	}
+	store.appendMLSCommitFn = func(_ context.Context, _ string, _ int64, _ []byte, _ string) error {
+		appendCalled = true
+		return nil
+	}
+	router := mlsRouter(store, hub)
+
+	body := map[string]interface{}{
+		"commitBytes": base64.StdEncoding.EncodeToString([]byte("commit-data")),
+		"groupInfo":   base64.StdEncoding.EncodeToString([]byte("updated-group-info")),
+		"epoch":       int64(5),
+	}
+	rr := postMLS(router, "/groups/"+channelID+"/commit", token, body)
+	require.Equal(t, http.StatusNoContent, rr.Code)
+	assert.True(t, upsertCalled, "UpsertMLSGroupInfo must be called")
+	assert.True(t, appendCalled, "AppendMLSCommit must be called")
+
+	hub.mu.Lock()
+	broadcastCount := len(hub.channelBroadcastCalls)
+	hub.mu.Unlock()
+	assert.Equal(t, 1, broadcastCount, "must broadcast mls.commit to channel")
+}
+
+// ---------- GET /groups/:channelId/commits ----------
+
+func TestMLS_GetCommitsSinceEpoch_Valid_Returns200(t *testing.T) {
+	store := &mockStore{}
+	userID := uuid.New().String()
+	channelID := uuid.New().String()
+	token := makeAuth(store, userID)
+
+	now := time.Now()
+	store.getMLSCommitsSinceEpochFn = func(_ context.Context, cid string, sinceEpoch int64, limit int) ([]db.MLSCommitRow, error) {
+		return []db.MLSCommitRow{
+			{Epoch: 1, CommitBytes: []byte("c1"), SenderID: "user1", CreatedAt: now},
+			{Epoch: 2, CommitBytes: []byte("c2"), SenderID: "user2", CreatedAt: now},
+			{Epoch: 3, CommitBytes: []byte("c3"), SenderID: "user3", CreatedAt: now},
+		}, nil
+	}
+	router := mlsRouter(store, &mockMLSHub{})
+
+	rr := getMLS(router, "/groups/"+channelID+"/commits?since_epoch=0", token)
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	var resp struct {
+		Commits []struct {
+			Epoch       int64  `json:"epoch"`
+			CommitBytes string `json:"commitBytes"`
+			SenderID    string `json:"senderId"`
+		} `json:"commits"`
+	}
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	require.Len(t, resp.Commits, 3)
+	assert.Equal(t, int64(1), resp.Commits[0].Epoch)
+	assert.Equal(t, int64(3), resp.Commits[2].Epoch)
+}
+
+func TestMLS_GetCommitsSinceEpoch_Empty_Returns200WithEmptyArray(t *testing.T) {
+	store := &mockStore{}
+	userID := uuid.New().String()
+	channelID := uuid.New().String()
+	token := makeAuth(store, userID)
+
+	store.getMLSCommitsSinceEpochFn = func(_ context.Context, _ string, _ int64, _ int) ([]db.MLSCommitRow, error) {
+		return nil, nil
+	}
+	router := mlsRouter(store, &mockMLSHub{})
+
+	rr := getMLS(router, "/groups/"+channelID+"/commits", token)
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	var resp struct {
+		Commits []interface{} `json:"commits"`
+	}
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.NotNil(t, resp.Commits)
+	assert.Empty(t, resp.Commits)
+}
+
+// ---------- GET /pending-welcomes ----------
+
+func TestMLS_GetPendingWelcomes_HasWelcomes_Returns200(t *testing.T) {
+	store := &mockStore{}
+	userID := uuid.New().String()
+	token := makeAuth(store, userID)
+
+	now := time.Now()
+	store.getPendingWelcomesFn = func(_ context.Context, uid string) ([]db.PendingWelcomeRow, error) {
+		return []db.PendingWelcomeRow{
+			{ID: "w1", ChannelID: "ch1", WelcomeBytes: []byte("wb1"), SenderID: "s1", Epoch: 1, CreatedAt: now},
+			{ID: "w2", ChannelID: "ch2", WelcomeBytes: []byte("wb2"), SenderID: "s2", Epoch: 2, CreatedAt: now},
+		}, nil
+	}
+	router := mlsRouter(store, &mockMLSHub{})
+
+	rr := getMLS(router, "/pending-welcomes", token)
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	var resp struct {
+		Welcomes []struct {
+			ID           string `json:"id"`
+			ChannelID    string `json:"channelId"`
+			WelcomeBytes string `json:"welcomeBytes"`
+			SenderID     string `json:"senderId"`
+			Epoch        int64  `json:"epoch"`
+		} `json:"welcomes"`
+	}
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	require.Len(t, resp.Welcomes, 2)
+	assert.Equal(t, "w1", resp.Welcomes[0].ID)
+	assert.Equal(t, "ch2", resp.Welcomes[1].ChannelID)
+}
+
+func TestMLS_GetPendingWelcomes_Empty_Returns200WithEmptyArray(t *testing.T) {
+	store := &mockStore{}
+	userID := uuid.New().String()
+	token := makeAuth(store, userID)
+
+	store.getPendingWelcomesFn = func(_ context.Context, _ string) ([]db.PendingWelcomeRow, error) {
+		return nil, nil
+	}
+	router := mlsRouter(store, &mockMLSHub{})
+
+	rr := getMLS(router, "/pending-welcomes", token)
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	var resp struct {
+		Welcomes []interface{} `json:"welcomes"`
+	}
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.NotNil(t, resp.Welcomes)
+	assert.Empty(t, resp.Welcomes)
+}
+
+// ---------- DELETE /pending-welcomes/:id ----------
+
+func TestMLS_DeletePendingWelcome_Valid_Returns204(t *testing.T) {
+	store := &mockStore{}
+	userID := uuid.New().String()
+	token := makeAuth(store, userID)
+	welcomeID := uuid.New().String()
+
+	deleteCalled := false
+	store.deletePendingWelcomeFn = func(_ context.Context, wid string) error {
+		if wid == welcomeID {
+			deleteCalled = true
+		}
+		return nil
+	}
+	router := mlsRouter(store, &mockMLSHub{})
+
+	rr := deleteMLS(router, "/pending-welcomes/"+welcomeID, token)
+	require.Equal(t, http.StatusNoContent, rr.Code)
+	assert.True(t, deleteCalled, "DeletePendingWelcome must be called with the correct ID")
+}
+
 // ---------- Mock hub ----------
 
-// mockMLSHub records BroadcastToUser calls for assertions.
+// mockMLSHub records BroadcastToUser and Broadcast calls for assertions.
 type mockMLSHub struct {
-	mu             sync.Mutex
-	broadcastCalls []struct {
+	mu                    sync.Mutex
+	broadcastCalls        []struct {
 		userID  string
 		message []byte
+	}
+	channelBroadcastCalls []struct {
+		channelID string
+		message   []byte
 	}
 }
 
@@ -397,5 +695,14 @@ func (m *mockMLSHub) BroadcastToUser(userID string, message []byte) {
 		userID  string
 		message []byte
 	}{userID, message})
+}
+
+func (m *mockMLSHub) Broadcast(channelID string, message []byte, excludeClientID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.channelBroadcastCalls = append(m.channelBroadcastCalls, struct {
+		channelID string
+		message   []byte
+	}{channelID, message})
 }
 

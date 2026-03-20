@@ -47,6 +47,12 @@ func (h *MessageHandler) Handle(c *Client, msgType string, raw []byte) {
 		}
 	case "message.history":
 		h.handleMessageHistory(c, raw)
+	case "mls.commit":
+		h.handleMLSCommit(c, raw)
+	case "mls.leave_proposal":
+		h.handleMLSLeaveProposal(c, raw)
+	case "mls.add_request":
+		h.handleMLSAddRequest(c, raw)
 	default:
 		// subscribe/unsubscribe handled in readPump
 		return
@@ -323,4 +329,147 @@ func sendError(c *Client, code, message string) {
 	default:
 		slog.Warn("ws client send buffer full", "clientID", c.id)
 	}
+}
+
+// handleMLSCommit processes an mls.commit WS message.
+// Verifies channel membership, updates GroupInfo, queues the commit, and broadcasts
+// mls.commit to all channel subscribers. This is the WS-only path (alternative to
+// POST /api/mls/groups/:channelId/commit).
+func (h *MessageHandler) handleMLSCommit(c *Client, raw []byte) {
+	if h.store == nil {
+		sendError(c, "forbidden", "store unavailable")
+		return
+	}
+	var payload struct {
+		ChannelID   string `json:"channel_id"`
+		CommitBytes string `json:"commit_bytes"`
+		GroupInfo   string `json:"group_info"`
+		Epoch       int64  `json:"epoch"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil || payload.ChannelID == "" {
+		sendError(c, "bad_request", "channel_id required")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
+	defer cancel()
+
+	ok, err := h.store.IsChannelMember(ctx, payload.ChannelID, c.userID)
+	if err != nil {
+		slog.Warn("ws mls.commit IsChannelMember failed", "err", err)
+		sendError(c, "internal", "check membership failed")
+		return
+	}
+	if !ok {
+		sendError(c, "forbidden", "not a channel member")
+		return
+	}
+
+	commitBytes, err := base64.StdEncoding.DecodeString(payload.CommitBytes)
+	if err != nil || len(commitBytes) == 0 {
+		sendError(c, "bad_request", "invalid commit_bytes base64")
+		return
+	}
+	groupInfoBytes, err := base64.StdEncoding.DecodeString(payload.GroupInfo)
+	if err != nil || len(groupInfoBytes) == 0 {
+		sendError(c, "bad_request", "invalid group_info base64")
+		return
+	}
+
+	if err := h.store.UpsertMLSGroupInfo(ctx, payload.ChannelID, groupInfoBytes, payload.Epoch); err != nil {
+		slog.Error("ws mls.commit UpsertMLSGroupInfo failed", "err", err)
+		sendError(c, "internal", "failed to store group info")
+		return
+	}
+	if err := h.store.AppendMLSCommit(ctx, payload.ChannelID, payload.Epoch, commitBytes, c.userID); err != nil {
+		slog.Error("ws mls.commit AppendMLSCommit failed", "err", err)
+		sendError(c, "internal", "failed to queue commit")
+		return
+	}
+
+	out, _ := json.Marshal(map[string]interface{}{
+		"type":         "mls.commit",
+		"channel_id":   payload.ChannelID,
+		"epoch":        payload.Epoch,
+		"commit_bytes": payload.CommitBytes,
+		"sender_id":    c.userID,
+	})
+	h.hub.Broadcast(payload.ChannelID, out, "")
+}
+
+// handleMLSLeaveProposal processes an mls.leave_proposal WS message.
+// The leaving member sends their leave proposal bytes; this handler broadcasts
+// mls.add_request to all channel subscribers so an online member can commit the removal.
+// The leaving member has already deleted their local group state before sending this.
+func (h *MessageHandler) handleMLSLeaveProposal(c *Client, raw []byte) {
+	if h.store == nil {
+		sendError(c, "forbidden", "store unavailable")
+		return
+	}
+	var payload struct {
+		ChannelID     string `json:"channel_id"`
+		ProposalBytes string `json:"proposal_bytes"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil || payload.ChannelID == "" {
+		sendError(c, "bad_request", "channel_id required")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
+	defer cancel()
+
+	ok, err := h.store.IsChannelMember(ctx, payload.ChannelID, c.userID)
+	if err != nil {
+		slog.Warn("ws mls.leave_proposal IsChannelMember failed", "err", err)
+		sendError(c, "internal", "check membership failed")
+		return
+	}
+	if !ok {
+		sendError(c, "forbidden", "not a channel member")
+		return
+	}
+
+	// Broadcast mls.add_request to channel so an online member can commit the removal.
+	out, _ := json.Marshal(map[string]interface{}{
+		"type":          "mls.add_request",
+		"channel_id":    payload.ChannelID,
+		"action":        "remove",
+		"proposal_bytes": payload.ProposalBytes,
+		"requester_id":  c.userID,
+	})
+	h.hub.Broadcast(payload.ChannelID, out, "")
+}
+
+// handleMLSAddRequest processes an mls.add_request WS message.
+// Verifies channel membership and relays the request to all channel subscribers.
+// Clients use this for add flows (e.g., inviting a new member by posting their
+// key package add request so an online member can commit the Add).
+func (h *MessageHandler) handleMLSAddRequest(c *Client, raw []byte) {
+	if h.store == nil {
+		sendError(c, "forbidden", "store unavailable")
+		return
+	}
+	var payload struct {
+		ChannelID string `json:"channel_id"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil || payload.ChannelID == "" {
+		sendError(c, "bad_request", "channel_id required")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
+	defer cancel()
+
+	ok, err := h.store.IsChannelMember(ctx, payload.ChannelID, c.userID)
+	if err != nil {
+		slog.Warn("ws mls.add_request IsChannelMember failed", "err", err)
+		sendError(c, "internal", "check membership failed")
+		return
+	}
+	if !ok {
+		sendError(c, "forbidden", "not a channel member")
+		return
+	}
+
+	h.hub.Broadcast(payload.ChannelID, raw, c.id)
 }
