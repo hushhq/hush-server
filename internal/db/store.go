@@ -122,6 +122,17 @@ type Store interface {
 	ListSystemMessages(ctx context.Context, serverID string, before time.Time, limit int) ([]models.SystemMessage, error)
 	PurgeExpiredSystemMessages(ctx context.Context, retentionDays int) (int64, error)
 	GetSystemMessageRetentionDays(ctx context.Context) (*int, error)
+
+	// MLS group methods
+	UpsertMLSGroupInfo(ctx context.Context, channelID string, groupInfoBytes []byte, epoch int64) error
+	GetMLSGroupInfo(ctx context.Context, channelID string) (groupInfoBytes []byte, epoch int64, err error)
+	AppendMLSCommit(ctx context.Context, channelID string, epoch int64, commitBytes []byte, senderID string) error
+	GetMLSCommitsSinceEpoch(ctx context.Context, channelID string, sinceEpoch int64, limit int) ([]MLSCommitRow, error)
+	DeleteMLSGroupInfo(ctx context.Context, channelID string) error
+	PurgeOldMLSCommits(ctx context.Context, maxPerChannel int) (int64, error)
+	StorePendingWelcome(ctx context.Context, channelID, recipientUserID, senderID string, welcomeBytes []byte, epoch int64) error
+	GetPendingWelcomes(ctx context.Context, recipientUserID string) ([]PendingWelcomeRow, error)
+	DeletePendingWelcome(ctx context.Context, welcomeID string) error
 }
 
 // InstanceAuditLogFilter filters instance audit log queries.

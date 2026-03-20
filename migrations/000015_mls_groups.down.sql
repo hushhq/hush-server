@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS mls_pending_welcomes CASCADE;
+DROP TABLE IF EXISTS mls_commits CASCADE;
+DROP TABLE IF EXISTS mls_group_info CASCADE;

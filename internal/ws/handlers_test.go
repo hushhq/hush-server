@@ -240,6 +240,31 @@ func (m *messageStoreMock) GetSystemMessageRetentionDays(context.Context) (*int,
 	return nil, nil
 }
 
+// MLS group stubs.
+func (m *messageStoreMock) UpsertMLSGroupInfo(context.Context, string, []byte, int64) error {
+	return nil
+}
+func (m *messageStoreMock) GetMLSGroupInfo(context.Context, string) ([]byte, int64, error) {
+	return nil, 0, nil
+}
+func (m *messageStoreMock) AppendMLSCommit(context.Context, string, int64, []byte, string) error {
+	return nil
+}
+func (m *messageStoreMock) GetMLSCommitsSinceEpoch(context.Context, string, int64, int) ([]db.MLSCommitRow, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) DeleteMLSGroupInfo(context.Context, string) error { return nil }
+func (m *messageStoreMock) PurgeOldMLSCommits(context.Context, int) (int64, error) {
+	return 0, nil
+}
+func (m *messageStoreMock) StorePendingWelcome(context.Context, string, string, string, []byte, int64) error {
+	return nil
+}
+func (m *messageStoreMock) GetPendingWelcomes(context.Context, string) ([]db.PendingWelcomeRow, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) DeletePendingWelcome(context.Context, string) error { return nil }
+
 // drainUntilType reads from c.send until a message with the given type is received or timeout.
 func drainUntilType(t *testing.T, c *Client, wantType string, timeout time.Duration) []byte {
 	t.Helper()

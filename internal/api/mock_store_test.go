@@ -134,6 +134,17 @@ type mockStore struct {
 	listSystemMessagesFn        func(ctx context.Context, serverID string, before time.Time, limit int) ([]models.SystemMessage, error)
 	purgeExpiredSystemMsgsFn    func(ctx context.Context, retentionDays int) (int64, error)
 	getSystemMsgRetentionDaysFn func(ctx context.Context) (*int, error)
+
+	// MLS group methods
+	upsertMLSGroupInfoFn        func(ctx context.Context, channelID string, groupInfoBytes []byte, epoch int64) error
+	getMLSGroupInfoFn           func(ctx context.Context, channelID string) ([]byte, int64, error)
+	appendMLSCommitFn           func(ctx context.Context, channelID string, epoch int64, commitBytes []byte, senderID string) error
+	getMLSCommitsSinceEpochFn   func(ctx context.Context, channelID string, sinceEpoch int64, limit int) ([]db.MLSCommitRow, error)
+	deleteMLSGroupInfoFn        func(ctx context.Context, channelID string) error
+	purgeOldMLSCommitsFn        func(ctx context.Context, maxPerChannel int) (int64, error)
+	storePendingWelcomeFn       func(ctx context.Context, channelID, recipientUserID, senderID string, welcomeBytes []byte, epoch int64) error
+	getPendingWelcomesFn        func(ctx context.Context, recipientUserID string) ([]db.PendingWelcomeRow, error)
+	deletePendingWelcomeFn      func(ctx context.Context, welcomeID string) error
 }
 
 // ---------- User/session ----------
@@ -687,6 +698,71 @@ func (m *mockStore) GetSystemMessageRetentionDays(ctx context.Context) (*int, er
 		return m.getSystemMsgRetentionDaysFn(ctx)
 	}
 	return nil, nil
+}
+
+// ---------- MLS group methods ----------
+
+func (m *mockStore) UpsertMLSGroupInfo(ctx context.Context, channelID string, groupInfoBytes []byte, epoch int64) error {
+	if m.upsertMLSGroupInfoFn != nil {
+		return m.upsertMLSGroupInfoFn(ctx, channelID, groupInfoBytes, epoch)
+	}
+	return nil
+}
+
+func (m *mockStore) GetMLSGroupInfo(ctx context.Context, channelID string) ([]byte, int64, error) {
+	if m.getMLSGroupInfoFn != nil {
+		return m.getMLSGroupInfoFn(ctx, channelID)
+	}
+	return nil, 0, nil
+}
+
+func (m *mockStore) AppendMLSCommit(ctx context.Context, channelID string, epoch int64, commitBytes []byte, senderID string) error {
+	if m.appendMLSCommitFn != nil {
+		return m.appendMLSCommitFn(ctx, channelID, epoch, commitBytes, senderID)
+	}
+	return nil
+}
+
+func (m *mockStore) GetMLSCommitsSinceEpoch(ctx context.Context, channelID string, sinceEpoch int64, limit int) ([]db.MLSCommitRow, error) {
+	if m.getMLSCommitsSinceEpochFn != nil {
+		return m.getMLSCommitsSinceEpochFn(ctx, channelID, sinceEpoch, limit)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) DeleteMLSGroupInfo(ctx context.Context, channelID string) error {
+	if m.deleteMLSGroupInfoFn != nil {
+		return m.deleteMLSGroupInfoFn(ctx, channelID)
+	}
+	return nil
+}
+
+func (m *mockStore) PurgeOldMLSCommits(ctx context.Context, maxPerChannel int) (int64, error) {
+	if m.purgeOldMLSCommitsFn != nil {
+		return m.purgeOldMLSCommitsFn(ctx, maxPerChannel)
+	}
+	return 0, nil
+}
+
+func (m *mockStore) StorePendingWelcome(ctx context.Context, channelID, recipientUserID, senderID string, welcomeBytes []byte, epoch int64) error {
+	if m.storePendingWelcomeFn != nil {
+		return m.storePendingWelcomeFn(ctx, channelID, recipientUserID, senderID, welcomeBytes, epoch)
+	}
+	return nil
+}
+
+func (m *mockStore) GetPendingWelcomes(ctx context.Context, recipientUserID string) ([]db.PendingWelcomeRow, error) {
+	if m.getPendingWelcomesFn != nil {
+		return m.getPendingWelcomesFn(ctx, recipientUserID)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) DeletePendingWelcome(ctx context.Context, welcomeID string) error {
+	if m.deletePendingWelcomeFn != nil {
+		return m.deletePendingWelcomeFn(ctx, welcomeID)
+	}
+	return nil
 }
 
 // ---------- Shared test helpers ----------
