@@ -345,10 +345,15 @@ func (h *MessageHandler) handleMLSCommit(c *Client, raw []byte) {
 		CommitBytes string `json:"commit_bytes"`
 		GroupInfo   string `json:"group_info"`
 		Epoch       int64  `json:"epoch"`
+		GroupType   string `json:"group_type"` // "text" or "voice"; defaults to "text"
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil || payload.ChannelID == "" {
 		sendError(c, "bad_request", "channel_id required")
 		return
+	}
+	groupType := payload.GroupType
+	if groupType != "voice" {
+		groupType = "text"
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
@@ -376,7 +381,7 @@ func (h *MessageHandler) handleMLSCommit(c *Client, raw []byte) {
 		return
 	}
 
-	if err := h.store.UpsertMLSGroupInfo(ctx, payload.ChannelID, groupInfoBytes, payload.Epoch); err != nil {
+	if err := h.store.UpsertMLSGroupInfo(ctx, payload.ChannelID, groupType, groupInfoBytes, payload.Epoch); err != nil {
 		slog.Error("ws mls.commit UpsertMLSGroupInfo failed", "err", err)
 		sendError(c, "internal", "failed to store group info")
 		return
@@ -387,12 +392,14 @@ func (h *MessageHandler) handleMLSCommit(c *Client, raw []byte) {
 		return
 	}
 
+	// group_type is included so Plan 03's handleVoiceCommit can filter voice vs text commits.
 	out, _ := json.Marshal(map[string]interface{}{
 		"type":         "mls.commit",
 		"channel_id":   payload.ChannelID,
 		"epoch":        payload.Epoch,
 		"commit_bytes": payload.CommitBytes,
 		"sender_id":    c.userID,
+		"group_type":   groupType,
 	})
 	h.hub.Broadcast(payload.ChannelID, out, "")
 }

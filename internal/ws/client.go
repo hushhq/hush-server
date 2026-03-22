@@ -11,11 +11,10 @@ import (
 )
 
 const (
-	writeWait         = 10 * time.Second
-	pongWait          = 60 * time.Second
-	pingPeriod        = (pongWait * 9) / 10
-	maxMessageSize    = 512 * 1024
-	maxMediaKeyPayload = 4096
+	writeWait      = 10 * time.Second
+	pongWait       = 60 * time.Second
+	pingPeriod     = (pongWait * 9) / 10
+	maxMessageSize = 512 * 1024
 )
 
 // Client is a single WebSocket connection.
@@ -124,22 +123,8 @@ func (c *Client) handleMessage(raw []byte) {
 		if c.handler != nil {
 			c.handler.Handle(c, msg.Type, raw)
 		}
-	case "media.key":
-		if msg.TargetUserID == "" || msg.TargetUserID == c.userID {
-			return
-		}
-		if len(msg.Payload) > maxMediaKeyPayload {
-			return
-		}
-		out, err := json.Marshal(map[string]interface{}{
-			"type":           "media.key",
-			"sender_user_id": c.userID,
-			"payload":        msg.Payload,
-		})
-		if err != nil {
-			return
-		}
-		c.hub.BroadcastToUser(msg.TargetUserID, out)
+		// media.key was removed in M.3-01: frame keys are now derived locally via
+		// MLS export_secret. Sending key bytes over the wire violates the MLS security model.
 	}
 }
 

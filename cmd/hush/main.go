@@ -71,7 +71,12 @@ func main() {
 			slog.Warn("handshake cache: no instance_config row at startup", "err", seedErr)
 			// cache stays zero-valued: bootstrapped=false, name="" — valid for fresh instance
 		} else {
-			handshakeCache.Set(icfg.Name, icfg.IconURL, icfg.RegistrationMode, icfg.ServerCreationPolicy, icfg.OwnerID != nil)
+			voiceKeyRotationHours, vkrhErr := pool.GetVoiceKeyRotationHours(ctx)
+			if vkrhErr != nil {
+				slog.Warn("handshake cache: failed to read voice_key_rotation_hours, using default", "err", vkrhErr)
+				voiceKeyRotationHours = 2
+			}
+			handshakeCache.Set(icfg.Name, icfg.IconURL, icfg.RegistrationMode, icfg.ServerCreationPolicy, icfg.OwnerID != nil, voiceKeyRotationHours)
 		}
 
 		// System message cleanup: prune expired messages every 6 hours.

@@ -253,8 +253,19 @@ type postCommitRequest struct {
 	Epoch       int64  `json:"epoch"`
 }
 
+// resolveGroupType reads the ?type= query parameter and returns "text" or "voice".
+// Defaults to "text" when the parameter is absent or unrecognized.
+func resolveGroupType(r *http.Request) string {
+	t := r.URL.Query().Get("type")
+	if t == "voice" {
+		return "voice"
+	}
+	return "text"
+}
+
 // getGroupInfo handles GET /api/mls/groups/:channelId/info.
 // Returns the current MLS GroupInfo bytes (base64) and epoch for a channel.
+// Query parameter: ?type=text|voice (default: text).
 // Returns 404 when the channel has no group yet.
 func (h *mlsHandler) getGroupInfo(w http.ResponseWriter, r *http.Request) {
 	channelID := chi.URLParam(r, "channelId")
@@ -263,7 +274,8 @@ func (h *mlsHandler) getGroupInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	groupInfoBytes, epoch, err := h.store.GetMLSGroupInfo(r.Context(), channelID)
+	groupType := resolveGroupType(r)
+	groupInfoBytes, epoch, err := h.store.GetMLSGroupInfo(r.Context(), channelID, groupType)
 	if err != nil {
 		slog.Error("mls: get group info", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to get group info"})
@@ -281,13 +293,16 @@ func (h *mlsHandler) getGroupInfo(w http.ResponseWriter, r *http.Request) {
 }
 
 // putGroupInfo handles PUT /api/mls/groups/:channelId/info.
-// Upserts the GroupInfo bytes and epoch for a channel. Returns 204 on success.
+// Upserts the GroupInfo bytes and epoch for a channel.
+// Query parameter: ?type=text|voice (default: text). Returns 204 on success.
 func (h *mlsHandler) putGroupInfo(w http.ResponseWriter, r *http.Request) {
 	channelID := chi.URLParam(r, "channelId")
 	if _, err := uuid.Parse(channelID); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid channelId"})
 		return
 	}
+
+	groupType := resolveGroupType(r)
 
 	var req putGroupInfoRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -309,7 +324,7 @@ func (h *mlsHandler) putGroupInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.store.UpsertMLSGroupInfo(r.Context(), channelID, groupInfoBytes, req.Epoch); err != nil {
+	if err := h.store.UpsertMLSGroupInfo(r.Context(), channelID, groupType, groupInfoBytes, req.Epoch); err != nil {
 		slog.Error("mls: upsert group info", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to store group info"})
 		return
@@ -319,6 +334,8 @@ func (h *mlsHandler) putGroupInfo(w http.ResponseWriter, r *http.Request) {
 
 // postCommit handles POST /api/mls/groups/:channelId/commit.
 // Stores the Commit, updates GroupInfo, and broadcasts mls.commit to channel subscribers.
+// Query parameter: ?type=text|voice (default: text).
+// The mls.commit broadcast includes group_type so clients can filter voice vs text commits.
 // Returns 204 on success.
 func (h *mlsHandler) postCommit(w http.ResponseWriter, r *http.Request) {
 	channelID := chi.URLParam(r, "channelId")
@@ -332,6 +349,8 @@ func (h *mlsHandler) postCommit(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
 		return
 	}
+
+	groupType := resolveGroupType(r)
 
 	var req postCommitRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -359,7 +378,7 @@ func (h *mlsHandler) postCommit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	if err := h.store.UpsertMLSGroupInfo(ctx, channelID, groupInfoBytes, req.Epoch); err != nil {
+	if err := h.store.UpsertMLSGroupInfo(ctx, channelID, groupType, groupInfoBytes, req.Epoch); err != nil {
 		slog.Error("mls: upsert group info on commit", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to store group info"})
 		return
@@ -370,12 +389,14 @@ func (h *mlsHandler) postCommit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// group_type is included so Plan 03's handleVoiceCommit can filter voice vs text commits.
 	msg, _ := json.Marshal(map[string]interface{}{
 		"type":         "mls.commit",
 		"channel_id":   channelID,
 		"epoch":        req.Epoch,
 		"commit_bytes": req.CommitBytes,
 		"sender_id":    userID,
+		"group_type":   groupType,
 	})
 	h.hub.Broadcast(channelID, msg, "")
 	w.WriteHeader(http.StatusNoContent)

@@ -188,7 +188,12 @@ func (h *instanceHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 
 	// Refresh handshake cache so GET /api/handshake reflects the updated config.
 	if h.cache != nil && newCfg != nil {
-		h.cache.Set(newCfg.Name, newCfg.IconURL, newCfg.RegistrationMode, newCfg.ServerCreationPolicy, newCfg.OwnerID != nil)
+		voiceKeyRotationHours, vkrhErr := h.store.GetVoiceKeyRotationHours(r.Context())
+		if vkrhErr != nil {
+			slog.Warn("config refresh: failed to read voice_key_rotation_hours, using default", "err", vkrhErr)
+			voiceKeyRotationHours = 2
+		}
+		h.cache.Set(newCfg.Name, newCfg.IconURL, newCfg.RegistrationMode, newCfg.ServerCreationPolicy, newCfg.OwnerID != nil, voiceKeyRotationHours)
 	}
 
 	w.WriteHeader(http.StatusNoContent)

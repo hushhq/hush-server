@@ -415,7 +415,7 @@ func TestMLS_GetGroupInfo_Found_Returns200(t *testing.T) {
 	token := makeAuth(store, userID)
 
 	groupBytes := []byte("group-info-bytes")
-	store.getMLSGroupInfoFn = func(_ context.Context, cid string) ([]byte, int64, error) {
+	store.getMLSGroupInfoFn = func(_ context.Context, cid string, _ string) ([]byte, int64, error) {
 		if cid == channelID {
 			return groupBytes, 7, nil
 		}
@@ -441,7 +441,7 @@ func TestMLS_GetGroupInfo_NotFound_Returns404(t *testing.T) {
 	channelID := uuid.New().String()
 	token := makeAuth(store, userID)
 
-	store.getMLSGroupInfoFn = func(_ context.Context, _ string) ([]byte, int64, error) {
+	store.getMLSGroupInfoFn = func(_ context.Context, _ string, _ string) ([]byte, int64, error) {
 		return nil, 0, nil
 	}
 	router := mlsRouter(store, &mockMLSHub{})
@@ -460,7 +460,7 @@ func TestMLS_PutGroupInfo_Valid_Returns204(t *testing.T) {
 
 	var upsertedBytes []byte
 	var upsertedEpoch int64
-	store.upsertMLSGroupInfoFn = func(_ context.Context, cid string, b []byte, epoch int64) error {
+	store.upsertMLSGroupInfoFn = func(_ context.Context, _ string, _ string, b []byte, epoch int64) error {
 		upsertedBytes = b
 		upsertedEpoch = epoch
 		return nil
@@ -514,7 +514,7 @@ func TestMLS_PostCommit_Valid_Returns204(t *testing.T) {
 
 	upsertCalled := false
 	appendCalled := false
-	store.upsertMLSGroupInfoFn = func(_ context.Context, _ string, _ []byte, _ int64) error {
+	store.upsertMLSGroupInfoFn = func(_ context.Context, _ string, _ string, _ []byte, _ int64) error {
 		upsertCalled = true
 		return nil
 	}

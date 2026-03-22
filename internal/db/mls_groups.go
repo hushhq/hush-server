@@ -26,29 +26,30 @@ type PendingWelcomeRow struct {
 	CreatedAt    time.Time
 }
 
-// UpsertMLSGroupInfo inserts or updates the GroupInfo bytes for a channel.
-// On conflict (channel_id) the group_info_bytes, epoch, and updated_at are refreshed.
-func (p *Pool) UpsertMLSGroupInfo(ctx context.Context, channelID string, groupInfoBytes []byte, epoch int64) error {
+// UpsertMLSGroupInfo inserts or updates the GroupInfo bytes for a channel and group type.
+// groupType must be "text" or "voice". On conflict (channel_id, group_type) the
+// group_info_bytes, epoch, and updated_at are refreshed.
+func (p *Pool) UpsertMLSGroupInfo(ctx context.Context, channelID string, groupType string, groupInfoBytes []byte, epoch int64) error {
 	_, err := p.Exec(ctx, `
-		INSERT INTO mls_group_info (channel_id, group_info_bytes, epoch, updated_at)
-		VALUES ($1, $2, $3, now())
-		ON CONFLICT (channel_id) DO UPDATE SET
+		INSERT INTO mls_group_info (channel_id, group_type, group_info_bytes, epoch, updated_at)
+		VALUES ($1, $2, $3, $4, now())
+		ON CONFLICT (channel_id, group_type) DO UPDATE SET
 			group_info_bytes = EXCLUDED.group_info_bytes,
 			epoch            = EXCLUDED.epoch,
 			updated_at       = now()`,
-		channelID, groupInfoBytes, epoch,
+		channelID, groupType, groupInfoBytes, epoch,
 	)
 	return err
 }
 
-// GetMLSGroupInfo returns the stored GroupInfo bytes and epoch for a channel.
-// Returns (nil, 0, nil) when no row exists.
-func (p *Pool) GetMLSGroupInfo(ctx context.Context, channelID string) (groupInfoBytes []byte, epoch int64, err error) {
+// GetMLSGroupInfo returns the stored GroupInfo bytes and epoch for a channel and group type.
+// groupType must be "text" or "voice". Returns (nil, 0, nil) when no row exists.
+func (p *Pool) GetMLSGroupInfo(ctx context.Context, channelID string, groupType string) (groupInfoBytes []byte, epoch int64, err error) {
 	err = p.QueryRow(ctx, `
 		SELECT group_info_bytes, epoch
 		FROM mls_group_info
-		WHERE channel_id = $1`,
-		channelID,
+		WHERE channel_id = $1 AND group_type = $2`,
+		channelID, groupType,
 	).Scan(&groupInfoBytes, &epoch)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, 0, nil
@@ -93,12 +94,14 @@ func (p *Pool) GetMLSCommitsSinceEpoch(ctx context.Context, channelID string, si
 	return commits, rows.Err()
 }
 
-// DeleteMLSGroupInfo removes the GroupInfo row for a channel.
-// Associated commits in mls_commits are deleted by the channel FK cascade on channels.
-func (p *Pool) DeleteMLSGroupInfo(ctx context.Context, channelID string) error {
+// DeleteMLSGroupInfo removes the GroupInfo row for a channel and group type.
+// groupType must be "text" or "voice". For voice groups this is called when the
+// last participant leaves the voice channel to enforce the clean forward-secrecy
+// boundary between voice sessions.
+func (p *Pool) DeleteMLSGroupInfo(ctx context.Context, channelID string, groupType string) error {
 	_, err := p.Exec(ctx, `
-		DELETE FROM mls_group_info WHERE channel_id = $1`,
-		channelID,
+		DELETE FROM mls_group_info WHERE channel_id = $1 AND group_type = $2`,
+		channelID, groupType,
 	)
 	return err
 }
@@ -169,4 +172,19 @@ func (p *Pool) DeletePendingWelcome(ctx context.Context, welcomeID string) error
 		welcomeID,
 	)
 	return err
+}
+
+// GetVoiceKeyRotationHours returns the configured voice group periodic key rotation
+// interval from instance_config. Returns the default of 2 when the row is missing.
+func (p *Pool) GetVoiceKeyRotationHours(ctx context.Context) (int, error) {
+	var hours int
+	err := p.QueryRow(ctx, `
+		SELECT voice_key_rotation_hours FROM instance_config LIMIT 1`).Scan(&hours)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 2, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return hours, nil
 }

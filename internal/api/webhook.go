@@ -126,18 +126,44 @@ func LiveKitWebhookHandler(hub *ws.Hub, store db.Store, apiKey, apiSecret string
 			return
 		}
 
+		// Resolve the channel's server_id to broadcast to the correct guild only.
+		serverID := resolveChannelServerID(store, channelID)
+
 		msg, _ := json.Marshal(map[string]interface{}{
 			"type":         "voice_state_update",
 			"channel_id":   channelID,
 			"participants": participants,
 		})
-
-		// Resolve the channel's server_id to broadcast to the correct guild only.
-		serverID := resolveChannelServerID(store, channelID)
 		if serverID != "" {
 			hub.BroadcastToServer(serverID, msg)
 		} else {
 			hub.BroadcastToAll(msg)
+		}
+
+		// When the last participant leaves, destroy the voice MLS group.
+		// This enforces a clean forward-secrecy boundary between voice sessions:
+		// the next session always starts a fresh group at epoch 0.
+		if event.GetEvent() == webhook.EventParticipantLeft && len(participants) == 0 {
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := store.DeleteMLSGroupInfo(ctx, channelID, "voice"); err != nil {
+					slog.Warn("voice: failed to delete MLS group info on room empty", "channel", channelID, "err", err)
+				} else {
+					slog.Info("voice: deleted MLS group info (room empty)", "channel", channelID)
+				}
+			}()
+
+			// Broadcast voice_group_destroyed so clients can clean up local MLS state.
+			destroyMsg, _ := json.Marshal(map[string]interface{}{
+				"type":       "voice_group_destroyed",
+				"channel_id": channelID,
+			})
+			if serverID != "" {
+				hub.BroadcastToServer(serverID, destroyMsg)
+			} else {
+				hub.BroadcastToAll(destroyMsg)
+			}
 		}
 
 		w.WriteHeader(http.StatusOK)

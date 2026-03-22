@@ -124,15 +124,18 @@ type Store interface {
 	GetSystemMessageRetentionDays(ctx context.Context) (*int, error)
 
 	// MLS group methods
-	UpsertMLSGroupInfo(ctx context.Context, channelID string, groupInfoBytes []byte, epoch int64) error
-	GetMLSGroupInfo(ctx context.Context, channelID string) (groupInfoBytes []byte, epoch int64, err error)
+	// groupType is "text" or "voice" — each channel can have one group of each type.
+	UpsertMLSGroupInfo(ctx context.Context, channelID string, groupType string, groupInfoBytes []byte, epoch int64) error
+	GetMLSGroupInfo(ctx context.Context, channelID string, groupType string) (groupInfoBytes []byte, epoch int64, err error)
+	DeleteMLSGroupInfo(ctx context.Context, channelID string, groupType string) error
 	AppendMLSCommit(ctx context.Context, channelID string, epoch int64, commitBytes []byte, senderID string) error
 	GetMLSCommitsSinceEpoch(ctx context.Context, channelID string, sinceEpoch int64, limit int) ([]MLSCommitRow, error)
-	DeleteMLSGroupInfo(ctx context.Context, channelID string) error
 	PurgeOldMLSCommits(ctx context.Context, maxPerChannel int) (int64, error)
 	StorePendingWelcome(ctx context.Context, channelID, recipientUserID, senderID string, welcomeBytes []byte, epoch int64) error
 	GetPendingWelcomes(ctx context.Context, recipientUserID string) ([]PendingWelcomeRow, error)
 	DeletePendingWelcome(ctx context.Context, welcomeID string) error
+	// GetVoiceKeyRotationHours returns the configured voice group key rotation interval in hours.
+	GetVoiceKeyRotationHours(ctx context.Context) (int, error)
 }
 
 // InstanceAuditLogFilter filters instance audit log queries.

@@ -136,15 +136,16 @@ type mockStore struct {
 	getSystemMsgRetentionDaysFn func(ctx context.Context) (*int, error)
 
 	// MLS group methods
-	upsertMLSGroupInfoFn        func(ctx context.Context, channelID string, groupInfoBytes []byte, epoch int64) error
-	getMLSGroupInfoFn           func(ctx context.Context, channelID string) ([]byte, int64, error)
+	upsertMLSGroupInfoFn        func(ctx context.Context, channelID string, groupType string, groupInfoBytes []byte, epoch int64) error
+	getMLSGroupInfoFn           func(ctx context.Context, channelID string, groupType string) ([]byte, int64, error)
+	deleteMLSGroupInfoFn        func(ctx context.Context, channelID string, groupType string) error
 	appendMLSCommitFn           func(ctx context.Context, channelID string, epoch int64, commitBytes []byte, senderID string) error
 	getMLSCommitsSinceEpochFn   func(ctx context.Context, channelID string, sinceEpoch int64, limit int) ([]db.MLSCommitRow, error)
-	deleteMLSGroupInfoFn        func(ctx context.Context, channelID string) error
 	purgeOldMLSCommitsFn        func(ctx context.Context, maxPerChannel int) (int64, error)
 	storePendingWelcomeFn       func(ctx context.Context, channelID, recipientUserID, senderID string, welcomeBytes []byte, epoch int64) error
 	getPendingWelcomesFn        func(ctx context.Context, recipientUserID string) ([]db.PendingWelcomeRow, error)
 	deletePendingWelcomeFn      func(ctx context.Context, welcomeID string) error
+	getVoiceKeyRotationHoursFn  func(ctx context.Context) (int, error)
 }
 
 // ---------- User/session ----------
@@ -702,18 +703,25 @@ func (m *mockStore) GetSystemMessageRetentionDays(ctx context.Context) (*int, er
 
 // ---------- MLS group methods ----------
 
-func (m *mockStore) UpsertMLSGroupInfo(ctx context.Context, channelID string, groupInfoBytes []byte, epoch int64) error {
+func (m *mockStore) UpsertMLSGroupInfo(ctx context.Context, channelID string, groupType string, groupInfoBytes []byte, epoch int64) error {
 	if m.upsertMLSGroupInfoFn != nil {
-		return m.upsertMLSGroupInfoFn(ctx, channelID, groupInfoBytes, epoch)
+		return m.upsertMLSGroupInfoFn(ctx, channelID, groupType, groupInfoBytes, epoch)
 	}
 	return nil
 }
 
-func (m *mockStore) GetMLSGroupInfo(ctx context.Context, channelID string) ([]byte, int64, error) {
+func (m *mockStore) GetMLSGroupInfo(ctx context.Context, channelID string, groupType string) ([]byte, int64, error) {
 	if m.getMLSGroupInfoFn != nil {
-		return m.getMLSGroupInfoFn(ctx, channelID)
+		return m.getMLSGroupInfoFn(ctx, channelID, groupType)
 	}
 	return nil, 0, nil
+}
+
+func (m *mockStore) DeleteMLSGroupInfo(ctx context.Context, channelID string, groupType string) error {
+	if m.deleteMLSGroupInfoFn != nil {
+		return m.deleteMLSGroupInfoFn(ctx, channelID, groupType)
+	}
+	return nil
 }
 
 func (m *mockStore) AppendMLSCommit(ctx context.Context, channelID string, epoch int64, commitBytes []byte, senderID string) error {
@@ -728,13 +736,6 @@ func (m *mockStore) GetMLSCommitsSinceEpoch(ctx context.Context, channelID strin
 		return m.getMLSCommitsSinceEpochFn(ctx, channelID, sinceEpoch, limit)
 	}
 	return nil, nil
-}
-
-func (m *mockStore) DeleteMLSGroupInfo(ctx context.Context, channelID string) error {
-	if m.deleteMLSGroupInfoFn != nil {
-		return m.deleteMLSGroupInfoFn(ctx, channelID)
-	}
-	return nil
 }
 
 func (m *mockStore) PurgeOldMLSCommits(ctx context.Context, maxPerChannel int) (int64, error) {
@@ -763,6 +764,13 @@ func (m *mockStore) DeletePendingWelcome(ctx context.Context, welcomeID string) 
 		return m.deletePendingWelcomeFn(ctx, welcomeID)
 	}
 	return nil
+}
+
+func (m *mockStore) GetVoiceKeyRotationHours(ctx context.Context) (int, error) {
+	if m.getVoiceKeyRotationHoursFn != nil {
+		return m.getVoiceKeyRotationHoursFn(ctx)
+	}
+	return 2, nil
 }
 
 // ---------- Shared test helpers ----------

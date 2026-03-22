@@ -16,33 +16,35 @@ import (
 
 func TestInstanceCache_ZeroValue_ReturnsDefaults(t *testing.T) {
 	cache := NewInstanceCache()
-	name, iconURL, regMode, scp, bootstrapped := cache.snapshot()
+	name, iconURL, regMode, scp, bootstrapped, vkrh := cache.snapshot()
 	assert.Equal(t, "", name)
 	assert.Nil(t, iconURL)
 	assert.Equal(t, "", regMode)
 	assert.Equal(t, "", scp)
 	assert.False(t, bootstrapped)
+	assert.Equal(t, voiceKeyRotationHoursDefault, vkrh, "zero-value cache must use default voice key rotation hours")
 }
 
 func TestInstanceCache_Set_ReflectsValues(t *testing.T) {
 	cache := NewInstanceCache()
 	icon := "https://example.com/icon.png"
-	cache.Set("My Hush", &icon, "invite_only", "admin_only", true)
+	cache.Set("My Hush", &icon, "invite_only", "admin_only", true, 4)
 
-	name, iconURL, regMode, scp, bootstrapped := cache.snapshot()
+	name, iconURL, regMode, scp, bootstrapped, vkrh := cache.snapshot()
 	assert.Equal(t, "My Hush", name)
 	require.NotNil(t, iconURL)
 	assert.Equal(t, "https://example.com/icon.png", *iconURL)
 	assert.Equal(t, "invite_only", regMode)
 	assert.Equal(t, "admin_only", scp)
 	assert.True(t, bootstrapped)
+	assert.Equal(t, 4, vkrh)
 }
 
 func TestInstanceCache_Set_NilIconURL(t *testing.T) {
 	cache := NewInstanceCache()
-	cache.Set("Test", nil, "open", "any_member", false)
+	cache.Set("Test", nil, "open", "any_member", false, 2)
 
-	_, iconURL, _, _, _ := cache.snapshot()
+	_, iconURL, _, _, _, _ := cache.snapshot()
 	assert.Nil(t, iconURL)
 }
 
@@ -50,7 +52,7 @@ func TestInstanceCache_Set_NilIconURL(t *testing.T) {
 
 func TestHandshake_Returns200_NoAuth(t *testing.T) {
 	cache := NewInstanceCache()
-	cache.Set("Hush Instance", nil, "open", "any_member", true)
+	cache.Set("Hush Instance", nil, "open", "any_member", true, 2)
 	handler := HandshakeHandler(cache, true)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/handshake", nil)
@@ -64,7 +66,7 @@ func TestHandshake_Returns200_NoAuth(t *testing.T) {
 func TestHandshake_ContainsAllRequiredFields(t *testing.T) {
 	cache := NewInstanceCache()
 	icon := "https://example.com/icon.png"
-	cache.Set("My Instance", &icon, "invite_only", "admin_only", true)
+	cache.Set("My Instance", &icon, "invite_only", "admin_only", true, 2)
 	handler := HandshakeHandler(cache, true)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/handshake", nil)
@@ -91,6 +93,9 @@ func TestHandshake_ContainsAllRequiredFields(t *testing.T) {
 	assert.Contains(t, resp, "registrationMode")
 	assert.Contains(t, resp, "bootstrapped")
 	assert.Contains(t, resp, "server_creation_policy")
+
+	// Voice MLS
+	assert.Contains(t, resp, "voice_key_rotation_hours")
 }
 
 func TestHandshake_ServerVersionDefaultsDev(t *testing.T) {
@@ -174,7 +179,7 @@ func TestHandshake_VoiceChannels_FalseWhenDisabled(t *testing.T) {
 
 func TestHandshake_Bootstrapped_TrueWhenOwnerSet(t *testing.T) {
 	cache := NewInstanceCache()
-	cache.Set("Bootstrapped", nil, "open", "any_member", true) // bootstrapped = true
+	cache.Set("Bootstrapped", nil, "open", "any_member", true, 2) // bootstrapped = true
 
 	handler := HandshakeHandler(cache, false)
 	req := httptest.NewRequest(http.MethodGet, "/api/handshake", nil)
@@ -188,7 +193,7 @@ func TestHandshake_Bootstrapped_TrueWhenOwnerSet(t *testing.T) {
 
 func TestHandshake_Bootstrapped_FalseWhenOwnerNil(t *testing.T) {
 	cache := NewInstanceCache()
-	cache.Set("Fresh", nil, "open", "any_member", false) // bootstrapped = false
+	cache.Set("Fresh", nil, "open", "any_member", false, 2) // bootstrapped = false
 
 	handler := HandshakeHandler(cache, false)
 	req := httptest.NewRequest(http.MethodGet, "/api/handshake", nil)
@@ -220,7 +225,7 @@ func TestHandshake_UninitializedCache_ReturnsZeroValues(t *testing.T) {
 func TestHandshake_InstanceIdentity_PopulatedFromCache(t *testing.T) {
 	cache := NewInstanceCache()
 	icon := "https://hush.example.com/logo.png"
-	cache.Set("Hush Corp", &icon, "invite_only", "admin_only", true)
+	cache.Set("Hush Corp", &icon, "invite_only", "admin_only", true, 2)
 
 	handler := HandshakeHandler(cache, true)
 	req := httptest.NewRequest(http.MethodGet, "/api/handshake", nil)
@@ -235,4 +240,34 @@ func TestHandshake_InstanceIdentity_PopulatedFromCache(t *testing.T) {
 	assert.Equal(t, "invite_only", resp.RegistrationMode)
 	assert.Equal(t, "admin_only", resp.ServerCreationPolicy)
 	assert.True(t, resp.Bootstrapped)
+}
+
+func TestHandshake_VoiceKeyRotationHours_InResponse(t *testing.T) {
+	cache := NewInstanceCache()
+	cache.Set("Test", nil, "open", "any_member", true, 4)
+
+	handler := HandshakeHandler(cache, true)
+	req := httptest.NewRequest(http.MethodGet, "/api/handshake", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	var resp handshakeResponse
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.Equal(t, 4, resp.VoiceKeyRotationHours, "voice_key_rotation_hours must reflect configured value")
+}
+
+func TestHandshake_VoiceKeyRotationHours_DefaultIs2(t *testing.T) {
+	cache := NewInstanceCache()
+	// Do NOT call Set — verify default is 2 hours
+
+	handler := HandshakeHandler(cache, true)
+	req := httptest.NewRequest(http.MethodGet, "/api/handshake", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	var resp handshakeResponse
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.Equal(t, voiceKeyRotationHoursDefault, resp.VoiceKeyRotationHours, "default voice_key_rotation_hours must be 2")
 }
