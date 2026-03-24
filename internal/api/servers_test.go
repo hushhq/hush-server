@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"sync"
 	"testing"
@@ -22,9 +21,9 @@ func serversRouter(store *mockStore) http.Handler {
 	return ServerRoutes(store, nil, testJWTSecret)
 }
 
-// adminRouter returns an AdminRoutes handler wired with testJWTSecret.
-func adminRouter(store *mockStore) http.Handler {
-	return AdminRoutes(store, testJWTSecret)
+// serversRouterWithHub wires ServerRoutes with a custom hub for broadcast tests.
+func serversRouterWithHub(store *mockStore, hub GlobalBroadcaster) http.Handler {
+	return ServerRoutes(store, hub, testJWTSecret)
 }
 
 // ---------- POST / (createServer) ----------
@@ -32,122 +31,59 @@ func adminRouter(store *mockStore) http.Handler {
 func TestCreateServer_Success(t *testing.T) {
 	userID := uuid.New().String()
 	serverID := uuid.New().String()
+	encMeta := []byte(`{"name":"My Guild"}`)
 
 	store := &mockStore{
-		getInstanceConfigFn: func(_ context.Context) (*models.InstanceConfig, error) {
-			return &models.InstanceConfig{
-				ID:                   "inst-1",
-				Name:                 "Test",
-				RegistrationMode:     "open",
-				ServerCreationPolicy: "any_member",
-			}, nil
+		createServerFn: func(_ context.Context, metadata []byte) (*models.Server, error) {
+			assert.Equal(t, encMeta, metadata)
+			return &models.Server{ID: serverID, EncryptedMetadata: metadata}, nil
 		},
-		createServerFn: func(_ context.Context, name, ownerID string) (*models.Server, error) {
-			assert.Equal(t, "My Guild", name)
-			assert.Equal(t, userID, ownerID)
-			return &models.Server{ID: serverID, Name: name, OwnerID: ownerID}, nil
-		},
-		addServerMemberFn: func(_ context.Context, srvID, uid, _ string) error {
+		addServerMemberFn: func(_ context.Context, srvID, uid string, level int) error {
 			assert.Equal(t, serverID, srvID)
 			assert.Equal(t, userID, uid)
+			assert.Equal(t, models.PermissionLevelOwner, level)
 			return nil
 		},
 	}
 	token := makeAuth(store, userID)
 	router := serversRouter(store)
 
-	rr := postServerJSON(router, "/", models.CreateServerRequest{Name: "My Guild"}, token)
+	rr := postServerJSON(router, "/", models.CreateServerRequest{EncryptedMetadata: encMeta}, token)
 	require.Equal(t, http.StatusCreated, rr.Code)
 
 	var server models.Server
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&server))
 	assert.Equal(t, serverID, server.ID)
-	assert.Equal(t, "My Guild", server.Name)
 }
 
-// TestCreateServer_CreatorBecomesOwner verifies AddServerMember is called with "owner" role.
+// TestCreateServer_CreatorBecomesOwner verifies AddServerMember is called with PermissionLevelOwner.
 func TestCreateServer_CreatorBecomesOwner(t *testing.T) {
 	userID := uuid.New().String()
 	serverID := uuid.New().String()
 
-	var capturedRole string
+	var capturedLevel int
 	store := &mockStore{
-		getInstanceConfigFn: func(_ context.Context) (*models.InstanceConfig, error) {
-			return &models.InstanceConfig{ServerCreationPolicy: "any_member"}, nil
+		createServerFn: func(_ context.Context, metadata []byte) (*models.Server, error) {
+			return &models.Server{ID: serverID, EncryptedMetadata: metadata}, nil
 		},
-		createServerFn: func(_ context.Context, name, ownerID string) (*models.Server, error) {
-			return &models.Server{ID: serverID, Name: name, OwnerID: ownerID}, nil
-		},
-		addServerMemberFn: func(_ context.Context, _, _, role string) error {
-			capturedRole = role
+		addServerMemberFn: func(_ context.Context, _, _ string, level int) error {
+			capturedLevel = level
 			return nil
 		},
 	}
 	token := makeAuth(store, userID)
 	router := serversRouter(store)
 
-	rr := postServerJSON(router, "/", models.CreateServerRequest{Name: "Test Guild"}, token)
+	rr := postServerJSON(router, "/", models.CreateServerRequest{EncryptedMetadata: []byte(`{}`)}, token)
 	require.Equal(t, http.StatusCreated, rr.Code)
-	assert.Equal(t, "owner", capturedRole, "creator must be added as guild owner")
+	assert.Equal(t, models.PermissionLevelOwner, capturedLevel, "creator must be added with owner permission level")
 }
 
-func TestCreateServer_AdminOnly_MemberForbidden(t *testing.T) {
-	userID := uuid.New().String()
-
-	store := &mockStore{
-		getInstanceConfigFn: func(_ context.Context) (*models.InstanceConfig, error) {
-			return &models.InstanceConfig{ServerCreationPolicy: "admin_only"}, nil
-		},
-		getUserRoleFn: func(_ context.Context, _ string) (string, error) {
-			return "member", nil // member cannot create when policy is admin_only
-		},
-	}
-	token := makeAuth(store, userID)
+func TestCreateServer_Unauthenticated_Returns401(t *testing.T) {
+	store := &mockStore{}
 	router := serversRouter(store)
-
-	rr := postServerJSON(router, "/", models.CreateServerRequest{Name: "Forbidden Guild"}, token)
-	require.Equal(t, http.StatusForbidden, rr.Code)
-	errBody := decodeError(t, rr)
-	assert.Contains(t, errBody["error"], "restricted")
-}
-
-func TestCreateServer_AdminOnly_AdminAllowed(t *testing.T) {
-	userID := uuid.New().String()
-	serverID := uuid.New().String()
-
-	store := &mockStore{
-		getInstanceConfigFn: func(_ context.Context) (*models.InstanceConfig, error) {
-			return &models.InstanceConfig{ServerCreationPolicy: "admin_only"}, nil
-		},
-		getUserRoleFn: func(_ context.Context, _ string) (string, error) {
-			return "admin", nil // instance admin is allowed
-		},
-		createServerFn: func(_ context.Context, name, ownerID string) (*models.Server, error) {
-			return &models.Server{ID: serverID, Name: name, OwnerID: ownerID}, nil
-		},
-	}
-	token := makeAuth(store, userID)
-	router := serversRouter(store)
-
-	rr := postServerJSON(router, "/", models.CreateServerRequest{Name: "Admin Guild"}, token)
-	require.Equal(t, http.StatusCreated, rr.Code)
-}
-
-func TestCreateServer_EmptyName_Returns400(t *testing.T) {
-	userID := uuid.New().String()
-
-	store := &mockStore{
-		getInstanceConfigFn: func(_ context.Context) (*models.InstanceConfig, error) {
-			return &models.InstanceConfig{ServerCreationPolicy: "any_member"}, nil
-		},
-	}
-	token := makeAuth(store, userID)
-	router := serversRouter(store)
-
-	rr := postServerJSON(router, "/", models.CreateServerRequest{Name: "   "}, token)
-	require.Equal(t, http.StatusBadRequest, rr.Code)
-	errBody := decodeError(t, rr)
-	assert.Contains(t, errBody["error"], "name is required")
+	rr := postServerJSON(router, "/", models.CreateServerRequest{EncryptedMetadata: []byte(`{}`)}, "")
+	require.Equal(t, http.StatusUnauthorized, rr.Code)
 }
 
 // ---------- GET / (listMyServers) ----------
@@ -159,8 +95,8 @@ func TestListMyServers(t *testing.T) {
 		listServersForUserFn: func(_ context.Context, uid string) ([]models.Server, error) {
 			assert.Equal(t, userID, uid)
 			return []models.Server{
-				{ID: "srv-1", Name: "Guild One", OwnerID: userID},
-				{ID: "srv-2", Name: "Guild Two", OwnerID: uuid.New().String()},
+				{ID: "srv-1", EncryptedMetadata: []byte(`{"name":"Guild One"}`)},
+				{ID: "srv-2", EncryptedMetadata: []byte(`{"name":"Guild Two"}`)},
 			}, nil
 		},
 	}
@@ -173,7 +109,7 @@ func TestListMyServers(t *testing.T) {
 	var servers []models.Server
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&servers))
 	require.Len(t, servers, 2)
-	assert.Equal(t, "Guild One", servers[0].Name)
+	assert.Equal(t, "srv-1", servers[0].ID)
 }
 
 func TestListMyServers_EmptyList_ReturnsEmptyArray(t *testing.T) {
@@ -202,15 +138,15 @@ func TestGetServer(t *testing.T) {
 	serverID := uuid.New().String()
 
 	store := &mockStore{
-		getServerMemberRoleFn: func(_ context.Context, _, uid string) (string, error) {
+		getServerMemberLevelFn: func(_ context.Context, _, uid string) (int, error) {
 			if uid == userID {
-				return "member", nil
+				return models.PermissionLevelMember, nil
 			}
-			return "", nil
+			return 0, errors.New("not a member")
 		},
 		getServerByIDFn: func(_ context.Context, srvID string) (*models.Server, error) {
 			assert.Equal(t, serverID, srvID)
-			return &models.Server{ID: serverID, Name: "My Guild", OwnerID: userID}, nil
+			return &models.Server{ID: serverID, EncryptedMetadata: []byte(`{"name":"My Guild"}`)}, nil
 		},
 	}
 	token := makeAuth(store, userID)
@@ -222,7 +158,6 @@ func TestGetServer(t *testing.T) {
 	var server models.Server
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&server))
 	assert.Equal(t, serverID, server.ID)
-	assert.Equal(t, "My Guild", server.Name)
 }
 
 func TestGetServer_NotGuildMember_Returns403(t *testing.T) {
@@ -230,8 +165,8 @@ func TestGetServer_NotGuildMember_Returns403(t *testing.T) {
 	serverID := uuid.New().String()
 
 	store := &mockStore{
-		getServerMemberRoleFn: func(_ context.Context, _, _ string) (string, error) {
-			return "", nil // empty role means not a member
+		getServerMemberLevelFn: func(_ context.Context, _, _ string) (int, error) {
+			return 0, errors.New("not a member") // error = not in guild
 		},
 	}
 	token := makeAuth(store, userID)
@@ -249,11 +184,11 @@ func TestDeleteServer_OwnerOnly(t *testing.T) {
 
 	var deleted bool
 	store := &mockStore{
-		getServerMemberRoleFn: func(_ context.Context, _, uid string) (string, error) {
+		getServerMemberLevelFn: func(_ context.Context, _, uid string) (int, error) {
 			if uid == userID {
-				return "owner", nil
+				return models.PermissionLevelOwner, nil
 			}
-			return "", nil
+			return 0, errors.New("not a member")
 		},
 		deleteServerFn: func(_ context.Context, srvID string) error {
 			assert.Equal(t, serverID, srvID)
@@ -274,8 +209,8 @@ func TestDeleteServer_AdminForbidden(t *testing.T) {
 	serverID := uuid.New().String()
 
 	store := &mockStore{
-		getServerMemberRoleFn: func(_ context.Context, _, _ string) (string, error) {
-			return "admin", nil // admin cannot delete — only owner can
+		getServerMemberLevelFn: func(_ context.Context, _, _ string) (int, error) {
+			return models.PermissionLevelAdmin, nil // admin cannot delete — only owner can
 		},
 	}
 	token := makeAuth(store, userID)
@@ -294,16 +229,16 @@ func TestListMembers(t *testing.T) {
 	serverID := uuid.New().String()
 
 	store := &mockStore{
-		getServerMemberRoleFn: func(_ context.Context, _, uid string) (string, error) {
+		getServerMemberLevelFn: func(_ context.Context, _, uid string) (int, error) {
 			if uid == userID {
-				return "member", nil
+				return models.PermissionLevelMember, nil
 			}
-			return "", nil
+			return 0, errors.New("not a member")
 		},
 		listServerMembersFn: func(_ context.Context, srvID string) ([]models.ServerMemberWithUser, error) {
 			assert.Equal(t, serverID, srvID)
 			return []models.ServerMemberWithUser{
-				{ID: userID, Username: "alice", Role: "member", JoinedAt: time.Now()},
+				{ID: userID, Username: "alice", PermissionLevel: models.PermissionLevelMember, JoinedAt: time.Now()},
 			}, nil
 		},
 	}
@@ -326,19 +261,19 @@ func TestChangeRole_AdminCanPromote(t *testing.T) {
 	targetID := uuid.New().String()
 	serverID := uuid.New().String()
 
-	var updatedRole string
+	var updatedLevel int
 	store := &mockStore{
-		getServerMemberRoleFn: func(_ context.Context, _, userID string) (string, error) {
+		getServerMemberLevelFn: func(_ context.Context, _, userID string) (int, error) {
 			switch userID {
 			case actorID:
-				return "admin", nil
+				return models.PermissionLevelAdmin, nil
 			case targetID:
-				return "member", nil
+				return models.PermissionLevelMember, nil
 			}
-			return "", nil
+			return 0, errors.New("not a member")
 		},
-		updateServerMemberRoleFn: func(_ context.Context, _, _, role string) error {
-			updatedRole = role
+		updateServerMemberLevelFn: func(_ context.Context, _, _ string, level int) error {
+			updatedLevel = level
 			return nil
 		},
 	}
@@ -346,9 +281,9 @@ func TestChangeRole_AdminCanPromote(t *testing.T) {
 	router := serversRouter(store)
 
 	rr := putServerJSON(router, "/"+serverID+"/members/"+targetID+"/role",
-		changeRoleRequest{NewRole: "mod"}, token)
+		changePermissionLevelRequest{PermissionLevel: models.PermissionLevelMod}, token)
 	require.Equal(t, http.StatusNoContent, rr.Code)
-	assert.Equal(t, "mod", updatedRole)
+	assert.Equal(t, models.PermissionLevelMod, updatedLevel)
 }
 
 func TestChangeRole_MemberCannot(t *testing.T) {
@@ -357,15 +292,15 @@ func TestChangeRole_MemberCannot(t *testing.T) {
 	serverID := uuid.New().String()
 
 	store := &mockStore{
-		getServerMemberRoleFn: func(_ context.Context, _, _ string) (string, error) {
-			return "member", nil // everyone is a member
+		getServerMemberLevelFn: func(_ context.Context, _, _ string) (int, error) {
+			return models.PermissionLevelMember, nil // everyone is member
 		},
 	}
 	token := makeAuth(store, actorID)
 	router := serversRouter(store)
 
 	rr := putServerJSON(router, "/"+serverID+"/members/"+targetID+"/role",
-		changeRoleRequest{NewRole: "mod"}, token)
+		changePermissionLevelRequest{PermissionLevel: models.PermissionLevelMod}, token)
 	require.Equal(t, http.StatusForbidden, rr.Code)
 	errBody := decodeError(t, rr)
 	assert.Contains(t, errBody["error"], "admin")
@@ -377,28 +312,27 @@ func TestChangeRole_CannotPromoteAboveSelf(t *testing.T) {
 	serverID := uuid.New().String()
 
 	store := &mockStore{
-		getServerMemberRoleFn: func(_ context.Context, _, userID string) (string, error) {
+		getServerMemberLevelFn: func(_ context.Context, _, userID string) (int, error) {
 			switch userID {
 			case actorID:
-				return "admin", nil
+				return models.PermissionLevelAdmin, nil
 			case targetID:
-				return "member", nil
+				return models.PermissionLevelMember, nil
 			}
-			return "", nil
+			return 0, errors.New("not a member")
 		},
 	}
 	token := makeAuth(store, actorID)
 	router := serversRouter(store)
 
-	// Admin trying to promote to "owner" — "owner" is not a valid newRole.
+	// Admin (level 2) trying to promote to owner (level 3) — exceeds own level.
 	rr := putServerJSON(router, "/"+serverID+"/members/"+targetID+"/role",
-		changeRoleRequest{NewRole: "owner"}, token)
-	// "owner" is rejected as invalid newRole value.
-	require.Equal(t, http.StatusBadRequest, rr.Code)
+		changePermissionLevelRequest{PermissionLevel: models.PermissionLevelOwner}, token)
+	require.Equal(t, http.StatusForbidden, rr.Code)
 }
 
 // TestChangeRole_EmitsSystemMessage verifies changeRole calls EmitSystemMessage
-// with event_type="role_changed" and metadata containing old_role/new_role.
+// with event_type="role_changed" and metadata containing old_level/new_level.
 func TestChangeRole_EmitsSystemMessage(t *testing.T) {
 	actorID := uuid.New().String()
 	targetID := uuid.New().String()
@@ -408,16 +342,16 @@ func TestChangeRole_EmitsSystemMessage(t *testing.T) {
 	var capturedEventType string
 	var capturedMetadata map[string]interface{}
 	store := &mockStore{
-		getServerMemberRoleFn: func(_ context.Context, _, userID string) (string, error) {
+		getServerMemberLevelFn: func(_ context.Context, _, userID string) (int, error) {
 			switch userID {
 			case actorID:
-				return "admin", nil
+				return models.PermissionLevelAdmin, nil
 			case targetID:
-				return "member", nil
+				return models.PermissionLevelMember, nil
 			}
-			return "", nil
+			return 0, errors.New("not a member")
 		},
-		updateServerMemberRoleFn: func(_ context.Context, _, _, _ string) error {
+		updateServerMemberLevelFn: func(_ context.Context, _, _ string, _ int) error {
 			return nil
 		},
 		insertSystemMessageFn: func(_ context.Context, _, eventType, _ string, _ *string, _ string, metadata map[string]interface{}) (*models.SystemMessage, error) {
@@ -431,108 +365,29 @@ func TestChangeRole_EmitsSystemMessage(t *testing.T) {
 	router := ServerRoutes(store, &mockHub{}, testJWTSecret)
 
 	rr := putServerJSON(router, "/"+serverID+"/members/"+targetID+"/role",
-		changeRoleRequest{NewRole: "mod"}, token)
+		changePermissionLevelRequest{PermissionLevel: models.PermissionLevelMod}, token)
 	require.Equal(t, http.StatusNoContent, rr.Code)
 	require.True(t, sysMsgCalled, "changeRole must emit system message")
 	assert.Equal(t, "role_changed", capturedEventType)
 	require.NotNil(t, capturedMetadata)
-	assert.Equal(t, "member", capturedMetadata["old_role"])
-	assert.Equal(t, "mod", capturedMetadata["new_role"])
-}
-
-// ---------- GET /admin/guilds (listGuildBillingStats) ----------
-
-func TestListGuildBillingStats_OwnerOnly(t *testing.T) {
-	userID := uuid.New().String()
-
-	store := &mockStore{
-		getUserRoleFn: func(_ context.Context, uid string) (string, error) {
-			if uid == userID {
-				return "admin", nil // admin, not owner
-			}
-			return "member", nil
-		},
-	}
-	token := makeAuth(store, userID)
-	router := adminRouter(store)
-
-	rr := getServer(router, "/guilds", token)
-	require.Equal(t, http.StatusForbidden, rr.Code)
-	errBody := decodeError(t, rr)
-	assert.Contains(t, errBody["error"], "instance owner")
-}
-
-func TestListGuildBillingStats_Returns5Fields(t *testing.T) {
-	userID := uuid.New().String()
-	now := time.Now()
-
-	store := &mockStore{
-		getUserRoleFn: func(_ context.Context, _ string) (string, error) {
-			return "owner", nil
-		},
-		listGuildBillingStatsFn: func(_ context.Context) ([]models.GuildBillingStats, error) {
-			return []models.GuildBillingStats{
-				{
-					ID:           "guild-1",
-					MemberCount:  42,
-					StorageBytes: 1024 * 1024,
-					OwnerID:      uuid.New().String(),
-					CreatedAt:    now,
-				},
-			}, nil
-		},
-	}
-	token := makeAuth(store, userID)
-	router := adminRouter(store)
-
-	rr := getServer(router, "/guilds", token)
-	require.Equal(t, http.StatusOK, rr.Code)
-
-	var stats []models.GuildBillingStats
-	require.NoError(t, json.NewDecoder(rr.Body).Decode(&stats))
-	require.Len(t, stats, 1)
-	assert.Equal(t, "guild-1", stats[0].ID)
-	assert.Equal(t, 42, stats[0].MemberCount)
-	assert.Equal(t, int64(1024*1024), stats[0].StorageBytes)
-	assert.NotEmpty(t, stats[0].OwnerID)
-	assert.False(t, stats[0].CreatedAt.IsZero())
-}
-
-func TestListGuildBillingStats_EmptyList_ReturnsEmptyArray(t *testing.T) {
-	userID := uuid.New().String()
-
-	store := &mockStore{
-		getUserRoleFn: func(_ context.Context, _ string) (string, error) {
-			return "owner", nil
-		},
-		listGuildBillingStatsFn: func(_ context.Context) ([]models.GuildBillingStats, error) {
-			return nil, nil
-		},
-	}
-	token := makeAuth(store, userID)
-	router := adminRouter(store)
-
-	rr := getServer(router, "/guilds", token)
-	require.Equal(t, http.StatusOK, rr.Code)
-
-	var stats []models.GuildBillingStats
-	require.NoError(t, json.NewDecoder(rr.Body).Decode(&stats))
-	assert.Empty(t, stats)
+	// metadata contains old_level/new_level integers
+	assert.NotNil(t, capturedMetadata["old_level"])
+	assert.NotNil(t, capturedMetadata["new_level"])
 }
 
 // ---------- createServer template tests ----------
 
 // channelCreation records a CreateChannel call for test assertions.
 type channelCreation struct {
-	ServerID  string
-	Name      string
-	Type      string
-	VoiceMode *string
-	ParentID  *string
-	Position  int
+	ServerID          string
+	EncryptedMetadata []byte
+	Type              string
+	VoiceMode         *string
+	ParentID          *string
+	Position          int
 }
 
-// TestCreateServer_Template verifies createServer creates 3 template channels from instance_config,
+// TestCreateServer_Template verifies createServer creates template channels,
 // broadcasts channel_created for each, and emits a server_created system message.
 func TestCreateServer_Template(t *testing.T) {
 	userID := uuid.New().String()
@@ -545,11 +400,6 @@ func TestCreateServer_Template(t *testing.T) {
 	channelCounter := 0
 
 	store := &mockStore{
-		getInstanceConfigFn: func(_ context.Context) (*models.InstanceConfig, error) {
-			return &models.InstanceConfig{
-				ServerCreationPolicy: "any_member",
-			}, nil
-		},
 		getDefaultServerTemplateFn: func(_ context.Context) (*models.ServerTemplate, error) {
 			return &models.ServerTemplate{
 				ID:        uuid.New().String(),
@@ -562,25 +412,25 @@ func TestCreateServer_Template(t *testing.T) {
 				},
 			}, nil
 		},
-		createServerFn: func(_ context.Context, name, ownerID string) (*models.Server, error) {
-			return &models.Server{ID: serverID, Name: name, OwnerID: ownerID}, nil
+		createServerFn: func(_ context.Context, metadata []byte) (*models.Server, error) {
+			return &models.Server{ID: serverID, EncryptedMetadata: metadata}, nil
 		},
-		addServerMemberFn: func(_ context.Context, _, _, _ string) error { return nil },
-		getChannelByNameAndTypeFn: func(_ context.Context, _, _, _ string) (*models.Channel, error) {
+		addServerMemberFn: func(_ context.Context, _, _ string, _ int) error { return nil },
+		getChannelByTypeAndPositionFn: func(_ context.Context, _, _ string, _ int) (*models.Channel, error) {
 			return nil, nil // no existing channels
 		},
-		createChannelFn: func(_ context.Context, srvID, name, chType string, voiceMode *string, parentID *string, position int) (*models.Channel, error) {
+		createChannelFn: func(_ context.Context, srvID string, metadata []byte, chType string, voiceMode *string, parentID *string, position int) (*models.Channel, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			channelCounter++
 			createdChannels = append(createdChannels, channelCreation{
-				ServerID: srvID, Name: name, Type: chType,
+				ServerID: srvID, EncryptedMetadata: metadata, Type: chType,
 				VoiceMode: voiceMode, ParentID: parentID, Position: position,
 			})
 			sid := srvID
 			return &models.Channel{
-				ID: fmt.Sprintf("ch-%d", channelCounter), ServerID: &sid,
-				Name: name, Type: chType, VoiceMode: voiceMode, Position: position,
+				ID: "ch-" + chType, ServerID: &sid,
+				EncryptedMetadata: metadata, Type: chType, VoiceMode: voiceMode, Position: position,
 			}, nil
 		},
 		insertSystemMessageFn: func(_ context.Context, _, eventType, _ string, _ *string, _ string, _ map[string]interface{}) (*models.SystemMessage, error) {
@@ -595,35 +445,35 @@ func TestCreateServer_Template(t *testing.T) {
 	token := makeAuth(store, userID)
 	router := serversRouterWithHub(store, hub)
 
-	rr := postServerJSON(router, "/", models.CreateServerRequest{Name: "Template Guild"}, token)
+	rr := postServerJSON(router, "/", models.CreateServerRequest{EncryptedMetadata: []byte(`{}`)}, token)
 	require.Equal(t, http.StatusCreated, rr.Code)
 
-	// Should create 3 channels
+	// Template has 3 channels; wait briefly for the goroutine to run.
+	// The goroutine runs after response is sent, so we poll.
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := len(createdChannels)
+		mu.Unlock()
+		if n >= 3 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
 	require.Len(t, createdChannels, 3, "expected 3 template channels to be created")
-	assert.Equal(t, "system", createdChannels[0].Name)
 	assert.Equal(t, "system", createdChannels[0].Type)
 	assert.Equal(t, -1, createdChannels[0].Position)
-	assert.Equal(t, "general", createdChannels[1].Name)
 	assert.Equal(t, "text", createdChannels[1].Type)
 	assert.Equal(t, 0, createdChannels[1].Position)
-	assert.Equal(t, "General", createdChannels[2].Name)
 	assert.Equal(t, "voice", createdChannels[2].Type)
 	require.NotNil(t, createdChannels[2].VoiceMode)
 	assert.Equal(t, "quality", *createdChannels[2].VoiceMode)
 	assert.Equal(t, 1, createdChannels[2].Position)
 
-	// 3 channel_created broadcasts + 1 system_message broadcast (for server_created)
-	require.GreaterOrEqual(t, len(hub.broadcastCalls), 3, "expected at least 3 broadcasts for channel_created")
-
-	// Verify channel_created broadcasts
-	for i := 0; i < 3; i++ {
-		var msg map[string]interface{}
-		require.NoError(t, json.Unmarshal(hub.broadcastCalls[i].message, &msg))
-		assert.Equal(t, "channel_created", msg["type"])
-		assert.Equal(t, serverID, hub.broadcastCalls[i].serverID)
-	}
-
-	// system_message: server_created should be emitted
+	// server_created system message should be emitted
 	assert.Contains(t, systemMessages, "server_created")
 }
 
@@ -638,11 +488,6 @@ func TestCreateServer_PartialFail(t *testing.T) {
 	callCount := 0
 
 	store := &mockStore{
-		getInstanceConfigFn: func(_ context.Context) (*models.InstanceConfig, error) {
-			return &models.InstanceConfig{
-				ServerCreationPolicy: "any_member",
-			}, nil
-		},
 		getDefaultServerTemplateFn: func(_ context.Context) (*models.ServerTemplate, error) {
 			return &models.ServerTemplate{
 				ID: uuid.New().String(), Name: "Default", IsDefault: true,
@@ -652,14 +497,14 @@ func TestCreateServer_PartialFail(t *testing.T) {
 				},
 			}, nil
 		},
-		createServerFn: func(_ context.Context, name, ownerID string) (*models.Server, error) {
-			return &models.Server{ID: serverID, Name: name, OwnerID: ownerID}, nil
+		createServerFn: func(_ context.Context, metadata []byte) (*models.Server, error) {
+			return &models.Server{ID: serverID, EncryptedMetadata: metadata}, nil
 		},
-		addServerMemberFn: func(_ context.Context, _, _, _ string) error { return nil },
-		getChannelByNameAndTypeFn: func(_ context.Context, _, _, _ string) (*models.Channel, error) {
+		addServerMemberFn: func(_ context.Context, _, _ string, _ int) error { return nil },
+		getChannelByTypeAndPositionFn: func(_ context.Context, _, _ string, _ int) (*models.Channel, error) {
 			return nil, nil
 		},
-		createChannelFn: func(_ context.Context, _, name, chType string, _ *string, _ *string, _ int) (*models.Channel, error) {
+		createChannelFn: func(_ context.Context, _ string, metadata []byte, chType string, _ *string, _ *string, position int) (*models.Channel, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			callCount++
@@ -668,8 +513,7 @@ func TestCreateServer_PartialFail(t *testing.T) {
 			}
 			sid := serverID
 			return &models.Channel{
-				ID: fmt.Sprintf("ch-%d", callCount), ServerID: &sid,
-				Name: name, Type: chType,
+				ID: "ch-1", ServerID: &sid, Type: chType, Position: position,
 			}, nil
 		},
 		insertSystemMessageFn: func(_ context.Context, _, eventType, _ string, _ *string, _ string, _ map[string]interface{}) (*models.SystemMessage, error) {
@@ -684,174 +528,22 @@ func TestCreateServer_PartialFail(t *testing.T) {
 	token := makeAuth(store, userID)
 	router := serversRouterWithHub(store, hub)
 
-	rr := postServerJSON(router, "/", models.CreateServerRequest{Name: "Partial Guild"}, token)
+	rr := postServerJSON(router, "/", models.CreateServerRequest{EncryptedMetadata: []byte(`{}`)}, token)
 	require.Equal(t, http.StatusCreated, rr.Code, "server creation should still succeed on partial template failure")
 
-	// Both server_created and template_partial_failure should be emitted.
-	assert.Contains(t, systemMessages, "server_created")
-	assert.Contains(t, systemMessages, "template_partial_failure")
-}
-
-// TestCreateServer_Idempotent verifies that when GetChannelByNameAndType returns an existing channel,
-// that template entry is skipped (no duplicate CreateChannel call).
-func TestCreateServer_Idempotent(t *testing.T) {
-	userID := uuid.New().String()
-	serverID := uuid.New().String()
-
-	var mu sync.Mutex
-	createCount := 0
-
-	store := &mockStore{
-		getInstanceConfigFn: func(_ context.Context) (*models.InstanceConfig, error) {
-			return &models.InstanceConfig{
-				ServerCreationPolicy: "any_member",
-			}, nil
-		},
-		getDefaultServerTemplateFn: func(_ context.Context) (*models.ServerTemplate, error) {
-			return &models.ServerTemplate{
-				ID: uuid.New().String(), Name: "Default", IsDefault: true,
-				Channels: []models.TemplateChannel{
-					{Name: "system", Type: "system", Position: -1},
-					{Name: "general", Type: "text", Position: 0},
-				},
-			}, nil
-		},
-		createServerFn: func(_ context.Context, name, ownerID string) (*models.Server, error) {
-			return &models.Server{ID: serverID, Name: name, OwnerID: ownerID}, nil
-		},
-		addServerMemberFn: func(_ context.Context, _, _, _ string) error { return nil },
-		getChannelByNameAndTypeFn: func(_ context.Context, _, name, chType string) (*models.Channel, error) {
-			// system channel already exists
-			if name == "system" && chType == "system" {
-				sid := serverID
-				return &models.Channel{ID: "existing-sys", ServerID: &sid, Name: "system", Type: "system"}, nil
-			}
-			return nil, nil
-		},
-		createChannelFn: func(_ context.Context, _, name, chType string, _ *string, _ *string, _ int) (*models.Channel, error) {
-			mu.Lock()
-			defer mu.Unlock()
-			createCount++
-			sid := serverID
-			return &models.Channel{
-				ID: fmt.Sprintf("ch-%d", createCount), ServerID: &sid,
-				Name: name, Type: chType,
-			}, nil
-		},
-		insertSystemMessageFn: func(_ context.Context, _, eventType, _ string, _ *string, _ string, _ map[string]interface{}) (*models.SystemMessage, error) {
-			return &models.SystemMessage{ID: uuid.New().String(), EventType: eventType}, nil
-		},
+	// Wait for goroutine to run.
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := len(systemMessages)
+		mu.Unlock()
+		if n >= 1 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 
-	hub := &mockHub{}
-	token := makeAuth(store, userID)
-	router := serversRouterWithHub(store, hub)
-
-	rr := postServerJSON(router, "/", models.CreateServerRequest{Name: "Idempotent Guild"}, token)
-	require.Equal(t, http.StatusCreated, rr.Code)
-
-	// Only 1 channel should be created (general), system was skipped due to idempotency.
-	assert.Equal(t, 1, createCount, "system channel should have been skipped; only general should be created")
-}
-
-// TestCreateServer_NoTemplate verifies that when no default template exists, only #system is created.
-func TestCreateServer_NoTemplate(t *testing.T) {
-	userID := uuid.New().String()
-	serverID := uuid.New().String()
-
-	var mu sync.Mutex
-	var createdNames []string
-
-	store := &mockStore{
-		getInstanceConfigFn: func(_ context.Context) (*models.InstanceConfig, error) {
-			return &models.InstanceConfig{
-				ServerCreationPolicy: "any_member",
-			}, nil
-		},
-		getDefaultServerTemplateFn: func(_ context.Context) (*models.ServerTemplate, error) {
-			return nil, nil // no default template
-		},
-		createServerFn: func(_ context.Context, name, ownerID string) (*models.Server, error) {
-			return &models.Server{ID: serverID, Name: name, OwnerID: ownerID}, nil
-		},
-		addServerMemberFn: func(_ context.Context, _, _, _ string) error { return nil },
-		getChannelByNameAndTypeFn: func(_ context.Context, _, _, _ string) (*models.Channel, error) {
-			return nil, nil
-		},
-		createChannelFn: func(_ context.Context, _, name, _ string, _ *string, _ *string, _ int) (*models.Channel, error) {
-			mu.Lock()
-			defer mu.Unlock()
-			createdNames = append(createdNames, name)
-			sid := serverID
-			return &models.Channel{ID: uuid.New().String(), ServerID: &sid, Name: name}, nil
-		},
-		insertSystemMessageFn: func(_ context.Context, _, eventType, _ string, _ *string, _ string, _ map[string]interface{}) (*models.SystemMessage, error) {
-			return &models.SystemMessage{ID: uuid.New().String(), EventType: eventType}, nil
-		},
-	}
-
-	hub := &mockHub{}
-	token := makeAuth(store, userID)
-	router := serversRouterWithHub(store, hub)
-
-	rr := postServerJSON(router, "/", models.CreateServerRequest{Name: "Default Template Guild"}, token)
-	require.Equal(t, http.StatusCreated, rr.Code)
-
-	require.Len(t, createdNames, 1, "fallback should only create #system channel")
-	assert.Equal(t, "system", createdNames[0])
-}
-
-// TestCreateServer_SystemAlwaysIncluded verifies that when template has no system entry,
-// system channel is prepended automatically.
-func TestCreateServer_SystemAlwaysIncluded(t *testing.T) {
-	userID := uuid.New().String()
-	serverID := uuid.New().String()
-
-	var mu sync.Mutex
-	var createdNames []string
-
-	store := &mockStore{
-		getInstanceConfigFn: func(_ context.Context) (*models.InstanceConfig, error) {
-			return &models.InstanceConfig{
-				ServerCreationPolicy: "any_member",
-			}, nil
-		},
-		getDefaultServerTemplateFn: func(_ context.Context) (*models.ServerTemplate, error) {
-			return &models.ServerTemplate{
-				ID: uuid.New().String(), Name: "Default", IsDefault: true,
-				Channels: []models.TemplateChannel{
-					// Template without system channel
-					{Name: "general", Type: "text", Position: 0},
-				},
-			}, nil
-		},
-		createServerFn: func(_ context.Context, name, ownerID string) (*models.Server, error) {
-			return &models.Server{ID: serverID, Name: name, OwnerID: ownerID}, nil
-		},
-		addServerMemberFn: func(_ context.Context, _, _, _ string) error { return nil },
-		getChannelByNameAndTypeFn: func(_ context.Context, _, _, _ string) (*models.Channel, error) {
-			return nil, nil
-		},
-		createChannelFn: func(_ context.Context, _, name, chType string, _ *string, _ *string, _ int) (*models.Channel, error) {
-			mu.Lock()
-			defer mu.Unlock()
-			createdNames = append(createdNames, name)
-			sid := serverID
-			return &models.Channel{ID: uuid.New().String(), ServerID: &sid, Name: name, Type: chType}, nil
-		},
-		insertSystemMessageFn: func(_ context.Context, _, eventType, _ string, _ *string, _ string, _ map[string]interface{}) (*models.SystemMessage, error) {
-			return &models.SystemMessage{ID: uuid.New().String(), EventType: eventType}, nil
-		},
-	}
-
-	hub := &mockHub{}
-	token := makeAuth(store, userID)
-	router := serversRouterWithHub(store, hub)
-
-	rr := postServerJSON(router, "/", models.CreateServerRequest{Name: "Auto System Guild"}, token)
-	require.Equal(t, http.StatusCreated, rr.Code)
-
-	require.Len(t, createdNames, 2, "system channel should have been auto-prepended")
-	assert.Equal(t, "system", createdNames[0], "system channel must be created first")
-	assert.Equal(t, "general", createdNames[1])
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Contains(t, systemMessages, "template_partial_failure", "partial failure should emit system message")
 }

@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"hush.app/server/internal/db"
 	"hush.app/server/internal/models"
 
 	"github.com/google/uuid"
@@ -26,17 +25,15 @@ func TestGetInstanceConfig_ReturnsConfig(t *testing.T) {
 	userID := uuid.New().String()
 	store := &mockStore{}
 	token := makeAuth(store, userID)
-	ownerID := uuid.New().String()
 	store.getInstanceConfigFn = func(_ context.Context) (*models.InstanceConfig, error) {
 		return &models.InstanceConfig{
 			ID:               "inst-1",
 			Name:             "My Hush",
-			OwnerID:          &ownerID,
 			RegistrationMode: "open",
 		}, nil
 	}
 	store.getUserRoleFn = func(_ context.Context, _ string) (string, error) {
-		return "owner", nil
+		return "admin", nil
 	}
 	router := instanceRouter(store)
 	rr := getServer(router, "/", token)
@@ -45,11 +42,10 @@ func TestGetInstanceConfig_ReturnsConfig(t *testing.T) {
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
 	assert.Equal(t, "My Hush", resp.Name)
 	assert.Equal(t, "open", resp.RegistrationMode)
-	assert.True(t, resp.Bootstrapped, "bootstrapped must be true when ownerID is set")
-	assert.Equal(t, "owner", resp.MyRole)
+	assert.Equal(t, "admin", resp.MyRole)
 }
 
-func TestGetInstanceConfig_Unbootstrapped_BootstrappedFalse(t *testing.T) {
+func TestGetInstanceConfig_MemberRole(t *testing.T) {
 	userID := uuid.New().String()
 	store := &mockStore{}
 	token := makeAuth(store, userID)
@@ -57,7 +53,6 @@ func TestGetInstanceConfig_Unbootstrapped_BootstrappedFalse(t *testing.T) {
 		return &models.InstanceConfig{
 			ID:               "inst-1",
 			Name:             "Fresh Instance",
-			OwnerID:          nil,
 			RegistrationMode: "open",
 		}, nil
 	}
@@ -69,7 +64,6 @@ func TestGetInstanceConfig_Unbootstrapped_BootstrappedFalse(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rr.Code)
 	var resp instanceConfigResponse
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
-	assert.False(t, resp.Bootstrapped, "bootstrapped must be false when ownerID is nil")
 	assert.Equal(t, "member", resp.MyRole)
 }
 
@@ -80,63 +74,6 @@ func TestGetInstanceConfig_Unauthenticated_Returns401(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, rr.Code)
 }
 
-// ---------- PUT /instance ----------
-
-func TestUpdateInstanceConfig_OwnerCanUpdate_Returns204(t *testing.T) {
-	userID := uuid.New().String()
-	store := &mockStore{}
-	token := makeAuth(store, userID)
-	store.getUserRoleFn = func(_ context.Context, uid string) (string, error) {
-		if uid == userID {
-			return "owner", nil
-		}
-		return "member", nil
-	}
-	var updatedName string
-	store.updateInstanceConfigFn = func(_ context.Context, name *string, _ *string, _ *string, _ *string) error {
-		if name != nil {
-			updatedName = *name
-		}
-		return nil
-	}
-	router := instanceRouter(store)
-	rr := putServerJSON(router, "/", map[string]string{"name": "Updated Name"}, token)
-	assert.Equal(t, http.StatusNoContent, rr.Code)
-	assert.Equal(t, "Updated Name", updatedName)
-}
-
-func TestUpdateInstanceConfig_NonOwnerForbidden_Returns403(t *testing.T) {
-	userID := uuid.New().String()
-	store := &mockStore{}
-	token := makeAuth(store, userID)
-	store.getUserRoleFn = func(_ context.Context, _ string) (string, error) { return "member", nil }
-	router := instanceRouter(store)
-	rr := putServerJSON(router, "/", map[string]string{"name": "Hack"}, token)
-	assert.Equal(t, http.StatusForbidden, rr.Code)
-	err := decodeError(t, rr)
-	assert.Contains(t, err["error"], "owner")
-}
-
-func TestUpdateInstanceConfig_AdminForbidden_Returns403(t *testing.T) {
-	userID := uuid.New().String()
-	store := &mockStore{}
-	token := makeAuth(store, userID)
-	store.getUserRoleFn = func(_ context.Context, _ string) (string, error) { return "admin", nil }
-	router := instanceRouter(store)
-	rr := putServerJSON(router, "/", map[string]string{"name": "Hack"}, token)
-	assert.Equal(t, http.StatusForbidden, rr.Code)
-}
-
-func TestUpdateInstanceConfig_InvalidRegistrationMode_Returns400(t *testing.T) {
-	userID := uuid.New().String()
-	store := &mockStore{}
-	token := makeAuth(store, userID)
-	store.getUserRoleFn = func(_ context.Context, _ string) (string, error) { return "owner", nil }
-	router := instanceRouter(store)
-	rr := putServerJSON(router, "/", map[string]string{"registrationMode": "banana"}, token)
-	assert.Equal(t, http.StatusBadRequest, rr.Code)
-}
-
 // ---------- GET /instance/members ----------
 
 func TestListMembers_ReturnsAllUsers(t *testing.T) {
@@ -145,7 +82,7 @@ func TestListMembers_ReturnsAllUsers(t *testing.T) {
 	token := makeAuth(store, userID)
 	store.listMembersFn = func(_ context.Context) ([]models.Member, error) {
 		return []models.Member{
-			{ID: "u1", Username: "alice", DisplayName: "Alice", Role: "owner"},
+			{ID: "u1", Username: "alice", DisplayName: "Alice", Role: "admin"},
 			{ID: "u2", Username: "bob", DisplayName: "Bob", Role: "member"},
 		}, nil
 	}
@@ -156,7 +93,7 @@ func TestListMembers_ReturnsAllUsers(t *testing.T) {
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&members))
 	require.Len(t, members, 2)
 	assert.Equal(t, "alice", members[0].Username)
-	assert.Equal(t, "owner", members[0].Role)
+	assert.Equal(t, "admin", members[0].Role)
 	assert.Equal(t, "bob", members[1].Username)
 }
 
@@ -180,128 +117,6 @@ func TestListMembers_Unauthenticated_Returns401(t *testing.T) {
 	router := instanceRouter(store)
 	rr := getServer(router, "/members", "")
 	assert.Equal(t, http.StatusUnauthorized, rr.Code)
-}
-
-// ---------- POST /instance/server-templates ----------
-
-func TestCreateServerTemplate_Success(t *testing.T) {
-	userID := uuid.New().String()
-	store := &mockStore{}
-	token := makeAuth(store, userID)
-	store.getUserRoleFn = func(_ context.Context, _ string) (string, error) { return "owner", nil }
-	store.createServerTemplateFn = func(_ context.Context, name string, channels json.RawMessage, isDefault bool) (*models.ServerTemplate, error) {
-		return &models.ServerTemplate{ID: uuid.New().String(), Name: name, IsDefault: isDefault}, nil
-	}
-
-	quality := "quality"
-	body := serverTemplateRequest{
-		Name: "Gaming",
-		Channels: []models.TemplateChannel{
-			{Name: "system", Type: "system", Position: -1},
-			{Name: "general", Type: "text", Position: 0},
-			{Name: "Lounge", Type: "voice", VoiceMode: &quality, Position: 1},
-		},
-		IsDefault: false,
-	}
-	router := instanceRouter(store)
-	rr := postServerJSON(router, "/server-templates", body, token)
-	require.Equal(t, http.StatusCreated, rr.Code)
-}
-
-func TestCreateServerTemplate_SystemRequired(t *testing.T) {
-	userID := uuid.New().String()
-	store := &mockStore{}
-	token := makeAuth(store, userID)
-	store.getUserRoleFn = func(_ context.Context, _ string) (string, error) { return "owner", nil }
-
-	body := serverTemplateRequest{
-		Name: "Bad Template",
-		Channels: []models.TemplateChannel{
-			{Name: "general", Type: "text", Position: 0},
-		},
-	}
-	router := instanceRouter(store)
-	rr := postServerJSON(router, "/server-templates", body, token)
-	require.Equal(t, http.StatusBadRequest, rr.Code)
-	errBody := decodeError(t, rr)
-	assert.Contains(t, errBody["error"], "system channel is required")
-}
-
-func TestCreateServerTemplate_Forbidden(t *testing.T) {
-	userID := uuid.New().String()
-	store := &mockStore{}
-	token := makeAuth(store, userID)
-	store.getUserRoleFn = func(_ context.Context, _ string) (string, error) { return "admin", nil }
-
-	body := serverTemplateRequest{
-		Name: "Test",
-		Channels: []models.TemplateChannel{
-			{Name: "system", Type: "system", Position: -1},
-		},
-	}
-	router := instanceRouter(store)
-	rr := postServerJSON(router, "/server-templates", body, token)
-	require.Equal(t, http.StatusForbidden, rr.Code)
-}
-
-func TestCreateServerTemplate_InvalidType(t *testing.T) {
-	userID := uuid.New().String()
-	store := &mockStore{}
-	token := makeAuth(store, userID)
-	store.getUserRoleFn = func(_ context.Context, _ string) (string, error) { return "owner", nil }
-
-	body := serverTemplateRequest{
-		Name: "Bad",
-		Channels: []models.TemplateChannel{
-			{Name: "system", Type: "system", Position: -1},
-			{Name: "weird", Type: "banana", Position: 0},
-		},
-	}
-	router := instanceRouter(store)
-	rr := postServerJSON(router, "/server-templates", body, token)
-	require.Equal(t, http.StatusBadRequest, rr.Code)
-	errBody := decodeError(t, rr)
-	assert.Contains(t, errBody["error"], "invalid channel type")
-}
-
-func TestCreateServerTemplate_VoiceRequiresMode(t *testing.T) {
-	userID := uuid.New().String()
-	store := &mockStore{}
-	token := makeAuth(store, userID)
-	store.getUserRoleFn = func(_ context.Context, _ string) (string, error) { return "owner", nil }
-
-	body := serverTemplateRequest{
-		Name: "Bad",
-		Channels: []models.TemplateChannel{
-			{Name: "system", Type: "system", Position: -1},
-			{Name: "voice-ch", Type: "voice", Position: 0},
-		},
-	}
-	router := instanceRouter(store)
-	rr := postServerJSON(router, "/server-templates", body, token)
-	require.Equal(t, http.StatusBadRequest, rr.Code)
-	errBody := decodeError(t, rr)
-	assert.Contains(t, errBody["error"], "voiceMode")
-}
-
-func TestCreateServerTemplate_CategoryCannotHaveParentRef(t *testing.T) {
-	userID := uuid.New().String()
-	store := &mockStore{}
-	token := makeAuth(store, userID)
-	store.getUserRoleFn = func(_ context.Context, _ string) (string, error) { return "owner", nil }
-
-	body := serverTemplateRequest{
-		Name: "Bad",
-		Channels: []models.TemplateChannel{
-			{Name: "system", Type: "system", Position: -1},
-			{Name: "Category", Type: "category", ParentRef: ptrString("other"), Position: 0},
-		},
-	}
-	router := instanceRouter(store)
-	rr := postServerJSON(router, "/server-templates", body, token)
-	require.Equal(t, http.StatusBadRequest, rr.Code)
-	errBody := decodeError(t, rr)
-	assert.Contains(t, errBody["error"], "categories cannot have parentRef")
 }
 
 // ---------- POST /instance/bans ----------
@@ -342,8 +157,8 @@ func TestInstanceBan_Success_CascadesGuilds(t *testing.T) {
 	store.listServersForUserFn = func(_ context.Context, uid string) ([]models.Server, error) {
 		assert.Equal(t, targetID, uid)
 		return []models.Server{
-			{ID: guild1ID, Name: "G1"},
-			{ID: guild2ID, Name: "G2"},
+			{ID: guild1ID},
+			{ID: guild2ID},
 		}, nil
 	}
 
@@ -392,29 +207,6 @@ func TestInstanceBan_SelfBan_Returns400(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, rr.Code)
 	errBody := decodeError(t, rr)
 	assert.Contains(t, errBody["error"], "cannot ban yourself")
-}
-
-func TestInstanceBan_CannotBanOwner_Returns403(t *testing.T) {
-	actorID := uuid.New().String()
-	ownerID := uuid.New().String()
-	store := &mockStore{}
-	token := makeAuth(store, actorID)
-	store.getUserRoleFn = func(_ context.Context, uid string) (string, error) {
-		if uid == actorID {
-			return "admin", nil
-		}
-		return "owner", nil
-	}
-
-	router := instanceRouter(store)
-	rr := postServerJSON(router, "/bans", models.InstanceBanRequest{
-		UserID: ownerID,
-		Reason: "test",
-	}, token)
-
-	require.Equal(t, http.StatusForbidden, rr.Code)
-	errBody := decodeError(t, rr)
-	assert.Contains(t, errBody["error"], "cannot ban the instance owner")
 }
 
 func TestInstanceBan_AdminCannotBanAdmin_Returns403(t *testing.T) {
@@ -543,131 +335,6 @@ func TestSearchUsers_ReturnsBanStatus(t *testing.T) {
 	assert.Equal(t, "tos violation", *results[0].BanReason)
 }
 
-// ---------- GET /instance/audit-log ----------
-
-func TestInstanceAuditLog_AdminDenied_Returns403(t *testing.T) {
-	actorID := uuid.New().String()
-	store := &mockStore{}
-	token := makeAuth(store, actorID)
-	store.getUserRoleFn = func(_ context.Context, _ string) (string, error) { return "admin", nil }
-
-	router := instanceRouter(store)
-	rr := getServer(router, "/audit-log", token)
-
-	assert.Equal(t, http.StatusForbidden, rr.Code)
-	errBody := decodeError(t, rr)
-	assert.Contains(t, errBody["error"], "owner")
-}
-
-func TestInstanceAuditLog_OwnerReturnsEntries(t *testing.T) {
-	ownerID := uuid.New().String()
-	store := &mockStore{}
-	token := makeAuth(store, ownerID)
-	store.getUserRoleFn = func(_ context.Context, _ string) (string, error) { return "owner", nil }
-
-	store.listInstanceAuditLogFn = func(_ context.Context, limit, offset int, _ *db.InstanceAuditLogFilter) ([]models.InstanceAuditLogEntry, error) {
-		return []models.InstanceAuditLogEntry{
-			{ID: uuid.New().String(), ActorID: ownerID, Action: "instance_ban", Reason: "spam"},
-			{ID: uuid.New().String(), ActorID: ownerID, Action: "config_change", Reason: "updated name"},
-		}, nil
-	}
-
-	router := instanceRouter(store)
-	rr := getServer(router, "/audit-log", token)
-
-	require.Equal(t, http.StatusOK, rr.Code)
-	var entries []models.InstanceAuditLogEntry
-	require.NoError(t, json.NewDecoder(rr.Body).Decode(&entries))
-	assert.Len(t, entries, 2)
-}
-
-// ---------- PUT /instance (broadcast payload) ----------
-
-// broadcastAllCapture implements GlobalBroadcaster and records BroadcastToAll calls.
-type broadcastAllCapture struct {
-	calls [][]byte
-}
-
-func (b *broadcastAllCapture) BroadcastToAll(msg []byte)                { b.calls = append(b.calls, msg) }
-func (b *broadcastAllCapture) BroadcastToServer(_ string, _ []byte)     {}
-func (b *broadcastAllCapture) BroadcastToUser(_ string, _ []byte)       {}
-func (b *broadcastAllCapture) DisconnectUser(_ string)                  {}
-
-func TestUpdateConfig_BroadcastPayload(t *testing.T) {
-	ownerID := uuid.New().String()
-	store := &mockStore{}
-	token := makeAuth(store, ownerID)
-	store.getUserRoleFn = func(_ context.Context, _ string) (string, error) { return "owner", nil }
-	store.updateInstanceConfigFn = func(_ context.Context, _ *string, _ *string, _ *string, _ *string) error {
-		return nil
-	}
-	iconURL := "https://example.com/icon.png"
-	store.getInstanceConfigFn = func(_ context.Context) (*models.InstanceConfig, error) {
-		return &models.InstanceConfig{
-			ID:               "inst-1",
-			Name:             "Updated Name",
-			IconURL:          &iconURL,
-			RegistrationMode: "open",
-		}, nil
-	}
-
-	hub := &broadcastAllCapture{}
-	router := InstanceRoutes(store, hub, testJWTSecret, NewInstanceCache())
-
-	rr := putServerJSON(router, "/", map[string]string{"name": "Updated Name"}, token)
-	require.Equal(t, http.StatusNoContent, rr.Code)
-
-	require.Len(t, hub.calls, 1, "BroadcastToAll must be called exactly once")
-	var payload map[string]interface{}
-	require.NoError(t, json.Unmarshal(hub.calls[0], &payload))
-	assert.Equal(t, "instance_updated", payload["type"])
-	assert.Equal(t, "Updated Name", payload["name"], "broadcast must include updated name")
-	assert.Equal(t, iconURL, payload["icon_url"], "broadcast must include icon_url")
-	assert.Equal(t, "open", payload["registration_mode"], "broadcast must include registration_mode")
-}
-
-// ---------- PUT /instance (audit log) ----------
-
-func TestUpdateConfig_AuditLogEntry(t *testing.T) {
-	ownerID := uuid.New().String()
-	store := &mockStore{}
-	token := makeAuth(store, ownerID)
-	store.getUserRoleFn = func(_ context.Context, _ string) (string, error) { return "owner", nil }
-
-	// Provide old config so the handler can diff
-	store.getInstanceConfigFn = func(_ context.Context) (*models.InstanceConfig, error) {
-		return &models.InstanceConfig{
-			ID:               "inst-1",
-			Name:             "Old Name",
-			RegistrationMode: "open",
-		}, nil
-	}
-
-	var capturedAction string
-	var capturedMetadata map[string]interface{}
-	store.insertInstanceAuditLogFn = func(_ context.Context, actor string, tid *string, action, _ string, metadata map[string]interface{}) error {
-		capturedAction = action
-		capturedMetadata = metadata
-		return nil
-	}
-
-	router := instanceRouter(store)
-	rr := putServerJSON(router, "/", map[string]string{"name": "New Name"}, token)
-
-	require.Equal(t, http.StatusNoContent, rr.Code)
-	assert.Equal(t, "config_change", capturedAction)
-	require.NotNil(t, capturedMetadata)
-	nameChange, ok := capturedMetadata["name"]
-	require.True(t, ok, "metadata must contain 'name' key")
-	// The handler stores map[string]string; assert the old/new values regardless of map concrete type.
-	switch nameMap := nameChange.(type) {
-	case map[string]string:
-		assert.Equal(t, "Old Name", nameMap["old"])
-		assert.Equal(t, "New Name", nameMap["new"])
-	case map[string]interface{}:
-		assert.Equal(t, "Old Name", nameMap["old"])
-		assert.Equal(t, "New Name", nameMap["new"])
-	default:
-		t.Fatalf("unexpected type for metadata name change: %T", nameChange)
-	}
-}
+// ---------- Routes moved to /api/admin (AdminAPIRoutes) ----------
+// Tests for PUT /api/admin/config, GET /api/admin/audit-log, and server template
+// CRUD are in admin_test.go.

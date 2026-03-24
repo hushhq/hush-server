@@ -18,12 +18,13 @@ import (
 )
 
 // buildModerationRouter returns a moderation routes handler wired with guild context.
-// actorRole controls what guild role the requester appears to have.
+// actorRole maps to a permission level integer via guildLevelFromRoleName.
 func buildModerationRouter(store *mockStore, actorID, actorRole string) http.Handler {
 	inner := ModerationRoutes(store, nil)
+	level := guildLevelFromRoleName(actorRole)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := withUserID(r.Context(), actorID)
-		ctx = withGuildRole(ctx, actorRole)
+		ctx = withGuildLevel(ctx, level)
 		inner.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -58,11 +59,11 @@ func TestKickMember_Success(t *testing.T) {
 
 	var auditLogged bool
 	store := &mockStore{
-		getServerMemberRoleFn: func(_ context.Context, _, userID string) (string, error) {
+		getServerMemberLevelFn: func(_ context.Context, _, userID string) (int, error) {
 			if userID == targetID {
-				return "member", nil
+				return models.PermissionLevelMember, nil
 			}
-			return "", nil
+			return models.PermissionLevelMember, nil
 		},
 		insertAuditLogFn: func(_ context.Context, _, _ string, _ *string, _, _ string, _ map[string]interface{}) error {
 			auditLogged = true
@@ -108,11 +109,11 @@ func TestKickMember_CannotKickHigherRole(t *testing.T) {
 	targetID := uuid.New().String()
 
 	store := &mockStore{
-		getServerMemberRoleFn: func(_ context.Context, _, userID string) (string, error) {
+		getServerMemberLevelFn: func(_ context.Context, _, userID string) (int, error) {
 			if userID == targetID {
-				return "admin", nil // target outranks actor (mod)
+				return models.PermissionLevelAdmin, nil // target outranks actor (mod)
 			}
-			return "", nil
+			return models.PermissionLevelMember, nil
 		},
 	}
 	router := buildModerationRouter(store, actorID, "mod")
@@ -120,7 +121,7 @@ func TestKickMember_CannotKickHigherRole(t *testing.T) {
 	rr := postServerJSON(router, "/kick", models.KickRequest{UserID: targetID, Reason: "reason"}, "")
 	require.Equal(t, http.StatusForbidden, rr.Code)
 	errBody := decodeError(t, rr)
-	assert.Contains(t, errBody["error"], "equal or higher role")
+	assert.Contains(t, errBody["error"], "equal or higher permission level")
 }
 
 func TestKickMember_CannotKickSelf(t *testing.T) {
@@ -146,11 +147,11 @@ func TestBanMember_Success(t *testing.T) {
 	expiresIn := 3600 // 1 hour
 
 	store := &mockStore{
-		getServerMemberRoleFn: func(_ context.Context, _, userID string) (string, error) {
+		getServerMemberLevelFn: func(_ context.Context, _, userID string) (int, error) {
 			if userID == targetID {
-				return "member", nil
+				return models.PermissionLevelMember, nil
 			}
-			return "", nil
+			return models.PermissionLevelMember, nil
 		},
 		insertBanFn: func(_ context.Context, _, _, _, _ string, _ *time.Time) (*models.Ban, error) {
 			banInserted = true
@@ -189,11 +190,11 @@ func TestBanMember_PermanentBan(t *testing.T) {
 
 	var capturedExpiresAt *time.Time
 	store := &mockStore{
-		getServerMemberRoleFn: func(_ context.Context, _, userID string) (string, error) {
+		getServerMemberLevelFn: func(_ context.Context, _, userID string) (int, error) {
 			if userID == targetID {
-				return "member", nil
+				return models.PermissionLevelMember, nil
 			}
-			return "", nil
+			return models.PermissionLevelMember, nil
 		},
 		insertBanFn: func(_ context.Context, _, _, _, _ string, expiresAt *time.Time) (*models.Ban, error) {
 			capturedExpiresAt = expiresAt
@@ -219,14 +220,14 @@ func TestBan_GuildScoped_DoesNotAffectOtherGuilds(t *testing.T) {
 
 	var capturedServerIDs []string
 	store := &mockStore{
-		getServerMemberRoleFn: func(_ context.Context, serverID, userID string) (string, error) {
+		getServerMemberLevelFn: func(_ context.Context, serverID, userID string) (int, error) {
 			if userID == actorID {
-				return "admin", nil
+				return models.PermissionLevelAdmin, nil
 			}
 			if userID == targetID {
-				return "member", nil
+				return models.PermissionLevelMember, nil
 			}
-			return "", nil
+			return models.PermissionLevelMember, nil
 		},
 		insertBanFn: func(_ context.Context, serverID, _, _, _ string, _ *time.Time) (*models.Ban, error) {
 			capturedServerIDs = append(capturedServerIDs, serverID)
@@ -314,11 +315,11 @@ func TestMuteMember_Success(t *testing.T) {
 
 	var muteInserted bool
 	store := &mockStore{
-		getServerMemberRoleFn: func(_ context.Context, _, userID string) (string, error) {
+		getServerMemberLevelFn: func(_ context.Context, _, userID string) (int, error) {
 			if userID == targetID {
-				return "member", nil
+				return models.PermissionLevelMember, nil
 			}
-			return "", nil
+			return models.PermissionLevelMember, nil
 		},
 		insertMuteFn: func(_ context.Context, _, _, _, _ string, _ *time.Time) (*models.Mute, error) {
 			muteInserted = true
@@ -705,7 +706,7 @@ func TestClaimInvite_BannedUser(t *testing.T) {
 			}, nil
 		},
 		getServerByIDFn: func(_ context.Context, _ string) (*models.Server, error) {
-			return &models.Server{ID: serverID, Name: "Test Guild"}, nil
+			return &models.Server{ID: serverID}, nil
 		},
 	}
 	token := makeAuth(store, userID)
@@ -742,7 +743,7 @@ func TestClaimInvite_BannedFromGuild_Rejected(t *testing.T) {
 			return nil, nil
 		},
 		getServerByIDFn: func(_ context.Context, _ string) (*models.Server, error) {
-			return &models.Server{ID: guildAID, Name: "Guild A"}, nil
+			return &models.Server{ID: guildAID}, nil
 		},
 	}
 	token := makeAuth(store, userID)
@@ -771,11 +772,13 @@ func (m *mockHub) BroadcastToUser(_ string, _ []byte)       { /* no-op */ }
 func (m *mockHub) DisconnectUser(uid string)                 { m.disconnectCalls = append(m.disconnectCalls, uid) }
 
 // buildModerationRouterWithHub wires ModerationRoutes with a custom hub for testing broadcast/disconnect.
+// actorRole maps to a permission level integer via guildLevelFromRoleName.
 func buildModerationRouterWithHub(store *mockStore, actorID, actorRole string, hub GlobalBroadcaster) http.Handler {
 	inner := ModerationRoutes(store, hub)
+	level := guildLevelFromRoleName(actorRole)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := withUserID(r.Context(), actorID)
-		ctx = withGuildRole(ctx, actorRole)
+		ctx = withGuildLevel(ctx, level)
 		inner.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -787,11 +790,11 @@ func TestKickMember_CallsDisconnectUser(t *testing.T) {
 	targetID := uuid.New().String()
 
 	store := &mockStore{
-		getServerMemberRoleFn: func(_ context.Context, _, userID string) (string, error) {
+		getServerMemberLevelFn: func(_ context.Context, _, userID string) (int, error) {
 			if userID == targetID {
-				return "member", nil
+				return models.PermissionLevelMember, nil
 			}
-			return "", nil
+			return models.PermissionLevelMember, nil
 		},
 		deleteSessionsByUserIDFn: func(_ context.Context, _ string) error { return nil },
 	}
@@ -820,11 +823,11 @@ func TestBanMember_CallsDisconnectUser(t *testing.T) {
 	targetID := uuid.New().String()
 
 	store := &mockStore{
-		getServerMemberRoleFn: func(_ context.Context, _, userID string) (string, error) {
+		getServerMemberLevelFn: func(_ context.Context, _, userID string) (int, error) {
 			if userID == targetID {
-				return "member", nil
+				return models.PermissionLevelMember, nil
 			}
-			return "", nil
+			return models.PermissionLevelMember, nil
 		},
 		insertBanFn: func(_ context.Context, _, _, _, _ string, _ *time.Time) (*models.Ban, error) {
 			return &models.Ban{ID: uuid.New().String()}, nil
@@ -862,11 +865,11 @@ func TestKickMember_EmitsSystemMessage(t *testing.T) {
 	var capturedActorID string
 	var capturedTargetID *string
 	store := &mockStore{
-		getServerMemberRoleFn: func(_ context.Context, _, userID string) (string, error) {
+		getServerMemberLevelFn: func(_ context.Context, _, userID string) (int, error) {
 			if userID == targetID {
-				return "member", nil
+				return models.PermissionLevelMember, nil
 			}
-			return "", nil
+			return models.PermissionLevelMember, nil
 		},
 		insertSystemMessageFn: func(_ context.Context, _, eventType, actor string, target *string, _ string, _ map[string]interface{}) (*models.SystemMessage, error) {
 			sysMsgCalled = true
@@ -899,11 +902,11 @@ func TestBanMember_EmitsSystemMessage(t *testing.T) {
 	var capturedEventType string
 	var capturedMetadata map[string]interface{}
 	store := &mockStore{
-		getServerMemberRoleFn: func(_ context.Context, _, userID string) (string, error) {
+		getServerMemberLevelFn: func(_ context.Context, _, userID string) (int, error) {
 			if userID == targetID {
-				return "member", nil
+				return models.PermissionLevelMember, nil
 			}
-			return "", nil
+			return models.PermissionLevelMember, nil
 		},
 		insertBanFn: func(_ context.Context, _, _, _, _ string, _ *time.Time) (*models.Ban, error) {
 			return &models.Ban{ID: uuid.New().String()}, nil
@@ -968,11 +971,11 @@ func TestMuteMember_EmitsSystemMessage(t *testing.T) {
 	var capturedEventType string
 	var capturedMetadata map[string]interface{}
 	store := &mockStore{
-		getServerMemberRoleFn: func(_ context.Context, _, userID string) (string, error) {
+		getServerMemberLevelFn: func(_ context.Context, _, userID string) (int, error) {
 			if userID == targetID {
-				return "member", nil
+				return models.PermissionLevelMember, nil
 			}
-			return "", nil
+			return models.PermissionLevelMember, nil
 		},
 		insertMuteFn: func(_ context.Context, _, _, _, _ string, _ *time.Time) (*models.Mute, error) {
 			return &models.Mute{ID: uuid.New().String()}, nil
@@ -1054,7 +1057,7 @@ func TestClaimInvite_BannedFromOtherGuild_Allowed(t *testing.T) {
 			return true, nil
 		},
 		getServerByIDFn: func(_ context.Context, id string) (*models.Server, error) {
-			return &models.Server{ID: id, Name: "Guild B"}, nil
+			return &models.Server{ID: id}, nil
 		},
 	}
 	token := makeAuth(store, userID)

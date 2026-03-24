@@ -942,3 +942,18 @@ func ptrString(s string) *string {
 func ptrInt(n int) *int {
 	return &n
 }
+
+// guildLevelFromRoleName maps legacy role name strings to permission level integers.
+// Used in tests that were written before the integer permission level model.
+func guildLevelFromRoleName(role string) int {
+	switch role {
+	case "owner":
+		return models.PermissionLevelOwner
+	case "admin":
+		return models.PermissionLevelAdmin
+	case "mod":
+		return models.PermissionLevelMod
+	default:
+		return models.PermissionLevelMember
+	}
+}

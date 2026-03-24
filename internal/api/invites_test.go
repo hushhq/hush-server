@@ -22,11 +22,11 @@ func publicInvitesRouter(store *mockStore) http.Handler {
 }
 
 // guildInvitesRouter returns the guild-scoped invite router (POST /).
-// It wraps GuildInviteRoutes with guild context injection for testing.
+// It wraps GuildInviteRoutes with guild level context injection for testing.
 func guildInvitesRouter(store *mockStore, guildRole string) http.Handler {
 	userID := "test-invite-user-id"
 	inner := GuildInviteRoutes(store)
-	return withGuildContext(userID, guildRole)(inner)
+	return withGuildLevelContext(userID, guildLevelFromRoleName(guildRole))(inner)
 }
 
 func getInvite(handler http.Handler, path string) *httptest.ResponseRecorder {
@@ -53,7 +53,7 @@ func postInviteJSON(handler http.Handler, path string, body interface{}, token s
 
 // ---------- GET /invites/:code (public) ----------
 
-func TestGetInviteInfo_Public_ValidCode_ReturnsGuildName(t *testing.T) {
+func TestGetInviteInfo_Public_ValidCode_ReturnsServerID(t *testing.T) {
 	serverID := uuid.New().String()
 	store := &mockStore{}
 	store.getInviteByCodeFn = func(_ context.Context, code string) (*models.InviteCode, error) {
@@ -70,7 +70,8 @@ func TestGetInviteInfo_Public_ValidCode_ReturnsGuildName(t *testing.T) {
 	}
 	store.getServerByIDFn = func(_ context.Context, sid string) (*models.Server, error) {
 		if sid == serverID {
-			return &models.Server{ID: serverID, Name: "My Guild"}, nil
+			// Server.Name removed — guild names are encrypted in MLS GroupInfo.
+			return &models.Server{ID: serverID}, nil
 		}
 		return nil, nil
 	}
@@ -80,7 +81,7 @@ func TestGetInviteInfo_Public_ValidCode_ReturnsGuildName(t *testing.T) {
 	var resp inviteInfoResponse
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
 	assert.Equal(t, "VALID", resp.Code)
-	assert.Equal(t, "My Guild", resp.GuildName)
+	// GuildName removed — backend is a blind relay; clients decrypt names from MLS.
 	assert.Equal(t, serverID, resp.ServerID)
 }
 
@@ -213,7 +214,7 @@ func TestClaimInvite_ValidCode_Returns200(t *testing.T) {
 		return true, nil
 	}
 	store.getServerByIDFn = func(_ context.Context, _ string) (*models.Server, error) {
-		return &models.Server{ID: serverID, Name: "Test Guild"}, nil
+		return &models.Server{ID: serverID}, nil
 	}
 	router := publicInvitesRouter(store)
 	rr := postInviteJSON(router, "/claim", map[string]string{"code": "CLAIM1"}, token)
@@ -221,7 +222,7 @@ func TestClaimInvite_ValidCode_Returns200(t *testing.T) {
 	var resp claimInviteResponse
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
 	assert.Equal(t, serverID, resp.ServerID)
-	assert.Equal(t, "Test Guild", resp.GuildName)
+	// GuildName removed — backend is a blind relay; clients decrypt names from MLS.
 }
 
 func TestClaimInvite_ExpiredCode_Returns400(t *testing.T) {
@@ -288,7 +289,7 @@ func TestClaimInvite_EmitsSystemMessage(t *testing.T) {
 			return true, nil
 		},
 		getServerByIDFn: func(_ context.Context, _ string) (*models.Server, error) {
-			return &models.Server{ID: serverID, Name: "Test Guild"}, nil
+			return &models.Server{ID: serverID}, nil
 		},
 		insertSystemMessageFn: func(_ context.Context, _, eventType, actorID string, targetID *string, _ string, _ map[string]interface{}) (*models.SystemMessage, error) {
 			sysMsgCalled = true

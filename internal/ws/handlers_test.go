@@ -97,13 +97,13 @@ func (m *messageStoreMock) GetInstanceConfig(context.Context) (*models.InstanceC
 func (m *messageStoreMock) UpdateInstanceConfig(context.Context, *string, *string, *string, *string) error {
 	return nil
 }
-func (m *messageStoreMock) SetInstanceOwner(context.Context, string) (bool, error) { return false, nil }
-func (m *messageStoreMock) GetUserRole(context.Context, string) (string, error)    { return "member", nil }
-func (m *messageStoreMock) UpdateUserRole(context.Context, string, string) error   { return nil }
-func (m *messageStoreMock) ListMembers(context.Context) ([]models.Member, error)   { return nil, nil }
+func (m *messageStoreMock) GetUserRole(context.Context, string) (string, error)  { return "member", nil }
+func (m *messageStoreMock) UpdateUserRole(context.Context, string, string) error { return nil }
+func (m *messageStoreMock) ListMembers(context.Context) ([]models.Member, error) { return nil, nil }
 
 // Channel stubs (guild-scoped — serverID param).
-func (m *messageStoreMock) CreateChannel(context.Context, string, string, string, *string, *string, int) (*models.Channel, error) {
+// CreateChannel now takes encryptedMetadata []byte instead of a plaintext name.
+func (m *messageStoreMock) CreateChannel(context.Context, string, []byte, string, *string, *string, int) (*models.Channel, error) {
 	return nil, nil
 }
 func (m *messageStoreMock) ListChannels(context.Context, string) ([]models.Channel, error) {
@@ -112,7 +112,7 @@ func (m *messageStoreMock) ListChannels(context.Context, string) ([]models.Chann
 func (m *messageStoreMock) GetChannelByID(context.Context, string) (*models.Channel, error) {
 	return nil, nil
 }
-func (m *messageStoreMock) GetChannelByNameAndType(context.Context, string, string, string) (*models.Channel, error) {
+func (m *messageStoreMock) GetChannelByTypeAndPosition(context.Context, string, string, int) (*models.Channel, error) {
 	return nil, nil
 }
 func (m *messageStoreMock) DeleteChannel(context.Context, string) error             { return nil }
@@ -144,8 +144,12 @@ func (m *messageStoreMock) GetInviteByCode(context.Context, string) (*models.Inv
 func (m *messageStoreMock) ClaimInviteUse(context.Context, string) (bool, error) { return true, nil }
 
 // Server / guild operation stubs.
-func (m *messageStoreMock) CreateServer(context.Context, string, string) (*models.Server, error) {
+// CreateServer now takes encryptedMetadata []byte only (no plaintext name).
+func (m *messageStoreMock) CreateServer(context.Context, []byte) (*models.Server, error) {
 	return nil, nil
+}
+func (m *messageStoreMock) UpdateServerEncryptedMetadata(context.Context, string, []byte) error {
+	return nil
 }
 func (m *messageStoreMock) GetServerByID(context.Context, string) (*models.Server, error) {
 	return nil, nil
@@ -159,12 +163,13 @@ func (m *messageStoreMock) ListGuildBillingStats(context.Context) ([]models.Guil
 }
 
 // Server member operation stubs.
-func (m *messageStoreMock) AddServerMember(context.Context, string, string, string) error { return nil }
-func (m *messageStoreMock) RemoveServerMember(context.Context, string, string) error      { return nil }
-func (m *messageStoreMock) GetServerMemberRole(context.Context, string, string) (string, error) {
-	return "", nil
+// AddServerMember uses permissionLevel int instead of role string.
+func (m *messageStoreMock) AddServerMember(context.Context, string, string, int) error { return nil }
+func (m *messageStoreMock) RemoveServerMember(context.Context, string, string) error   { return nil }
+func (m *messageStoreMock) GetServerMemberLevel(context.Context, string, string) (int, error) {
+	return 0, nil
 }
-func (m *messageStoreMock) UpdateServerMemberRole(context.Context, string, string, string) error {
+func (m *messageStoreMock) UpdateServerMemberLevel(context.Context, string, string, int) error {
 	return nil
 }
 func (m *messageStoreMock) ListServerMembers(context.Context, string) ([]models.ServerMemberWithUser, error) {
@@ -267,6 +272,20 @@ func (m *messageStoreMock) GetPendingWelcomes(context.Context, string) ([]db.Pen
 }
 func (m *messageStoreMock) DeletePendingWelcome(context.Context, string) error { return nil }
 func (m *messageStoreMock) GetVoiceKeyRotationHours(context.Context) (int, error) { return 2, nil }
+
+// Guild metadata GroupInfo stubs (0O-03: encrypted guild name/icon blob).
+func (m *messageStoreMock) UpsertMLSGuildMetadataGroupInfo(context.Context, string, []byte, int64) error {
+	return nil
+}
+func (m *messageStoreMock) GetMLSGuildMetadataGroupInfo(context.Context, string) ([]byte, int64, error) {
+	return nil, 0, nil
+}
+func (m *messageStoreMock) DeleteMLSGuildMetadataGroupInfo(context.Context, string) error { return nil }
+
+// Guild counter stubs (0O-03: activity tracking).
+func (m *messageStoreMock) IncrementGuildMessageCount(context.Context, string) error      { return nil }
+func (m *messageStoreMock) IncrementGuildMemberCount(context.Context, string, int) error  { return nil }
+func (m *messageStoreMock) UpdateGuildChannelCounts(context.Context, string) error        { return nil }
 
 // drainUntilType reads from c.send until a message with the given type is received or timeout.
 func drainUntilType(t *testing.T, c *Client, wantType string, timeout time.Duration) []byte {

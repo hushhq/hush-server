@@ -322,9 +322,9 @@ func TestValidateUsername_InvalidChars_ReturnsError(t *testing.T) {
 	}
 }
 
-// ---------- First-user bootstrap ----------
+// ---------- Registration — all users are members (no owner bootstrap) ----------
 
-func TestRegister_FirstUserBecomesOwner(t *testing.T) {
+func TestRegister_FirstUserIsMember(t *testing.T) {
 	userID := uuid.New().String()
 	store := &mockStore{
 		createUserFn: func(_ context.Context, username, displayName string, _ *string) (*models.User, error) {
@@ -336,11 +336,6 @@ func TestRegister_FirstUserBecomesOwner(t *testing.T) {
 				CreatedAt:   time.Now(),
 			}, nil
 		},
-		// Simulate first registration: instance has no owner yet.
-		setInstanceOwnerFn: func(_ context.Context, uid string) (bool, error) {
-			assert.Equal(t, userID, uid)
-			return true, nil
-		},
 	}
 	router := newTestRouter(store)
 
@@ -351,7 +346,8 @@ func TestRegister_FirstUserBecomesOwner(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rr.Code)
 	resp := decodeAuthResponse(t, rr)
-	assert.Equal(t, "owner", resp.User.Role)
+	// Instance admin is now API-key-based; all registered users get "member" role.
+	assert.Equal(t, "member", resp.User.Role)
 }
 
 // ---------- Instance ban checks ----------
@@ -440,10 +436,6 @@ func TestRegister_SubsequentUserIsMember(t *testing.T) {
 				Role:        "member",
 				CreatedAt:   time.Now(),
 			}, nil
-		},
-		// Owner already set: SetInstanceOwner returns false.
-		setInstanceOwnerFn: func(_ context.Context, _ string) (bool, error) {
-			return false, nil
 		},
 	}
 	router := newTestRouter(store)

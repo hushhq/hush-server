@@ -45,7 +45,7 @@ func TestLiveKitToken_MutedUser(t *testing.T) {
 			if id == channelID {
 				return &models.Channel{
 					ID:       channelID,
-					Name:     "voice-general",
+					// Name field removed — channel names are in EncryptedMetadata.
 					Type:     "voice",
 					ServerID: ptrString(serverID),
 				}, nil
@@ -90,7 +90,7 @@ func TestLiveKitToken_NonMutedUser(t *testing.T) {
 			if id == channelID {
 				return &models.Channel{
 					ID:       channelID,
-					Name:     "voice-general",
+					// Name field removed — channel names are in EncryptedMetadata.
 					Type:     "voice",
 					ServerID: ptrString(serverID),
 				}, nil
