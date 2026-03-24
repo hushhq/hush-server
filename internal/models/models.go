@@ -27,7 +27,9 @@ type Session struct {
 type RegisterRequest struct {
 	Username    string `json:"username"`
 	DisplayName string `json:"displayName"`
-	PublicKey   string `json:"publicKey"` // base64-encoded Ed25519 public key
+	PublicKey   string `json:"publicKey"`   // base64-encoded Ed25519 public key
+	DeviceID    string `json:"deviceId"`    // optional; generated server-side if empty
+	InviteCode  string `json:"inviteCode"`  // required when registrationMode == "invite_only"
 }
 
 // ChallengeRequest is the body for POST /api/auth/challenge.
