@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"hush.app/server/internal/db"
@@ -66,15 +65,7 @@ func (h *channelsHandler) createChannel(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
 	}
-	req.Name = strings.TrimSpace(req.Name)
-	if req.Name == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
-		return
-	}
-	if len(req.Name) > maxNameLength {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name exceeds maximum length"})
-		return
-	}
+	// TODO(0O-03): Name validation removed — channel name is now encrypted in EncryptedMetadata.
 	if req.Type != "text" && req.Type != "voice" && req.Type != "category" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "type must be text, voice, or category"})
 		return
@@ -105,7 +96,7 @@ func (h *channelsHandler) createChannel(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
-	ch, err := h.store.CreateChannel(r.Context(), serverID, req.Name, req.Type, voiceMode, req.ParentID, position)
+	ch, err := h.store.CreateChannel(r.Context(), serverID, req.EncryptedMetadata, req.Type, voiceMode, req.ParentID, position)
 	if err != nil {
 		slog.Error("create channel", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create channel"})

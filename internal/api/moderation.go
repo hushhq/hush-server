@@ -68,18 +68,18 @@ func (h *moderationHandler) kickMember(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cannot kick yourself"})
 		return
 	}
-	actorRole := guildRoleFromContext(r.Context())
-	if !roleAtLeast(actorRole, "mod") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "mod role or higher required"})
+	actorLevel := guildLevelFromContext(r.Context())
+	if actorLevel < models.PermissionLevelMod {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "mod level or higher required"})
 		return
 	}
-	targetRole, err := h.store.GetServerMemberRole(r.Context(), serverID, req.UserID)
-	if err != nil || targetRole == "" {
+	targetLevel, err := h.store.GetServerMemberLevel(r.Context(), serverID, req.UserID)
+	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "target user not found in this guild"})
 		return
 	}
-	if roleOrder[actorRole] <= roleOrder[targetRole] {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "cannot kick a member with equal or higher role"})
+	if actorLevel <= targetLevel {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "cannot kick a member with equal or higher permission level"})
 		return
 	}
 	if err := h.store.RemoveServerMember(r.Context(), serverID, req.UserID); err != nil {
@@ -134,18 +134,18 @@ func (h *moderationHandler) banMember(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cannot ban yourself"})
 		return
 	}
-	actorRole := guildRoleFromContext(r.Context())
-	if !roleAtLeast(actorRole, "admin") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role or higher required"})
+	actorLevel := guildLevelFromContext(r.Context())
+	if actorLevel < models.PermissionLevelAdmin {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin level or higher required"})
 		return
 	}
-	targetRole, err := h.store.GetServerMemberRole(r.Context(), serverID, req.UserID)
-	if err != nil || targetRole == "" {
+	targetLevel, err := h.store.GetServerMemberLevel(r.Context(), serverID, req.UserID)
+	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "target user not found in this guild"})
 		return
 	}
-	if roleOrder[actorRole] <= roleOrder[targetRole] {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "cannot ban a member with equal or higher role"})
+	if actorLevel <= targetLevel {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "cannot ban a member with equal or higher permission level"})
 		return
 	}
 	var expiresAt *time.Time
@@ -265,18 +265,18 @@ func (h *moderationHandler) muteMember(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cannot mute yourself"})
 		return
 	}
-	actorRole := guildRoleFromContext(r.Context())
-	if !roleAtLeast(actorRole, "mod") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "mod role or higher required"})
+	actorLevel := guildLevelFromContext(r.Context())
+	if actorLevel < models.PermissionLevelMod {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "mod level or higher required"})
 		return
 	}
-	targetRole, err := h.store.GetServerMemberRole(r.Context(), serverID, req.UserID)
-	if err != nil || targetRole == "" {
+	targetLevel, err := h.store.GetServerMemberLevel(r.Context(), serverID, req.UserID)
+	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "target user not found in this guild"})
 		return
 	}
-	if roleOrder[actorRole] <= roleOrder[targetRole] {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "cannot mute a member with equal or higher role"})
+	if actorLevel <= targetLevel {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "cannot mute a member with equal or higher permission level"})
 		return
 	}
 	var expiresAt *time.Time

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"strings"
 
 	"hush.app/server/internal/db"
 	"hush.app/server/internal/models"
@@ -66,46 +65,19 @@ func (h *serversHandler) createServer(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
 		return
 	}
-	// Enforce server_creation_policy.
-	cfg, err := h.store.GetInstanceConfig(r.Context())
-	if err != nil {
-		slog.Error("createServer: get instance config", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load instance config"})
-		return
-	}
-	if cfg.ServerCreationPolicy == "admin_only" {
-		instanceRole, err := h.store.GetUserRole(r.Context(), userID)
-		if err != nil {
-			slog.Error("createServer: get user role", "err", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify role"})
-			return
-		}
-		if !roleAtLeast(instanceRole, "admin") {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "server creation restricted to instance admins"})
-			return
-		}
-	}
+	// TODO(0O-03): serverCreationPolicy removed — creation access handled in Plan 03.
 	var req models.CreateServerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
 	}
-	req.Name = strings.TrimSpace(req.Name)
-	if req.Name == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
-		return
-	}
-	if len(req.Name) > maxNameLength {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name exceeds maximum length"})
-		return
-	}
-	server, err := h.store.CreateServer(r.Context(), req.Name, userID)
+	server, err := h.store.CreateServer(r.Context(), req.EncryptedMetadata)
 	if err != nil {
 		slog.Error("createServer: create server", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create server"})
 		return
 	}
-	if err := h.store.AddServerMember(r.Context(), server.ID, userID, "owner"); err != nil {
+	if err := h.store.AddServerMember(r.Context(), server.ID, userID, models.PermissionLevelOwner); err != nil {
 		slog.Error("createServer: add server member", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to add creator as guild owner"})
 		return
@@ -130,7 +102,7 @@ func (h *serversHandler) createServer(w http.ResponseWriter, r *http.Request) {
 	if len(template) == 0 {
 		template = fallbackTemplate()
 	}
-	// Ensure #system channel is always present in the template.
+	// Ensure system channel is always present in the template.
 	hasSystem := false
 	for _, tc := range template {
 		if tc.Type == "system" {
@@ -139,6 +111,7 @@ func (h *serversHandler) createServer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if !hasSystem {
+		// TODO(0O-03): system channel Name field on TemplateChannel is display-only after migration 000017.
 		template = append([]models.TemplateChannel{{Name: "system", Type: "system", Position: -1}}, template...)
 	}
 
@@ -146,33 +119,40 @@ func (h *serversHandler) createServer(w http.ResponseWriter, r *http.Request) {
 	failures := 0
 
 	// Pass 1: Create entries with no ParentRef (categories, top-level channels, system).
-	// Build a map of category name -> created UUID for pass 2.
-	categoryMap := map[string]string{}
+	// Build a map of template position -> created UUID for pass 2 parent resolution.
+	// NOTE(0O-03): idempotency now uses GetChannelByTypeAndPosition (no name column).
+	// Category map keyed by ParentRef name string kept for template compatibility.
+	categoryPositionMap := map[int]string{} // position -> channel ID
+	categoryNameMap := map[string]string{}  // tc.Name -> channel ID for ParentRef lookup
 	for _, tc := range template {
 		if tc.ParentRef != nil {
 			continue // handled in pass 2
 		}
-		// Idempotency: skip if channel already exists
-		existing, err := h.store.GetChannelByNameAndType(ctx, server.ID, tc.Name, tc.Type)
+		// Idempotency: skip if channel already exists at this position+type
+		existing, err := h.store.GetChannelByTypeAndPosition(ctx, server.ID, tc.Type, tc.Position)
 		if err != nil {
-			slog.Error("createServer: idempotency check", "err", err, "channel", tc.Name)
+			slog.Error("createServer: idempotency check", "err", err, "position", tc.Position, "type", tc.Type)
 			failures++
 			continue
 		}
 		if existing != nil {
 			if tc.Type == "category" {
-				categoryMap[tc.Name] = existing.ID
+				categoryPositionMap[tc.Position] = existing.ID
+				categoryNameMap[tc.Name] = existing.ID
 			}
 			continue
 		}
-		ch, err := h.store.CreateChannel(ctx, server.ID, tc.Name, tc.Type, tc.VoiceMode, nil, tc.Position)
+		// EncryptedMetadata is nil for template channels (no client to encrypt yet).
+		// Clients will populate encrypted_metadata after joining the guild metadata MLS group.
+		ch, err := h.store.CreateChannel(ctx, server.ID, nil, tc.Type, tc.VoiceMode, nil, tc.Position)
 		if err != nil {
-			slog.Error("createServer: create template channel", "err", err, "channel", tc.Name)
+			slog.Error("createServer: create template channel", "err", err, "position", tc.Position)
 			failures++
 			continue
 		}
 		if tc.Type == "category" {
-			categoryMap[tc.Name] = ch.ID
+			categoryPositionMap[tc.Position] = ch.ID
+			categoryNameMap[tc.Name] = ch.ID
 		}
 		// Broadcast channel_created.
 		if h.hub != nil {
@@ -189,24 +169,24 @@ func (h *serversHandler) createServer(w http.ResponseWriter, r *http.Request) {
 		if tc.ParentRef == nil {
 			continue
 		}
-		parentID, ok := categoryMap[*tc.ParentRef]
+		parentID, ok := categoryNameMap[*tc.ParentRef]
 		if !ok {
-			slog.Error("createServer: parent category not found", "parentRef", *tc.ParentRef, "channel", tc.Name)
+			slog.Error("createServer: parent category not found", "parentRef", *tc.ParentRef)
 			failures++
 			continue
 		}
-		existing, err := h.store.GetChannelByNameAndType(ctx, server.ID, tc.Name, tc.Type)
+		existing, err := h.store.GetChannelByTypeAndPosition(ctx, server.ID, tc.Type, tc.Position)
 		if err != nil {
-			slog.Error("createServer: idempotency check", "err", err, "channel", tc.Name)
+			slog.Error("createServer: idempotency check", "err", err, "position", tc.Position)
 			failures++
 			continue
 		}
 		if existing != nil {
 			continue
 		}
-		ch, err := h.store.CreateChannel(ctx, server.ID, tc.Name, tc.Type, tc.VoiceMode, &parentID, tc.Position)
+		ch, err := h.store.CreateChannel(ctx, server.ID, nil, tc.Type, tc.VoiceMode, &parentID, tc.Position)
 		if err != nil {
-			slog.Error("createServer: create template channel", "err", err, "channel", tc.Name)
+			slog.Error("createServer: create template channel", "err", err, "position", tc.Position)
 			failures++
 			continue
 		}
@@ -262,8 +242,8 @@ func (h *serversHandler) getServer(w http.ResponseWriter, r *http.Request) {
 // Restricted to the guild owner only.
 func (h *serversHandler) deleteServer(w http.ResponseWriter, r *http.Request) {
 	serverID := chi.URLParam(r, "serverId")
-	role := guildRoleFromContext(r.Context())
-	if role != "owner" {
+	level := guildLevelFromContext(r.Context())
+	if level != models.PermissionLevelOwner {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "only the guild owner can delete the server"})
 		return
 	}
@@ -297,71 +277,69 @@ func (h *serversHandler) listMembers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, members)
 }
 
-// changeRoleRequest is the JSON body for PUT /api/servers/{serverId}/members/{userId}/role.
-type changeRoleRequest struct {
-	NewRole string `json:"newRole"`
+// changePermissionLevelRequest is the JSON body for PUT /api/servers/{serverId}/members/{userId}/level.
+// TODO(0O-03): Full permission level change handler will be rewritten in Plan 03.
+type changePermissionLevelRequest struct {
+	PermissionLevel int `json:"permissionLevel"`
 }
 
 // changeRole handles PUT /api/servers/{serverId}/members/{userId}/role.
-// Requires admin+ guild role. Actor must outrank the target's current and new role.
+// Temporarily wired to changePermissionLevel internally until Plan 03 rewrites this handler.
 func (h *serversHandler) changeRole(w http.ResponseWriter, r *http.Request) {
 	serverID := chi.URLParam(r, "serverId")
 	targetUserID := chi.URLParam(r, "userId")
 	actorID := userIDFromContext(r.Context())
-	actorRole := guildRoleFromContext(r.Context())
+	actorLevel := guildLevelFromContext(r.Context())
 
 	if targetUserID == actorID {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cannot change your own role"})
 		return
 	}
-	if !roleAtLeast(actorRole, "admin") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role or higher required"})
+	if actorLevel < models.PermissionLevelAdmin {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin level or higher required"})
 		return
 	}
-	var req changeRoleRequest
+	var req changePermissionLevelRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
 	}
-	switch req.NewRole {
-	case "member", "mod", "admin":
-		// valid
-	default:
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "newRole must be member, mod, or admin"})
+	if req.PermissionLevel < models.PermissionLevelMember || req.PermissionLevel > models.PermissionLevelOwner {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "permissionLevel must be 0-3"})
 		return
 	}
-	targetRole, err := h.store.GetServerMemberRole(r.Context(), serverID, targetUserID)
-	if err != nil || targetRole == "" {
+	targetLevel, err := h.store.GetServerMemberLevel(r.Context(), serverID, targetUserID)
+	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "target user not found in this guild"})
 		return
 	}
-	if roleOrder[actorRole] <= roleOrder[targetRole] {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "cannot modify a member with equal or higher role"})
+	if actorLevel <= targetLevel {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "cannot modify a member with equal or higher permission level"})
 		return
 	}
-	if roleOrder[actorRole] <= roleOrder[req.NewRole] {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "cannot assign a role equal or higher than your own"})
+	if actorLevel <= req.PermissionLevel {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "cannot assign a permission level equal or higher than your own"})
 		return
 	}
-	if err := h.store.UpdateServerMemberRole(r.Context(), serverID, targetUserID, req.NewRole); err != nil {
-		slog.Error("changeRole: update member role", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update role"})
+	if err := h.store.UpdateServerMemberLevel(r.Context(), serverID, targetUserID, req.PermissionLevel); err != nil {
+		slog.Error("changeRole: update member level", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update permission level"})
 		return
 	}
 	metadata := map[string]interface{}{
-		"old_role": targetRole,
-		"new_role": req.NewRole,
+		"old_level": targetLevel,
+		"new_level": req.PermissionLevel,
 	}
-	if err := h.store.InsertAuditLog(r.Context(), serverID, actorID, &targetUserID, "role_change", "role changed via guild management", metadata); err != nil {
+	if err := h.store.InsertAuditLog(r.Context(), serverID, actorID, &targetUserID, "level_change", "permission level changed via guild management", metadata); err != nil {
 		slog.Error("changeRole: insert audit log", "err", err)
 	}
-	EmitSystemMessage(r.Context(), h.store, h.hub, serverID, "role_changed", actorID, &targetUserID, "role changed", metadata)
+	EmitSystemMessage(r.Context(), h.store, h.hub, serverID, "role_changed", actorID, &targetUserID, "permission level changed", metadata)
 	if h.hub != nil {
 		msg, _ := json.Marshal(map[string]interface{}{
-			"type":      "member_role_changed",
-			"server_id": serverID,
-			"user_id":   targetUserID,
-			"new_role":  req.NewRole,
+			"type":             "member_role_changed",
+			"server_id":        serverID,
+			"user_id":          targetUserID,
+			"permission_level": req.PermissionLevel,
 		})
 		h.hub.BroadcastToServer(serverID, msg)
 	}
@@ -377,8 +355,8 @@ func (h *serversHandler) leaveServer(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
 		return
 	}
-	role := guildRoleFromContext(r.Context())
-	if role == "owner" {
+	level := guildLevelFromContext(r.Context())
+	if level == models.PermissionLevelOwner {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "guild owner cannot leave; transfer ownership first"})
 		return
 	}
@@ -411,8 +389,8 @@ func (h *serversHandler) listGuildBillingStats(w http.ResponseWriter, r *http.Re
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify role"})
 		return
 	}
-	if instanceRole != "owner" {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "instance owner required"})
+	if instanceRole != "admin" {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "instance admin required"})
 		return
 	}
 	stats, err := h.store.ListGuildBillingStats(r.Context())

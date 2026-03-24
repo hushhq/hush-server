@@ -188,3 +188,44 @@ func (p *Pool) GetVoiceKeyRotationHours(ctx context.Context) (int, error) {
 	}
 	return hours, nil
 }
+
+// UpsertMLSGuildMetadataGroupInfo inserts or updates the GroupInfo bytes for a guild
+// metadata group (group_type = 'metadata', server_id scoped, channel_id = NULL).
+// On conflict the group_info_bytes, epoch, and updated_at are refreshed.
+func (p *Pool) UpsertMLSGuildMetadataGroupInfo(ctx context.Context, serverID string, groupInfoBytes []byte, epoch int64) error {
+	_, err := p.Exec(ctx, `
+		INSERT INTO mls_group_info (server_id, group_type, group_info_bytes, epoch, updated_at)
+		VALUES ($1, 'metadata', $2, $3, now())
+		ON CONFLICT (server_id, group_type) DO UPDATE SET
+			group_info_bytes = EXCLUDED.group_info_bytes,
+			epoch            = EXCLUDED.epoch,
+			updated_at       = now()`,
+		serverID, groupInfoBytes, epoch,
+	)
+	return err
+}
+
+// GetMLSGuildMetadataGroupInfo returns the stored GroupInfo bytes and epoch for a guild
+// metadata group. Returns (nil, 0, nil) when no row exists.
+func (p *Pool) GetMLSGuildMetadataGroupInfo(ctx context.Context, serverID string) (groupInfoBytes []byte, epoch int64, err error) {
+	err = p.QueryRow(ctx, `
+		SELECT group_info_bytes, epoch
+		FROM mls_group_info
+		WHERE server_id = $1 AND group_type = 'metadata'`,
+		serverID,
+	).Scan(&groupInfoBytes, &epoch)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, 0, nil
+	}
+	return groupInfoBytes, epoch, err
+}
+
+// DeleteMLSGuildMetadataGroupInfo removes the metadata group row for the given guild.
+// Called when a guild is deleted.
+func (p *Pool) DeleteMLSGuildMetadataGroupInfo(ctx context.Context, serverID string) error {
+	_, err := p.Exec(ctx, `
+		DELETE FROM mls_group_info WHERE server_id = $1 AND group_type = 'metadata'`,
+		serverID,
+	)
+	return err
+}

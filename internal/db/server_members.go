@@ -6,12 +6,12 @@ import (
 	"hush.app/server/internal/models"
 )
 
-// AddServerMember inserts a new guild membership record.
-func (p *Pool) AddServerMember(ctx context.Context, serverID, userID, role string) error {
+// AddServerMember inserts a new guild membership record with the given permission level.
+func (p *Pool) AddServerMember(ctx context.Context, serverID, userID string, permissionLevel int) error {
 	_, err := p.Exec(ctx, `
-		INSERT INTO server_members (server_id, user_id, role)
+		INSERT INTO server_members (server_id, user_id, permission_level)
 		VALUES ($1, $2, $3)`,
-		serverID, userID, role,
+		serverID, userID, permissionLevel,
 	)
 	return err
 }
@@ -26,24 +26,24 @@ func (p *Pool) RemoveServerMember(ctx context.Context, serverID, userID string) 
 	return err
 }
 
-// GetServerMemberRole returns the role of the user within the guild.
+// GetServerMemberLevel returns the permission_level of the user within the guild.
 // Returns an error if the user is not a member.
-func (p *Pool) GetServerMemberRole(ctx context.Context, serverID, userID string) (string, error) {
-	var role string
+func (p *Pool) GetServerMemberLevel(ctx context.Context, serverID, userID string) (int, error) {
+	var level int
 	err := p.QueryRow(ctx, `
-		SELECT role FROM server_members
+		SELECT permission_level FROM server_members
 		WHERE server_id = $1 AND user_id = $2`,
 		serverID, userID,
-	).Scan(&role)
-	return role, err
+	).Scan(&level)
+	return level, err
 }
 
-// UpdateServerMemberRole sets a new role for the given member.
-func (p *Pool) UpdateServerMemberRole(ctx context.Context, serverID, userID, role string) error {
+// UpdateServerMemberLevel sets a new permission level for the given member.
+func (p *Pool) UpdateServerMemberLevel(ctx context.Context, serverID, userID string, permissionLevel int) error {
 	_, err := p.Exec(ctx, `
-		UPDATE server_members SET role = $1
-		WHERE server_id = $2 AND user_id = $3`,
-		role, serverID, userID,
+		UPDATE server_members SET permission_level = $3
+		WHERE server_id = $1 AND user_id = $2`,
+		serverID, userID, permissionLevel,
 	)
 	return err
 }
@@ -51,7 +51,7 @@ func (p *Pool) UpdateServerMemberRole(ctx context.Context, serverID, userID, rol
 // ListServerMembers returns all guild members with their user profiles, ordered by join time.
 func (p *Pool) ListServerMembers(ctx context.Context, serverID string) ([]models.ServerMemberWithUser, error) {
 	rows, err := p.Query(ctx, `
-		SELECT u.id, u.username, u.display_name, u.created_at, sm.role, sm.joined_at
+		SELECT u.id, u.username, u.display_name, u.created_at, sm.permission_level, sm.joined_at
 		FROM server_members sm
 		JOIN users u ON u.id = sm.user_id
 		WHERE sm.server_id = $1
@@ -63,7 +63,7 @@ func (p *Pool) ListServerMembers(ctx context.Context, serverID string) ([]models
 	var out []models.ServerMemberWithUser
 	for rows.Next() {
 		var m models.ServerMemberWithUser
-		if err := rows.Scan(&m.ID, &m.Username, &m.DisplayName, &m.CreatedAt, &m.Role, &m.JoinedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.Username, &m.DisplayName, &m.CreatedAt, &m.PermissionLevel, &m.JoinedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, m)

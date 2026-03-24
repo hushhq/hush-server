@@ -11,12 +11,11 @@ import (
 // handshake handler never hits the database. It is populated on server startup
 // and refreshed whenever the instance config is updated via PUT /api/instance.
 type InstanceCache struct {
-	mu                   sync.RWMutex
-	name                 string
-	iconURL              *string
-	registrationMode     string
-	serverCreationPolicy string
-	bootstrapped         bool
+	mu                    sync.RWMutex
+	name                  string
+	iconURL               *string
+	registrationMode      string
+	guildDiscovery        string
 	voiceKeyRotationHours int
 }
 
@@ -24,16 +23,20 @@ type InstanceCache struct {
 // Matches the instance_config column default (2 hours).
 const voiceKeyRotationHoursDefault = 2
 
-// NewInstanceCache creates an empty cache. Zero values are safe: bootstrapped=false,
-// name="" — representing a fresh instance before first-user setup.
+// NewInstanceCache creates an empty cache. Zero values are safe: name="" —
+// representing a fresh instance before first-user setup.
 // voiceKeyRotationHours defaults to voiceKeyRotationHoursDefault.
+// guildDiscovery defaults to "allowed".
 func NewInstanceCache() *InstanceCache {
-	return &InstanceCache{voiceKeyRotationHours: voiceKeyRotationHoursDefault}
+	return &InstanceCache{
+		voiceKeyRotationHours: voiceKeyRotationHoursDefault,
+		guildDiscovery:        "allowed",
+	}
 }
 
 // Set updates all cached fields under a write lock. Called on startup (from
 // GetInstanceConfig) and after updateConfig writes to the database.
-func (c *InstanceCache) Set(name string, iconURL *string, regMode string, serverCreationPolicy string, bootstrapped bool, voiceKeyRotationHours int) {
+func (c *InstanceCache) Set(name string, iconURL *string, regMode string, guildDiscovery string, voiceKeyRotationHours int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.name = name
@@ -44,8 +47,7 @@ func (c *InstanceCache) Set(name string, iconURL *string, regMode string, server
 		c.iconURL = nil
 	}
 	c.registrationMode = regMode
-	c.serverCreationPolicy = serverCreationPolicy
-	c.bootstrapped = bootstrapped
+	c.guildDiscovery = guildDiscovery
 	if voiceKeyRotationHours > 0 {
 		c.voiceKeyRotationHours = voiceKeyRotationHours
 	} else {
@@ -54,7 +56,7 @@ func (c *InstanceCache) Set(name string, iconURL *string, regMode string, server
 }
 
 // snapshot returns a consistent copy of all cached fields under a read lock.
-func (c *InstanceCache) snapshot() (name string, iconURL *string, regMode string, serverCreationPolicy string, bootstrapped bool, voiceKeyRotationHours int) {
+func (c *InstanceCache) snapshot() (name string, iconURL *string, regMode string, guildDiscovery string, voiceKeyRotationHours int) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	var ico *string
@@ -66,22 +68,25 @@ func (c *InstanceCache) snapshot() (name string, iconURL *string, regMode string
 	if vkrh == 0 {
 		vkrh = voiceKeyRotationHoursDefault
 	}
-	return c.name, ico, c.registrationMode, c.serverCreationPolicy, c.bootstrapped, vkrh
+	gd := c.guildDiscovery
+	if gd == "" {
+		gd = "allowed"
+	}
+	return c.name, ico, c.registrationMode, gd, vkrh
 }
 
 // handshakeResponse is the JSON shape returned by GET /api/handshake.
 type handshakeResponse struct {
-	ServerVersion         string          `json:"server_version"`
-	APIVersion            string          `json:"api_version"`
-	MinClientVersion      string          `json:"min_client_version"`
-	KeyPackageLowThreshold int            `json:"key_package_low_threshold"`
-	ServerCreationPolicy  string          `json:"server_creation_policy"`
-	Capabilities          map[string]bool `json:"capabilities"`
-	Name                  string          `json:"name"`
-	IconURL               *string         `json:"iconUrl,omitempty"`
-	RegistrationMode      string          `json:"registrationMode"`
-	Bootstrapped          bool            `json:"bootstrapped"`
-	VoiceKeyRotationHours int             `json:"voice_key_rotation_hours"`
+	ServerVersion          string          `json:"server_version"`
+	APIVersion             string          `json:"api_version"`
+	MinClientVersion       string          `json:"min_client_version"`
+	KeyPackageLowThreshold int             `json:"key_package_low_threshold"`
+	GuildDiscovery         string          `json:"guild_discovery"`
+	Capabilities           map[string]bool `json:"capabilities"`
+	Name                   string          `json:"name"`
+	IconURL                *string         `json:"iconUrl,omitempty"`
+	RegistrationMode       string          `json:"registrationMode"`
+	VoiceKeyRotationHours  int             `json:"voice_key_rotation_hours"`
 }
 
 // HandshakeHandler returns an http.HandlerFunc that serves GET /api/handshake.
@@ -89,14 +94,14 @@ type handshakeResponse struct {
 // only from the in-memory cache and version constants, never from the database.
 func HandshakeHandler(cache *InstanceCache, voiceEnabled bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		name, iconURL, regMode, scp, bootstrapped, voiceKeyRotationHours := cache.snapshot()
+		name, iconURL, regMode, guildDiscovery, voiceKeyRotationHours := cache.snapshot()
 
 		resp := handshakeResponse{
 			ServerVersion:          version.ServerVersion,
 			APIVersion:             version.APIVersion,
 			MinClientVersion:       version.MinClientVersion,
 			KeyPackageLowThreshold: version.KeyPackageLowThreshold,
-			ServerCreationPolicy:   scp,
+			GuildDiscovery:         guildDiscovery,
 			Capabilities: map[string]bool{
 				"e2ee.chat":      true,
 				"e2ee.media":     true,
@@ -105,7 +110,6 @@ func HandshakeHandler(cache *InstanceCache, voiceEnabled bool) http.HandlerFunc 
 			Name:                  name,
 			IconURL:               iconURL,
 			RegistrationMode:      regMode,
-			Bootstrapped:          bootstrapped,
 			VoiceKeyRotationHours: voiceKeyRotationHours,
 		}
 

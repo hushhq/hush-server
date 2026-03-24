@@ -53,19 +53,18 @@ type mockStore struct {
 
 	// Instance
 	getInstanceConfigFn    func(ctx context.Context) (*models.InstanceConfig, error)
-	updateInstanceConfigFn func(ctx context.Context, name *string, iconURL *string, registrationMode *string, serverCreationPolicy *string) error
-	setInstanceOwnerFn     func(ctx context.Context, userID string) (bool, error)
+	updateInstanceConfigFn func(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string) error
 	getUserRoleFn          func(ctx context.Context, userID string) (string, error)
 	updateUserRoleFn       func(ctx context.Context, userID, role string) error
 	listMembersFn          func(ctx context.Context) ([]models.Member, error)
 
 	// Channels (guild-scoped — serverID param)
-	createChannelFn          func(ctx context.Context, serverID, name, channelType string, voiceMode *string, parentID *string, position int) (*models.Channel, error)
-	listChannelsFn           func(ctx context.Context, serverID string) ([]models.Channel, error)
-	getChannelByIDFn         func(ctx context.Context, channelID string) (*models.Channel, error)
-	getChannelByNameAndTypeFn func(ctx context.Context, serverID, name, channelType string) (*models.Channel, error)
-	deleteChannelFn          func(ctx context.Context, channelID string) error
-	moveChannelFn            func(ctx context.Context, channelID string, parentID *string, position int) error
+	createChannelFn              func(ctx context.Context, serverID string, encryptedMetadata []byte, channelType string, voiceMode *string, parentID *string, position int) (*models.Channel, error)
+	listChannelsFn               func(ctx context.Context, serverID string) ([]models.Channel, error)
+	getChannelByIDFn             func(ctx context.Context, channelID string) (*models.Channel, error)
+	getChannelByTypeAndPositionFn func(ctx context.Context, serverID, channelType string, position int) (*models.Channel, error)
+	deleteChannelFn              func(ctx context.Context, channelID string) error
+	moveChannelFn                func(ctx context.Context, channelID string, parentID *string, position int) error
 
 	// Server templates
 	listServerTemplatesFn      func(ctx context.Context) ([]models.ServerTemplate, error)
@@ -81,18 +80,19 @@ type mockStore struct {
 	claimInviteUseFn  func(ctx context.Context, code string) (bool, error)
 
 	// Server / guild operations
-	createServerFn          func(ctx context.Context, name, ownerID string) (*models.Server, error)
-	getServerByIDFn         func(ctx context.Context, serverID string) (*models.Server, error)
-	listServersForUserFn    func(ctx context.Context, userID string) ([]models.Server, error)
-	deleteServerFn          func(ctx context.Context, serverID string) error
-	listGuildBillingStatsFn func(ctx context.Context) ([]models.GuildBillingStats, error)
+	createServerFn                      func(ctx context.Context, encryptedMetadata []byte) (*models.Server, error)
+	updateServerEncryptedMetadataFn     func(ctx context.Context, serverID string, encryptedMetadata []byte) error
+	getServerByIDFn                     func(ctx context.Context, serverID string) (*models.Server, error)
+	listServersForUserFn                func(ctx context.Context, userID string) ([]models.Server, error)
+	deleteServerFn                      func(ctx context.Context, serverID string) error
+	listGuildBillingStatsFn             func(ctx context.Context) ([]models.GuildBillingStats, error)
 
 	// Server member operations
-	addServerMemberFn        func(ctx context.Context, serverID, userID, role string) error
-	removeServerMemberFn     func(ctx context.Context, serverID, userID string) error
-	getServerMemberRoleFn    func(ctx context.Context, serverID, userID string) (string, error)
-	updateServerMemberRoleFn func(ctx context.Context, serverID, userID, role string) error
-	listServerMembersFn      func(ctx context.Context, serverID string) ([]models.ServerMemberWithUser, error)
+	addServerMemberFn         func(ctx context.Context, serverID, userID string, permissionLevel int) error
+	removeServerMemberFn      func(ctx context.Context, serverID, userID string) error
+	getServerMemberLevelFn    func(ctx context.Context, serverID, userID string) (int, error)
+	updateServerMemberLevelFn func(ctx context.Context, serverID, userID string, permissionLevel int) error
+	listServerMembersFn       func(ctx context.Context, serverID string) ([]models.ServerMemberWithUser, error)
 
 	// Moderation — bans (guild-scoped — serverID param)
 	insertBanFn      func(ctx context.Context, serverID, userID, actorID, reason string, expiresAt *time.Time) (*models.Ban, error)
@@ -146,6 +146,16 @@ type mockStore struct {
 	getPendingWelcomesFn        func(ctx context.Context, recipientUserID string) ([]db.PendingWelcomeRow, error)
 	deletePendingWelcomeFn      func(ctx context.Context, welcomeID string) error
 	getVoiceKeyRotationHoursFn  func(ctx context.Context) (int, error)
+
+	// MLS guild metadata group methods
+	upsertMLSGuildMetadataGroupInfoFn func(ctx context.Context, serverID string, groupInfoBytes []byte, epoch int64) error
+	getMLSGuildMetadataGroupInfoFn    func(ctx context.Context, serverID string) ([]byte, int64, error)
+	deleteMLSGuildMetadataGroupInfoFn func(ctx context.Context, serverID string) error
+
+	// Guild metrics increment methods
+	incrementGuildMessageCountFn func(ctx context.Context, channelID string) error
+	incrementGuildMemberCountFn  func(ctx context.Context, serverID string, delta int) error
+	updateGuildChannelCountsFn   func(ctx context.Context, serverID string) error
 }
 
 // ---------- User/session ----------
@@ -296,25 +306,17 @@ func (m *mockStore) GetInstanceConfig(ctx context.Context) (*models.InstanceConf
 		return m.getInstanceConfigFn(ctx)
 	}
 	return &models.InstanceConfig{
-		ID:               "inst-1",
+		ID:             "inst-1",
 		Name:             "Test Instance",
 		RegistrationMode: "open",
 	}, nil
 }
 
-func (m *mockStore) UpdateInstanceConfig(ctx context.Context, name *string, iconURL *string, registrationMode *string, serverCreationPolicy *string) error {
+func (m *mockStore) UpdateInstanceConfig(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string) error {
 	if m.updateInstanceConfigFn != nil {
-		return m.updateInstanceConfigFn(ctx, name, iconURL, registrationMode, serverCreationPolicy)
+		return m.updateInstanceConfigFn(ctx, name, iconURL, registrationMode, guildDiscovery)
 	}
 	return nil
-}
-
-func (m *mockStore) SetInstanceOwner(ctx context.Context, userID string) (bool, error) {
-	if m.setInstanceOwnerFn != nil {
-		return m.setInstanceOwnerFn(ctx, userID)
-	}
-	// Default: not first user (owner already set).
-	return false, nil
 }
 
 func (m *mockStore) GetUserRole(ctx context.Context, userID string) (string, error) {
@@ -340,9 +342,9 @@ func (m *mockStore) ListMembers(ctx context.Context) ([]models.Member, error) {
 
 // ---------- Channels ----------
 
-func (m *mockStore) CreateChannel(ctx context.Context, serverID, name, channelType string, voiceMode *string, parentID *string, position int) (*models.Channel, error) {
+func (m *mockStore) CreateChannel(ctx context.Context, serverID string, encryptedMetadata []byte, channelType string, voiceMode *string, parentID *string, position int) (*models.Channel, error) {
 	if m.createChannelFn != nil {
-		return m.createChannelFn(ctx, serverID, name, channelType, voiceMode, parentID, position)
+		return m.createChannelFn(ctx, serverID, encryptedMetadata, channelType, voiceMode, parentID, position)
 	}
 	return nil, nil
 }
@@ -361,9 +363,9 @@ func (m *mockStore) GetChannelByID(ctx context.Context, channelID string) (*mode
 	return nil, nil
 }
 
-func (m *mockStore) GetChannelByNameAndType(ctx context.Context, serverID, name, channelType string) (*models.Channel, error) {
-	if m.getChannelByNameAndTypeFn != nil {
-		return m.getChannelByNameAndTypeFn(ctx, serverID, name, channelType)
+func (m *mockStore) GetChannelByTypeAndPosition(ctx context.Context, serverID, channelType string, position int) (*models.Channel, error) {
+	if m.getChannelByTypeAndPositionFn != nil {
+		return m.getChannelByTypeAndPositionFn(ctx, serverID, channelType, position)
 	}
 	return nil, nil
 }
@@ -449,11 +451,22 @@ func (m *mockStore) ClaimInviteUse(ctx context.Context, code string) (bool, erro
 
 // ---------- Server / guild operations ----------
 
-func (m *mockStore) CreateServer(ctx context.Context, name, ownerID string) (*models.Server, error) {
+func (m *mockStore) CreateServer(ctx context.Context, encryptedMetadata []byte) (*models.Server, error) {
 	if m.createServerFn != nil {
-		return m.createServerFn(ctx, name, ownerID)
+		return m.createServerFn(ctx, encryptedMetadata)
 	}
-	return &models.Server{ID: uuid.New().String(), Name: name, OwnerID: ownerID}, nil
+	return &models.Server{
+		ID:                uuid.New().String(),
+		EncryptedMetadata: encryptedMetadata,
+		AccessPolicy:      "open",
+	}, nil
+}
+
+func (m *mockStore) UpdateServerEncryptedMetadata(ctx context.Context, serverID string, encryptedMetadata []byte) error {
+	if m.updateServerEncryptedMetadataFn != nil {
+		return m.updateServerEncryptedMetadataFn(ctx, serverID, encryptedMetadata)
+	}
+	return nil
 }
 
 func (m *mockStore) GetServerByID(ctx context.Context, serverID string) (*models.Server, error) {
@@ -486,9 +499,9 @@ func (m *mockStore) ListGuildBillingStats(ctx context.Context) ([]models.GuildBi
 
 // ---------- Server member operations ----------
 
-func (m *mockStore) AddServerMember(ctx context.Context, serverID, userID, role string) error {
+func (m *mockStore) AddServerMember(ctx context.Context, serverID, userID string, permissionLevel int) error {
 	if m.addServerMemberFn != nil {
-		return m.addServerMemberFn(ctx, serverID, userID, role)
+		return m.addServerMemberFn(ctx, serverID, userID, permissionLevel)
 	}
 	return nil
 }
@@ -500,16 +513,16 @@ func (m *mockStore) RemoveServerMember(ctx context.Context, serverID, userID str
 	return nil
 }
 
-func (m *mockStore) GetServerMemberRole(ctx context.Context, serverID, userID string) (string, error) {
-	if m.getServerMemberRoleFn != nil {
-		return m.getServerMemberRoleFn(ctx, serverID, userID)
+func (m *mockStore) GetServerMemberLevel(ctx context.Context, serverID, userID string) (int, error) {
+	if m.getServerMemberLevelFn != nil {
+		return m.getServerMemberLevelFn(ctx, serverID, userID)
 	}
-	return "", nil
+	return 0, nil
 }
 
-func (m *mockStore) UpdateServerMemberRole(ctx context.Context, serverID, userID, role string) error {
-	if m.updateServerMemberRoleFn != nil {
-		return m.updateServerMemberRoleFn(ctx, serverID, userID, role)
+func (m *mockStore) UpdateServerMemberLevel(ctx context.Context, serverID, userID string, permissionLevel int) error {
+	if m.updateServerMemberLevelFn != nil {
+		return m.updateServerMemberLevelFn(ctx, serverID, userID, permissionLevel)
 	}
 	return nil
 }
@@ -773,6 +786,52 @@ func (m *mockStore) GetVoiceKeyRotationHours(ctx context.Context) (int, error) {
 	return 2, nil
 }
 
+// ---------- MLS guild metadata group methods ----------
+
+func (m *mockStore) UpsertMLSGuildMetadataGroupInfo(ctx context.Context, serverID string, groupInfoBytes []byte, epoch int64) error {
+	if m.upsertMLSGuildMetadataGroupInfoFn != nil {
+		return m.upsertMLSGuildMetadataGroupInfoFn(ctx, serverID, groupInfoBytes, epoch)
+	}
+	return nil
+}
+
+func (m *mockStore) GetMLSGuildMetadataGroupInfo(ctx context.Context, serverID string) ([]byte, int64, error) {
+	if m.getMLSGuildMetadataGroupInfoFn != nil {
+		return m.getMLSGuildMetadataGroupInfoFn(ctx, serverID)
+	}
+	return nil, 0, nil
+}
+
+func (m *mockStore) DeleteMLSGuildMetadataGroupInfo(ctx context.Context, serverID string) error {
+	if m.deleteMLSGuildMetadataGroupInfoFn != nil {
+		return m.deleteMLSGuildMetadataGroupInfoFn(ctx, serverID)
+	}
+	return nil
+}
+
+// ---------- Guild metrics increment methods ----------
+
+func (m *mockStore) IncrementGuildMessageCount(ctx context.Context, channelID string) error {
+	if m.incrementGuildMessageCountFn != nil {
+		return m.incrementGuildMessageCountFn(ctx, channelID)
+	}
+	return nil
+}
+
+func (m *mockStore) IncrementGuildMemberCount(ctx context.Context, serverID string, delta int) error {
+	if m.incrementGuildMemberCountFn != nil {
+		return m.incrementGuildMemberCountFn(ctx, serverID, delta)
+	}
+	return nil
+}
+
+func (m *mockStore) UpdateGuildChannelCounts(ctx context.Context, serverID string) error {
+	if m.updateGuildChannelCountsFn != nil {
+		return m.updateGuildChannelCountsFn(ctx, serverID)
+	}
+	return nil
+}
+
 // ---------- Shared test helpers ----------
 
 // makeAuth creates a valid JWT and wires getSessionByTokenHashFn on the store.
@@ -798,15 +857,23 @@ func makeServerAuth(store *mockStore, userID string) string {
 	return makeAuth(store, userID)
 }
 
-// makeGuildAuth sets up auth AND guild membership mock for the given role.
+// makeGuildAuth sets up auth AND guild membership mock for the given permission level.
+// guildRole is a legacy string ("owner", "admin", "mod", "member") mapped to an int level.
 // Returns the bearer token. Useful for tests that need to pass RequireGuildMember.
 func makeGuildAuth(store *mockStore, userID, guildRole string) string {
 	token := makeAuth(store, userID)
-	store.getServerMemberRoleFn = func(_ context.Context, _, uid string) (string, error) {
+	levelMap := map[string]int{
+		"owner":  3,
+		"admin":  2,
+		"mod":    1,
+		"member": 0,
+	}
+	level := levelMap[guildRole]
+	store.getServerMemberLevelFn = func(_ context.Context, _, uid string) (int, error) {
 		if uid == userID {
-			return guildRole, nil
+			return level, nil
 		}
-		return "", nil
+		return 0, nil
 	}
 	return token
 }

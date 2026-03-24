@@ -11,23 +11,25 @@ import (
 )
 
 // CreateChannel inserts a channel scoped to the given guild and returns the created row.
-func (p *Pool) CreateChannel(ctx context.Context, serverID, name, channelType string, voiceMode *string, parentID *string, position int) (*models.Channel, error) {
+// encryptedMetadata is the client-encrypted channel name/description blob (may be nil for
+// system channels, which clients display using the channel type).
+func (p *Pool) CreateChannel(ctx context.Context, serverID string, encryptedMetadata []byte, channelType string, voiceMode *string, parentID *string, position int) (*models.Channel, error) {
 	row := p.QueryRow(ctx, `
-		INSERT INTO channels (server_id, name, type, voice_mode, parent_id, position)
+		INSERT INTO channels (server_id, encrypted_metadata, type, voice_mode, parent_id, position)
 		VALUES ($1, $2, $3, $4, $5, $6)
-		RETURNING id, server_id, name, type, voice_mode, parent_id, position`,
-		serverID, name, channelType, voiceMode, parentID, position,
+		RETURNING id, server_id, encrypted_metadata, type, voice_mode, parent_id, position`,
+		serverID, encryptedMetadata, channelType, voiceMode, parentID, position,
 	)
 	return scanChannel(row)
 }
 
-// ListChannels returns all channels for the given guild ordered by position, then name.
+// ListChannels returns all channels for the given guild ordered by position.
 func (p *Pool) ListChannels(ctx context.Context, serverID string) ([]models.Channel, error) {
 	rows, err := p.Query(ctx, `
-		SELECT id, server_id, name, type, voice_mode, parent_id, position
+		SELECT id, server_id, encrypted_metadata, type, voice_mode, parent_id, position
 		FROM channels
 		WHERE server_id = $1
-		ORDER BY position, name`, serverID)
+		ORDER BY position`, serverID)
 	if err != nil {
 		return nil, err
 	}
@@ -43,13 +45,14 @@ func (p *Pool) ListChannels(ctx context.Context, serverID string) ([]models.Chan
 	return out, rows.Err()
 }
 
-// GetChannelByNameAndType returns the channel matching both name and type within a guild,
-// or nil if not found. Used for idempotency checks during template channel creation.
-func (p *Pool) GetChannelByNameAndType(ctx context.Context, serverID, name, channelType string) (*models.Channel, error) {
+// GetChannelByTypeAndPosition returns the channel matching both type and position within a guild,
+// or nil if not found. Replaces GetChannelByNameAndType for idempotency checks during
+// template channel creation (no name column exists after migration 000017).
+func (p *Pool) GetChannelByTypeAndPosition(ctx context.Context, serverID, channelType string, position int) (*models.Channel, error) {
 	row := p.QueryRow(ctx, `
-		SELECT id, server_id, name, type, voice_mode, parent_id, position
-		FROM channels WHERE server_id = $1 AND name = $2 AND type = $3 LIMIT 1`,
-		serverID, name, channelType)
+		SELECT id, server_id, encrypted_metadata, type, voice_mode, parent_id, position
+		FROM channels WHERE server_id = $1 AND type = $2 AND position = $3 LIMIT 1`,
+		serverID, channelType, position)
 	c, err := scanChannel(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -63,7 +66,7 @@ func (p *Pool) GetChannelByNameAndType(ctx context.Context, serverID, name, chan
 // GetChannelByID returns the channel by ID, or nil if not found.
 func (p *Pool) GetChannelByID(ctx context.Context, channelID string) (*models.Channel, error) {
 	row := p.QueryRow(ctx, `
-		SELECT id, server_id, name, type, voice_mode, parent_id, position
+		SELECT id, server_id, encrypted_metadata, type, voice_mode, parent_id, position
 		FROM channels WHERE id = $1`, channelID)
 	c, err := scanChannel(row)
 	if err != nil {
@@ -174,7 +177,7 @@ func shiftPositions(ctx context.Context, tx pgx.Tx, channelID string, isCategory
 
 func scanChannel(row pgx.Row) (*models.Channel, error) {
 	var c models.Channel
-	err := row.Scan(&c.ID, &c.ServerID, &c.Name, &c.Type, &c.VoiceMode, &c.ParentID, &c.Position)
+	err := row.Scan(&c.ID, &c.ServerID, &c.EncryptedMetadata, &c.Type, &c.VoiceMode, &c.ParentID, &c.Position)
 	if err != nil {
 		return nil, err
 	}

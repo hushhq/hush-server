@@ -4,6 +4,8 @@
 -- 6. mls_group_info table (reverse)
 -- ============================================================
 
+DROP INDEX IF EXISTS mls_group_info_server_type;
+
 ALTER TABLE mls_group_info DROP CONSTRAINT IF EXISTS mls_group_info_group_type_check;
 ALTER TABLE mls_group_info ADD CONSTRAINT mls_group_info_group_type_check
     CHECK (group_type IN ('text', 'voice'));

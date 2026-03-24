@@ -98,3 +98,8 @@ ALTER TABLE mls_group_info ADD CONSTRAINT mls_group_info_xor_id
 ALTER TABLE mls_group_info DROP CONSTRAINT mls_group_info_group_type_check;
 ALTER TABLE mls_group_info ADD CONSTRAINT mls_group_info_group_type_check
     CHECK (group_type IN ('text', 'voice', 'metadata'));
+
+-- Add unique index on (server_id, group_type) for guild metadata group upserts.
+-- The existing PK covers (channel_id, group_type); this index covers server-scoped rows.
+CREATE UNIQUE INDEX mls_group_info_server_type ON mls_group_info (server_id, group_type)
+    WHERE server_id IS NOT NULL;

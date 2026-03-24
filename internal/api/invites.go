@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"hush.app/server/internal/db"
+	"hush.app/server/internal/models"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -87,9 +88,10 @@ func (h *inviteHandler) getInviteInfo(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load guild info"})
 		return
 	}
+	// TODO(0O-03): GuildName is empty — guild name is now encrypted; client decrypts after joining.
 	writeJSON(w, http.StatusOK, inviteInfoResponse{
 		Code:      inv.Code,
-		GuildName: guild.Name,
+		GuildName: "",
 		ExpiresAt: inv.ExpiresAt.Format(time.RFC3339),
 		ServerID:  guild.ID,
 	})
@@ -195,13 +197,9 @@ func (h *inviteHandler) claimInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if ban != nil {
-		guild, err := h.store.GetServerByID(r.Context(), serverID)
-		guildName := serverID
-		if err == nil && guild != nil {
-			guildName = guild.Name
-		}
+		// TODO(0O-03): guild name is encrypted; use server ID as fallback.
 		resp := map[string]interface{}{
-			"error": "You are banned from " + guildName + ".",
+			"error": "You are banned from this guild.",
 		}
 		if ban.ExpiresAt != nil {
 			resp["ban_expires_at"] = ban.ExpiresAt.Format(time.RFC3339)
@@ -221,19 +219,14 @@ func (h *inviteHandler) claimInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Add the user to the guild as a member.
-	if err := h.store.AddServerMember(r.Context(), serverID, userID, "member"); err != nil {
+	// Add the user to the guild as a member (permission level 0).
+	if err := h.store.AddServerMember(r.Context(), serverID, userID, models.PermissionLevelMember); err != nil {
 		slog.Error("claimInvite: add server member", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to join guild"})
 		return
 	}
 
-	guild, err := h.store.GetServerByID(r.Context(), serverID)
-	guildName := serverID
-	if err == nil && guild != nil {
-		guildName = guild.Name
-	}
-
+	// TODO(0O-03): guild name is encrypted, cannot include in member_joined payload.
 	// Broadcast member_joined so other connected users see the new member.
 	if h.hub != nil {
 		member := map[string]interface{}{
@@ -255,9 +248,10 @@ func (h *inviteHandler) claimInvite(w http.ResponseWriter, r *http.Request) {
 	// Emit system message: the joining user is the actor, no target.
 	EmitSystemMessage(r.Context(), h.store, h.hub, serverID, "member_joined", userID, nil, "", nil)
 
+	// TODO(0O-03): GuildName is empty — guild name is encrypted; client decrypts via MLS group.
 	writeJSON(w, http.StatusOK, claimInviteResponse{
 		ServerID:  serverID,
-		GuildName: guildName,
+		GuildName: "",
 	})
 }
 

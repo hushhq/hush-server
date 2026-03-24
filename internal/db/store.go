@@ -41,17 +41,19 @@ type Store interface {
 
 	// Instance config methods
 	GetInstanceConfig(ctx context.Context) (*models.InstanceConfig, error)
-	UpdateInstanceConfig(ctx context.Context, name *string, iconURL *string, registrationMode *string, serverCreationPolicy *string) error
-	SetInstanceOwner(ctx context.Context, userID string) (bool, error)
+	// UpdateInstanceConfig updates only the non-nil fields; guildDiscovery replaces serverCreationPolicy.
+	UpdateInstanceConfig(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string) error
 	GetUserRole(ctx context.Context, userID string) (string, error)
 	UpdateUserRole(ctx context.Context, userID, role string) error
 	ListMembers(ctx context.Context) ([]models.Member, error)
 
 	// Channel operations
-	CreateChannel(ctx context.Context, serverID, name, channelType string, voiceMode *string, parentID *string, position int) (*models.Channel, error)
+	// CreateChannel uses encryptedMetadata instead of a plaintext name.
+	CreateChannel(ctx context.Context, serverID string, encryptedMetadata []byte, channelType string, voiceMode *string, parentID *string, position int) (*models.Channel, error)
 	ListChannels(ctx context.Context, serverID string) ([]models.Channel, error)
 	GetChannelByID(ctx context.Context, channelID string) (*models.Channel, error)
-	GetChannelByNameAndType(ctx context.Context, serverID, name, channelType string) (*models.Channel, error)
+	// GetChannelByTypeAndPosition replaces GetChannelByNameAndType (no name column).
+	GetChannelByTypeAndPosition(ctx context.Context, serverID, channelType string, position int) (*models.Channel, error)
 	DeleteChannel(ctx context.Context, channelID string) error
 	MoveChannel(ctx context.Context, channelID string, parentID *string, position int) error
 
@@ -69,17 +71,25 @@ type Store interface {
 	ClaimInviteUse(ctx context.Context, code string) (bool, error)
 
 	// Server operations
-	CreateServer(ctx context.Context, name, ownerID string) (*models.Server, error)
+	// CreateServer accepts encryptedMetadata (may be nil for two-step creation flow).
+	CreateServer(ctx context.Context, encryptedMetadata []byte) (*models.Server, error)
+	// UpdateServerEncryptedMetadata updates only the encrypted_metadata blob.
+	// Used in the two-step guild creation flow and after MLS epoch advances.
+	// Returns sql.ErrNoRows if no server with that ID exists.
+	UpdateServerEncryptedMetadata(ctx context.Context, serverID string, encryptedMetadata []byte) error
 	GetServerByID(ctx context.Context, serverID string) (*models.Server, error)
 	ListServersForUser(ctx context.Context, userID string) ([]models.Server, error)
 	DeleteServer(ctx context.Context, serverID string) error
 	ListGuildBillingStats(ctx context.Context) ([]models.GuildBillingStats, error)
 
 	// Server member operations
-	AddServerMember(ctx context.Context, serverID, userID, role string) error
+	// AddServerMember uses permissionLevel int instead of role string.
+	AddServerMember(ctx context.Context, serverID, userID string, permissionLevel int) error
 	RemoveServerMember(ctx context.Context, serverID, userID string) error
-	GetServerMemberRole(ctx context.Context, serverID, userID string) (string, error)
-	UpdateServerMemberRole(ctx context.Context, serverID, userID, role string) error
+	// GetServerMemberLevel returns the permission_level int for a guild member.
+	GetServerMemberLevel(ctx context.Context, serverID, userID string) (int, error)
+	// UpdateServerMemberLevel sets a new permission level for the given member.
+	UpdateServerMemberLevel(ctx context.Context, serverID, userID string, permissionLevel int) error
 	ListServerMembers(ctx context.Context, serverID string) ([]models.ServerMemberWithUser, error)
 
 	// Moderation — bans
@@ -136,6 +146,20 @@ type Store interface {
 	DeletePendingWelcome(ctx context.Context, welcomeID string) error
 	// GetVoiceKeyRotationHours returns the configured voice group key rotation interval in hours.
 	GetVoiceKeyRotationHours(ctx context.Context) (int, error)
+
+	// MLS guild metadata group methods (server_id scoped, group_type = 'metadata').
+	UpsertMLSGuildMetadataGroupInfo(ctx context.Context, serverID string, groupInfoBytes []byte, epoch int64) error
+	GetMLSGuildMetadataGroupInfo(ctx context.Context, serverID string) (groupInfoBytes []byte, epoch int64, err error)
+	DeleteMLSGuildMetadataGroupInfo(ctx context.Context, serverID string) error
+
+	// Guild metrics increment methods.
+	// IncrementGuildMessageCount increments the message_count and updates last_active_at for
+	// the guild that owns the given channel.
+	IncrementGuildMessageCount(ctx context.Context, channelID string) error
+	// IncrementGuildMemberCount adjusts member_count by delta (+1 on join, -1 on leave).
+	IncrementGuildMemberCount(ctx context.Context, serverID string, delta int) error
+	// UpdateGuildChannelCounts recalculates text_channel_count and voice_channel_count for the guild.
+	UpdateGuildChannelCounts(ctx context.Context, serverID string) error
 }
 
 // InstanceAuditLogFilter filters instance audit log queries.

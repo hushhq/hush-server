@@ -90,21 +90,8 @@ func (h *authHandler) register(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "registration failed"})
 		return
 	}
-	// First-user bootstrap: atomically claim instance ownership if unclaimed.
-	wasFirst, err := h.store.SetInstanceOwner(r.Context(), user.ID)
-	if err != nil {
-		slog.Error("set instance owner", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "registration failed"})
-		return
-	}
-	if wasFirst {
-		if err := h.store.UpdateUserRole(r.Context(), user.ID, "owner"); err != nil {
-			slog.Error("update user role to owner", "err", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "registration failed"})
-			return
-		}
-		user.Role = "owner"
-	}
+	// TODO(0O-03): Instance owner bootstrap removed — instance admin is now API key auth.
+	// First registered user gets 'admin' role on the users table by default.
 	h.sendAuthResponse(w, r, user)
 }
 

@@ -60,16 +60,15 @@ type instanceHandler struct {
 	cache *InstanceCache
 }
 
-// instanceConfigResponse extends InstanceConfig with a bootstrapped flag and the caller's role.
+// instanceConfigResponse is the response for GET /api/instance.
+// TODO(0O-03): Bootstrapped and MyRole fields to be revisited when admin API key auth lands.
 type instanceConfigResponse struct {
-	ID                   string  `json:"id"`
-	Name                 string  `json:"name"`
-	IconURL              *string `json:"iconUrl"`
-	OwnerID              *string `json:"ownerId"`
-	RegistrationMode     string  `json:"registrationMode"`
-	ServerCreationPolicy string  `json:"serverCreationPolicy"`
-	Bootstrapped         bool    `json:"bootstrapped"`
-	MyRole               string  `json:"myRole"`
+	ID               string  `json:"id"`
+	Name             string  `json:"name"`
+	IconURL          *string `json:"iconUrl"`
+	RegistrationMode string  `json:"registrationMode"`
+	GuildDiscovery   string  `json:"guildDiscovery"`
+	MyRole           string  `json:"myRole"`
 }
 
 func (h *instanceHandler) getConfig(w http.ResponseWriter, r *http.Request) {
@@ -86,23 +85,22 @@ func (h *instanceHandler) getConfig(w http.ResponseWriter, r *http.Request) {
 		role = "member"
 	}
 	writeJSON(w, http.StatusOK, instanceConfigResponse{
-		ID:                   cfg.ID,
-		Name:                 cfg.Name,
-		IconURL:              cfg.IconURL,
-		OwnerID:              cfg.OwnerID,
-		RegistrationMode:     cfg.RegistrationMode,
-		ServerCreationPolicy: cfg.ServerCreationPolicy,
-		Bootstrapped:         cfg.OwnerID != nil,
-		MyRole:               role,
+		ID:               cfg.ID,
+		Name:             cfg.Name,
+		IconURL:          cfg.IconURL,
+		RegistrationMode: cfg.RegistrationMode,
+		GuildDiscovery:   cfg.GuildDiscovery,
+		MyRole:           role,
 	})
 }
 
 // updateConfigRequest is the JSON body for PUT /api/instance.
+// ServerCreationPolicy removed; GuildDiscovery added.
 type updateConfigRequest struct {
-	Name                 *string `json:"name"`
-	IconURL              *string `json:"iconUrl"`
-	RegistrationMode     *string `json:"registrationMode"`
-	ServerCreationPolicy *string `json:"serverCreationPolicy"`
+	Name             *string `json:"name"`
+	IconURL          *string `json:"iconUrl"`
+	RegistrationMode *string `json:"registrationMode"`
+	GuildDiscovery   *string `json:"guildDiscovery"`
 }
 
 func (h *instanceHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
@@ -142,11 +140,11 @@ func (h *instanceHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if req.ServerCreationPolicy != nil {
-		switch *req.ServerCreationPolicy {
-		case "any_member", "admin_only":
+	if req.GuildDiscovery != nil {
+		switch *req.GuildDiscovery {
+		case "disabled", "allowed", "required":
 		default:
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "serverCreationPolicy must be any_member or admin_only"})
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "guildDiscovery must be disabled, allowed, or required"})
 			return
 		}
 	}
@@ -154,7 +152,7 @@ func (h *instanceHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 	// Capture old config for audit log
 	oldCfg, _ := h.store.GetInstanceConfig(r.Context())
 
-	if err := h.store.UpdateInstanceConfig(r.Context(), req.Name, req.IconURL, req.RegistrationMode, req.ServerCreationPolicy); err != nil {
+	if err := h.store.UpdateInstanceConfig(r.Context(), req.Name, req.IconURL, req.RegistrationMode, req.GuildDiscovery); err != nil {
 		slog.Error("update instance config", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update instance config"})
 		return
@@ -169,8 +167,8 @@ func (h *instanceHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 		if req.RegistrationMode != nil && *req.RegistrationMode != oldCfg.RegistrationMode {
 			metadata["registration_mode"] = map[string]string{"old": oldCfg.RegistrationMode, "new": *req.RegistrationMode}
 		}
-		if req.ServerCreationPolicy != nil && *req.ServerCreationPolicy != oldCfg.ServerCreationPolicy {
-			metadata["server_creation_policy"] = map[string]string{"old": oldCfg.ServerCreationPolicy, "new": *req.ServerCreationPolicy}
+		if req.GuildDiscovery != nil && *req.GuildDiscovery != oldCfg.GuildDiscovery {
+			metadata["guild_discovery"] = map[string]string{"old": oldCfg.GuildDiscovery, "new": *req.GuildDiscovery}
 		}
 		if len(metadata) > 0 {
 			if err := h.store.InsertInstanceAuditLog(r.Context(), userID, nil, "config_change", "instance config updated", metadata); err != nil {
@@ -193,7 +191,7 @@ func (h *instanceHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("config refresh: failed to read voice_key_rotation_hours, using default", "err", vkrhErr)
 			voiceKeyRotationHours = 2
 		}
-		h.cache.Set(newCfg.Name, newCfg.IconURL, newCfg.RegistrationMode, newCfg.ServerCreationPolicy, newCfg.OwnerID != nil, voiceKeyRotationHours)
+		h.cache.Set(newCfg.Name, newCfg.IconURL, newCfg.RegistrationMode, newCfg.GuildDiscovery, voiceKeyRotationHours)
 	}
 
 	w.WriteHeader(http.StatusNoContent)
