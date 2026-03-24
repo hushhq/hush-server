@@ -103,7 +103,7 @@ func (h *instanceHandler) searchUsers(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify role"})
 		return
 	}
-	if role != "admin" && role != "owner" {
+	if role != "admin" {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
 		return
 	}
@@ -133,7 +133,7 @@ func (h *instanceHandler) instanceBan(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify role"})
 		return
 	}
-	if role != "admin" && role != "owner" {
+	if role != "admin" {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
 		return
 	}
@@ -234,7 +234,7 @@ func (h *instanceHandler) instanceUnban(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify role"})
 		return
 	}
-	if role != "admin" && role != "owner" {
+	if role != "admin" {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
 		return
 	}

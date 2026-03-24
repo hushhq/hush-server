@@ -70,14 +70,11 @@ func RequireAuth(jwtSecret string, store db.Store) func(http.Handler) http.Handl
 	}
 }
 
-// permissionLevelToRole converts a permission level integer to the legacy role string.
-// Used by handlers not yet migrated to integer permission levels.
-// TODO(0O-03): Remove once all handlers are updated to use permission levels.
+// permissionLevelToRole converts a guild permission level to a role string.
+// Guild owner maps to "admin" at instance level (owner is a guild concept).
 func permissionLevelToRole(level int) string {
 	switch level {
-	case models.PermissionLevelOwner:
-		return "owner"
-	case models.PermissionLevelAdmin:
+	case models.PermissionLevelOwner, models.PermissionLevelAdmin:
 		return "admin"
 	case models.PermissionLevelMod:
 		return "mod"
