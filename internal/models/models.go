@@ -89,47 +89,69 @@ type SystemMessage struct {
 	CreatedAt time.Time              `json:"createdAt"`
 }
 
+// Permission level constants for server_members.permission_level.
+// Human-readable role labels are stored encrypted in MLS group state.
+const (
+	PermissionLevelMember = 0
+	PermissionLevelMod    = 1
+	PermissionLevelAdmin  = 2
+	PermissionLevelOwner  = 3
+)
+
 // Server is a guild within this Hush instance.
+// All plaintext name/icon/owner fields are removed — the backend is a blind relay.
 type Server struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	IconURL   *string   `json:"iconUrl,omitempty"`
-	OwnerID   string    `json:"ownerId"`
-	CreatedAt time.Time `json:"createdAt"`
+	ID                  string     `json:"id"`
+	EncryptedMetadata   []byte     `json:"encryptedMetadata,omitempty"`
+	MemberCount         int        `json:"memberCount"`
+	TextChannelCount    int        `json:"textChannelCount"`
+	VoiceChannelCount   int        `json:"voiceChannelCount"`
+	StorageBytes        int64      `json:"storageBytes"`
+	MessageCount        int64      `json:"messageCount"`
+	ActiveMembers30d    int        `json:"activeMembers30d"`
+	LastActiveAt        *time.Time `json:"lastActiveAt,omitempty"`
+	AccessPolicy        string     `json:"accessPolicy"`
+	Discoverable        bool       `json:"discoverable"`
+	AdminLabelEncrypted []byte     `json:"adminLabelEncrypted,omitempty"`
+	CreatedAt           time.Time  `json:"createdAt"`
 }
 
-// ServerMember records a user's membership and role within a guild.
+// ServerMember records a user's membership and integer permission level within a guild.
 type ServerMember struct {
-	ServerID string    `json:"serverId"`
-	UserID   string    `json:"userId"`
-	Role     string    `json:"role"`
-	JoinedAt time.Time `json:"joinedAt"`
+	ServerID        string    `json:"serverId"`
+	UserID          string    `json:"userId"`
+	PermissionLevel int       `json:"permissionLevel"`
+	JoinedAt        time.Time `json:"joinedAt"`
 }
 
 // ServerMemberWithUser combines user fields with guild membership info for member-list responses.
 type ServerMemberWithUser struct {
-	ID          string    `json:"id"`
-	Username    string    `json:"username"`
-	DisplayName string    `json:"displayName"`
-	CreatedAt   time.Time `json:"createdAt"`
-	Role        string    `json:"role"`
-	JoinedAt    time.Time `json:"joinedAt"`
+	ID              string    `json:"id"`
+	Username        string    `json:"username"`
+	DisplayName     string    `json:"displayName"`
+	CreatedAt       time.Time `json:"createdAt"`
+	PermissionLevel int       `json:"permissionLevel"`
+	JoinedAt        time.Time `json:"joinedAt"`
 }
 
-// GuildBillingStats is the minimal metadata exposed to the instance operator for billing.
-// Exactly 5 fields — no guild name, no channel list, no member details.
+// GuildBillingStats exposes guild infrastructure metrics to the instance operator.
+// No guild name, channel list, or member details — privacy boundary is preserved.
 type GuildBillingStats struct {
-	ID           string    `json:"id"`
-	MemberCount  int       `json:"memberCount"`
-	StorageBytes int64     `json:"storageBytes"`
-	OwnerID      string    `json:"ownerId"`
-	CreatedAt    time.Time `json:"createdAt"`
+	ID               string     `json:"id"`
+	MemberCount      int        `json:"memberCount"`
+	StorageBytes     int64      `json:"storageBytes"`
+	MessageCount     int64      `json:"messageCount"`
+	ActiveMembers30d int        `json:"activeMembers30d"`
+	LastActiveAt     *time.Time `json:"lastActiveAt,omitempty"`
+	CreatedAt        time.Time  `json:"createdAt"`
 }
 
 // CreateServerRequest is the body for POST /api/servers.
+// EncryptedMetadata may be nil on creation if the client has not yet set up the
+// guild metadata MLS group (two-step creation flow).
 type CreateServerRequest struct {
-	Name       string  `json:"name"`
-	TemplateID *string `json:"templateId,omitempty"`
+	EncryptedMetadata []byte  `json:"encryptedMetadata,omitempty"`
+	TemplateID        *string `json:"templateId,omitempty"`
 }
 
 // TemplateChannel describes a single channel in a server creation template.
@@ -153,14 +175,15 @@ type ServerTemplate struct {
 }
 
 // InstanceConfig is the single-row table that describes this Hush instance.
+// OwnerID and ServerCreationPolicy are removed: instance ownership is API key auth;
+// creation policy is no longer an instance-level concern.
 type InstanceConfig struct {
-	ID                   string    `json:"id"`
-	Name                 string    `json:"name"`
-	IconURL              *string   `json:"iconUrl"`
-	OwnerID              *string   `json:"ownerId"`
-	RegistrationMode     string    `json:"registrationMode"`
-	ServerCreationPolicy string    `json:"serverCreationPolicy"`
-	CreatedAt            time.Time `json:"createdAt"`
+	ID               string    `json:"id"`
+	Name             string    `json:"name"`
+	IconURL          *string   `json:"iconUrl"`
+	RegistrationMode string    `json:"registrationMode"`
+	GuildDiscovery   string    `json:"guildDiscovery"`
+	CreatedAt        time.Time `json:"createdAt"`
 }
 
 // Member is a user with their instance role, used for member list responses.
@@ -173,14 +196,15 @@ type Member struct {
 }
 
 // Channel is a text or voice channel within a guild.
+// Name is removed — it lives in EncryptedMetadata. Type stays plaintext for routing.
 type Channel struct {
-	ID        string  `json:"id"`
-	ServerID  *string `json:"serverId,omitempty"`
-	Name      string  `json:"name"`
-	Type      string  `json:"type"`
-	VoiceMode *string `json:"voiceMode,omitempty"`
-	ParentID  *string `json:"parentId,omitempty"`
-	Position  int     `json:"position"`
+	ID                string  `json:"id"`
+	ServerID          *string `json:"serverId,omitempty"`
+	EncryptedMetadata []byte  `json:"encryptedMetadata,omitempty"`
+	Type              string  `json:"type"`
+	VoiceMode         *string `json:"voiceMode,omitempty"`
+	ParentID          *string `json:"parentId,omitempty"`
+	Position          int     `json:"position"`
 }
 
 // InviteCode is an invite link token for the instance or a specific guild.
@@ -263,20 +287,22 @@ type UnmuteRequest struct {
 	Reason string `json:"reason"`
 }
 
-// ChangeRoleRequest is the body for PUT /api/moderation/role.
-type ChangeRoleRequest struct {
-	UserID  string `json:"userId"`
-	NewRole string `json:"newRole"`
-	Reason  string `json:"reason"`
+// ChangePermissionLevelRequest is the body for PUT /api/servers/:id/members/:userId/level.
+// Replaces the old ChangeRoleRequest — role string is now an opaque integer.
+type ChangePermissionLevelRequest struct {
+	UserID           string `json:"userId"`
+	PermissionLevel  int    `json:"permissionLevel"`
+	Reason           string `json:"reason"`
 }
 
 // CreateChannelRequest is the body for POST /api/channels.
+// Name is removed — clients send an encrypted metadata blob instead.
 type CreateChannelRequest struct {
-	Name      string  `json:"name"`
-	Type      string  `json:"type"`
-	VoiceMode *string `json:"voiceMode,omitempty"`
-	ParentID  *string `json:"parentId,omitempty"`
-	Position  *int    `json:"position,omitempty"`
+	EncryptedMetadata []byte  `json:"encryptedMetadata,omitempty"`
+	Type              string  `json:"type"`
+	VoiceMode         *string `json:"voiceMode,omitempty"`
+	ParentID          *string `json:"parentId,omitempty"`
+	Position          *int    `json:"position,omitempty"`
 }
 
 // MoveChannelRequest is the body for PUT /api/channels/:id/move.
@@ -292,11 +318,12 @@ type CreateInviteRequest struct {
 }
 
 // UpdateInstanceRequest is the body for PATCH /api/instance.
+// ServerCreationPolicy removed; GuildDiscovery added.
 type UpdateInstanceRequest struct {
-	Name                 *string `json:"name,omitempty"`
-	IconURL              *string `json:"iconUrl,omitempty"`
-	RegistrationMode     *string `json:"registrationMode,omitempty"`
-	ServerCreationPolicy *string `json:"serverCreationPolicy,omitempty"`
+	Name             *string `json:"name,omitempty"`
+	IconURL          *string `json:"iconUrl,omitempty"`
+	RegistrationMode *string `json:"registrationMode,omitempty"`
+	GuildDiscovery   *string `json:"guildDiscovery,omitempty"`
 }
 
 // InstanceBan is an instance-level ban record (separate from guild bans).
