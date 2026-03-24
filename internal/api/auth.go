@@ -42,6 +42,7 @@ func AuthRoutes(store db.Store, jwtSecret string, jwtExpiry time.Duration) chi.R
 	h := &authHandler{store: store, jwtSecret: jwtSecret, jwtExpiry: jwtExpiry}
 
 	r.Post("/register", h.register)
+	r.Get("/check-username/{username}", h.checkUsername)
 	r.Post("/challenge", h.challenge)
 	r.Post("/verify", h.verify)
 	r.Post("/guest", h.guest)
@@ -339,6 +340,23 @@ func (h *authHandler) me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, user)
+}
+
+// checkUsername handles GET /api/auth/check-username/{username}.
+// Returns {"available": true/false}. Public endpoint — no auth required.
+func (h *authHandler) checkUsername(w http.ResponseWriter, r *http.Request) {
+	username := strings.TrimSpace(chi.URLParam(r, "username"))
+	if err := validateUsername(username); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	_, err := h.store.GetUserByUsername(r.Context(), username)
+	if err != nil {
+		// pgx.ErrNoRows means username is available.
+		writeJSON(w, http.StatusOK, map[string]bool{"available": true})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"available": false})
 }
 
 func validateUsername(s string) error {
