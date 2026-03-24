@@ -3,6 +3,10 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -11,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"hush.app/server/internal/auth"
 	"hush.app/server/internal/models"
 
 	"github.com/google/uuid"
@@ -70,224 +73,42 @@ func decodeErrorResponse(t *testing.T, rr *httptest.ResponseRecorder) map[string
 	return resp
 }
 
-func defaultCreateUser() func(ctx context.Context, username, displayName string, passwordHash *string) (*models.User, error) {
-	return func(_ context.Context, username, displayName string, _ *string) (*models.User, error) {
-		return &models.User{
-			ID:          uuid.New().String(),
-			Username:    username,
-			DisplayName: displayName,
-			Role:        "member",
-			CreatedAt:   time.Now(),
-		}, nil
+// newTestUser returns a minimal User for use in mock return values.
+func newTestUser(username string) *models.User {
+	return &models.User{
+		ID:          uuid.New().String(),
+		Username:    username,
+		DisplayName: username,
+		Role:        "member",
+		CreatedAt:   time.Now(),
 	}
 }
 
-// ---------- Register ----------
-
-func TestRegister_ValidInput_Returns200(t *testing.T) {
-	store := &mockStore{createUserFn: defaultCreateUser()}
-	router := newTestRouter(store)
-
-	rr := postJSON(router, "/register", models.RegisterRequest{
-		Username:    "alice",
-		Password:    "securepass",
-		DisplayName: "Alice",
-	})
-
-	assert.Equal(t, http.StatusOK, rr.Code)
-	resp := decodeAuthResponse(t, rr)
-	assert.NotEmpty(t, resp.Token)
-	assert.Equal(t, "alice", resp.User.Username)
-	assert.Equal(t, "Alice", resp.User.DisplayName)
-}
-
-func TestRegister_DuplicateUsername_Returns409(t *testing.T) {
-	store := &mockStore{
-		createUserFn: func(_ context.Context, _, _ string, _ *string) (*models.User, error) {
-			return nil, errors.New("duplicate key value violates unique constraint")
-		},
-	}
-	router := newTestRouter(store)
-
-	rr := postJSON(router, "/register", models.RegisterRequest{
-		Username: "alice",
-		Password: "securepass",
-	})
-
-	assert.Equal(t, http.StatusConflict, rr.Code)
-	resp := decodeErrorResponse(t, rr)
-	assert.Contains(t, resp["error"], "username already taken")
-}
-
-func TestRegister_ShortPassword_Returns400(t *testing.T) {
-	store := &mockStore{}
-	router := newTestRouter(store)
-
-	rr := postJSON(router, "/register", models.RegisterRequest{
-		Username: "alice",
-		Password: "short",
-	})
-
-	assert.Equal(t, http.StatusBadRequest, rr.Code)
-	resp := decodeErrorResponse(t, rr)
-	assert.Contains(t, resp["error"], "password must be at least 8 characters")
-}
-
-func TestRegister_EmptyUsername_Returns400(t *testing.T) {
-	store := &mockStore{}
-	router := newTestRouter(store)
-
-	rr := postJSON(router, "/register", models.RegisterRequest{
-		Username: "",
-		Password: "securepass",
-	})
-
-	assert.Equal(t, http.StatusBadRequest, rr.Code)
-	resp := decodeErrorResponse(t, rr)
-	assert.Contains(t, resp["error"], "username is required")
-}
-
-func TestRegister_InvalidUsernameChars_Returns400(t *testing.T) {
-	store := &mockStore{}
-	router := newTestRouter(store)
-
-	invalidNames := []string{"user name", "user@name", "user!name", "user name"}
-	for _, name := range invalidNames {
-		rr := postJSON(router, "/register", models.RegisterRequest{
-			Username: name,
-			Password: "securepass",
-		})
-
-		assert.Equal(t, http.StatusBadRequest, rr.Code, "expected 400 for username %q", name)
-		resp := decodeErrorResponse(t, rr)
-		assert.Contains(t, resp["error"], "username may only contain")
-	}
-}
-
-// ---------- Login ----------
-
-func TestLogin_ValidCredentials_Returns200(t *testing.T) {
-	hash, err := auth.HashPassword("securepass")
+// generateEd25519KeyPair generates an Ed25519 keypair and returns the base64-
+// encoded public key and the raw private key for signing.
+func generateEd25519KeyPair(t *testing.T) (pubBase64 string, priv ed25519.PrivateKey) {
+	t.Helper()
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
-
-	userID := uuid.New().String()
-	store := &mockStore{
-		getUserByUsernameFn: func(_ context.Context, _ string) (*models.User, error) {
-			return &models.User{
-				ID:           userID,
-				Username:     "alice",
-				PasswordHash: &hash,
-				DisplayName:  "Alice",
-				CreatedAt:    time.Now(),
-			}, nil
-		},
-	}
-	router := newTestRouter(store)
-
-	rr := postJSON(router, "/login", models.LoginRequest{
-		Username: "alice",
-		Password: "securepass",
-	})
-
-	assert.Equal(t, http.StatusOK, rr.Code)
-	resp := decodeAuthResponse(t, rr)
-	assert.NotEmpty(t, resp.Token)
-	assert.Equal(t, "alice", resp.User.Username)
+	return base64.StdEncoding.EncodeToString(pub), priv
 }
 
-func TestLogin_WrongPassword_Returns401(t *testing.T) {
-	hash, err := auth.HashPassword("securepass")
-	require.NoError(t, err)
-
-	store := &mockStore{
-		getUserByUsernameFn: func(_ context.Context, _ string) (*models.User, error) {
-			return &models.User{
-				ID:           uuid.New().String(),
-				Username:     "alice",
-				PasswordHash: &hash,
-				DisplayName:  "Alice",
-			}, nil
-		},
+// signNonce signs a nonce hex string with the given private key and returns
+// the base64-encoded signature.
+func signNonce(nonce string, priv ed25519.PrivateKey) string {
+	nonceBytes, err := hex.DecodeString(nonce)
+	if err != nil {
+		panic("signNonce: invalid hex nonce: " + err.Error())
 	}
-	router := newTestRouter(store)
-
-	rr := postJSON(router, "/login", models.LoginRequest{
-		Username: "alice",
-		Password: "wrongpassword",
-	})
-
-	assert.Equal(t, http.StatusUnauthorized, rr.Code)
-	resp := decodeErrorResponse(t, rr)
-	assert.Contains(t, resp["error"], "invalid username or password")
-}
-
-func TestLogin_NonexistentUser_Returns401(t *testing.T) {
-	store := &mockStore{
-		getUserByUsernameFn: func(_ context.Context, _ string) (*models.User, error) {
-			return nil, errors.New("not found")
-		},
-	}
-	router := newTestRouter(store)
-
-	rr := postJSON(router, "/login", models.LoginRequest{
-		Username: "ghost",
-		Password: "securepass",
-	})
-
-	assert.Equal(t, http.StatusUnauthorized, rr.Code)
-	resp := decodeErrorResponse(t, rr)
-	assert.Contains(t, resp["error"], "invalid username or password")
-}
-
-func TestLogin_OAuthUserNoPassword_Returns401(t *testing.T) {
-	store := &mockStore{
-		getUserByUsernameFn: func(_ context.Context, _ string) (*models.User, error) {
-			return &models.User{
-				ID:           uuid.New().String(),
-				Username:     "oauth_user",
-				PasswordHash: nil,
-				DisplayName:  "OAuth User",
-			}, nil
-		},
-	}
-	router := newTestRouter(store)
-
-	rr := postJSON(router, "/login", models.LoginRequest{
-		Username: "oauth_user",
-		Password: "securepass",
-	})
-
-	assert.Equal(t, http.StatusUnauthorized, rr.Code)
-	resp := decodeErrorResponse(t, rr)
-	assert.Contains(t, resp["error"], "invalid username or password")
-}
-
-// ---------- Guest ----------
-
-func TestGuest_CreatesGuestUser_Returns200(t *testing.T) {
-	store := &mockStore{createUserFn: defaultCreateUser()}
-	router := newTestRouter(store)
-
-	rr := postJSON(router, "/guest", nil)
-
-	assert.Equal(t, http.StatusOK, rr.Code)
-	resp := decodeAuthResponse(t, rr)
-	assert.NotEmpty(t, resp.Token)
-	assert.True(t, strings.HasPrefix(resp.User.Username, "guest_"),
-		"expected username to start with guest_, got %q", resp.User.Username)
+	sig := ed25519.Sign(priv, nonceBytes)
+	return base64.StdEncoding.EncodeToString(sig)
 }
 
 // ---------- ValidateUsername (unit) ----------
 
 func TestValidateUsername_ValidInput_ReturnsNil(t *testing.T) {
 	validNames := []string{
-		"alice",
-		"Alice123",
-		"user.name",
-		"user_name",
-		"user-name",
-		"a",
-		"A1._-b",
+		"alice", "Alice123", "user.name", "user_name", "user-name", "a", "A1._-b",
 	}
 	for _, name := range validNames {
 		assert.NoError(t, validateUsername(name), "expected nil for %q", name)
@@ -308,13 +129,7 @@ func TestValidateUsername_TooLong_ReturnsError(t *testing.T) {
 }
 
 func TestValidateUsername_InvalidChars_ReturnsError(t *testing.T) {
-	invalidNames := []string{
-		"has space",
-		"has@at",
-		"has!bang",
-		"has#hash",
-		"has$dollar",
-	}
+	invalidNames := []string{"has space", "has@at", "has!bang", "has#hash", "has$dollar"}
 	for _, name := range invalidNames {
 		err := validateUsername(name)
 		assert.Error(t, err, "expected error for %q", name)
@@ -322,113 +137,354 @@ func TestValidateUsername_InvalidChars_ReturnsError(t *testing.T) {
 	}
 }
 
-// ---------- Registration — all users are members (no owner bootstrap) ----------
+// ---------- Register ----------
 
-func TestRegister_FirstUserIsMember(t *testing.T) {
-	userID := uuid.New().String()
+func TestRegister_Success(t *testing.T) {
+	pubBase64, _ := generateEd25519KeyPair(t)
+	user := newTestUser("alice")
+
 	store := &mockStore{
-		createUserFn: func(_ context.Context, username, displayName string, _ *string) (*models.User, error) {
-			return &models.User{
-				ID:          userID,
-				Username:    username,
-				DisplayName: displayName,
-				Role:        "member",
-				CreatedAt:   time.Now(),
-			}, nil
+		createUserWithPublicKeyFn: func(_ context.Context, username, displayName string, _ []byte) (*models.User, error) {
+			return user, nil
 		},
 	}
 	router := newTestRouter(store)
 
 	rr := postJSON(router, "/register", models.RegisterRequest{
-		Username: "alice",
-		Password: "securepass",
+		Username:  "alice",
+		PublicKey: pubBase64,
 	})
 
 	assert.Equal(t, http.StatusOK, rr.Code)
 	resp := decodeAuthResponse(t, rr)
-	// Instance admin is now API-key-based; all registered users get "member" role.
-	assert.Equal(t, "member", resp.User.Role)
+	assert.NotEmpty(t, resp.Token)
+	assert.Equal(t, "alice", resp.User.Username)
 }
 
-// ---------- Instance ban checks ----------
+func TestRegister_EmptyUsername_Returns400(t *testing.T) {
+	pubBase64, _ := generateEd25519KeyPair(t)
+	store := &mockStore{}
+	router := newTestRouter(store)
 
-func TestLogin_BannedUser_Returns403(t *testing.T) {
-	hash, err := auth.HashPassword("securepass")
-	require.NoError(t, err)
+	rr := postJSON(router, "/register", models.RegisterRequest{
+		Username:  "",
+		PublicKey: pubBase64,
+	})
 
-	userID := uuid.New().String()
-	banReason := "spam and abuse"
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	resp := decodeErrorResponse(t, rr)
+	assert.Contains(t, resp["error"], "username is required")
+}
+
+func TestRegister_InvalidPublicKeyLength_Returns400(t *testing.T) {
+	store := &mockStore{}
+	router := newTestRouter(store)
+
+	// 16 bytes instead of 32.
+	shortKey := base64.StdEncoding.EncodeToString(make([]byte, 16))
+	rr := postJSON(router, "/register", models.RegisterRequest{
+		Username:  "alice",
+		PublicKey: shortKey,
+	})
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	resp := decodeErrorResponse(t, rr)
+	assert.Contains(t, resp["error"], "32 bytes")
+}
+
+func TestRegister_InvalidPublicKeyEncoding_Returns400(t *testing.T) {
+	store := &mockStore{}
+	router := newTestRouter(store)
+
+	rr := postJSON(router, "/register", models.RegisterRequest{
+		Username:  "alice",
+		PublicKey: "not-valid-base64!!!",
+	})
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestRegister_DuplicatePublicKey_Returns409(t *testing.T) {
+	pubBase64, _ := generateEd25519KeyPair(t)
 	store := &mockStore{
-		getUserByUsernameFn: func(_ context.Context, _ string) (*models.User, error) {
-			return &models.User{
-				ID:           userID,
-				Username:     "alice",
-				PasswordHash: &hash,
-				DisplayName:  "Alice",
-				CreatedAt:    time.Now(),
-			}, nil
-		},
-		getActiveInstanceBanFn: func(_ context.Context, uid string) (*models.InstanceBan, error) {
-			assert.Equal(t, userID, uid)
-			return &models.InstanceBan{
-				ID:     uuid.New().String(),
-				UserID: uid,
-				Reason: banReason,
-			}, nil
+		createUserWithPublicKeyFn: func(_ context.Context, _, _ string, _ []byte) (*models.User, error) {
+			return nil, errors.New("duplicate key value violates unique constraint on root_public_key")
 		},
 	}
 	router := newTestRouter(store)
 
-	rr := postJSON(router, "/login", models.LoginRequest{
-		Username: "alice",
-		Password: "securepass",
+	rr := postJSON(router, "/register", models.RegisterRequest{
+		Username:  "alice",
+		PublicKey: pubBase64,
 	})
 
-	assert.Equal(t, http.StatusForbidden, rr.Code)
+	assert.Equal(t, http.StatusConflict, rr.Code)
 	resp := decodeErrorResponse(t, rr)
-	assert.Contains(t, resp["error"], "suspended")
-	assert.Contains(t, resp["error"], banReason)
+	assert.Contains(t, resp["error"], "Public key already registered")
 }
 
-func TestRegister_BannedUsername_Returns403(t *testing.T) {
-	existingUserID := uuid.New().String()
-	banReason := "prior violation"
+func TestRegister_DuplicateUsername_Returns409(t *testing.T) {
+	pubBase64, _ := generateEd25519KeyPair(t)
 	store := &mockStore{
-		getUserByUsernameFn: func(_ context.Context, username string) (*models.User, error) {
-			// username already exists (owned by a banned user)
-			return &models.User{
-				ID:          existingUserID,
-				Username:    username,
-				DisplayName: username,
-				Role:        "member",
-				CreatedAt:   time.Now(),
-			}, nil
+		createUserWithPublicKeyFn: func(_ context.Context, _, _ string, _ []byte) (*models.User, error) {
+			return nil, errors.New("duplicate key value violates unique constraint")
 		},
-		getActiveInstanceBanFn: func(_ context.Context, uid string) (*models.InstanceBan, error) {
-			assert.Equal(t, existingUserID, uid)
-			return &models.InstanceBan{
-				ID:     uuid.New().String(),
-				UserID: uid,
-				Reason: banReason,
+	}
+	router := newTestRouter(store)
+
+	rr := postJSON(router, "/register", models.RegisterRequest{
+		Username:  "alice",
+		PublicKey: pubBase64,
+	})
+
+	assert.Equal(t, http.StatusConflict, rr.Code)
+	resp := decodeErrorResponse(t, rr)
+	assert.Contains(t, resp["error"], "Username already taken")
+}
+
+func TestRegister_ClosedMode_Returns403(t *testing.T) {
+	pubBase64, _ := generateEd25519KeyPair(t)
+	store := &mockStore{
+		getInstanceConfigFn: func(_ context.Context) (*models.InstanceConfig, error) {
+			return &models.InstanceConfig{
+				ID:               "inst-1",
+				RegistrationMode: "closed",
 			}, nil
 		},
 	}
 	router := newTestRouter(store)
 
 	rr := postJSON(router, "/register", models.RegisterRequest{
-		Username: "alice",
-		Password: "securepass",
+		Username:  "alice",
+		PublicKey: pubBase64,
 	})
 
 	assert.Equal(t, http.StatusForbidden, rr.Code)
 	resp := decodeErrorResponse(t, rr)
-	assert.Contains(t, resp["error"], "Registration blocked")
-	assert.Contains(t, resp["error"], banReason)
+	assert.Contains(t, resp["error"], "closed")
 }
 
-func TestRegister_SubsequentUserIsMember(t *testing.T) {
+// ---------- Challenge ----------
+
+func TestChallenge_ReturnsNonce(t *testing.T) {
+	pubBase64, _ := generateEd25519KeyPair(t)
+	store := &mockStore{}
+	router := newTestRouter(store)
+
+	rr := postJSON(router, "/challenge", models.ChallengeRequest{
+		PublicKey: pubBase64,
+	})
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	var body map[string]string
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&body))
+	assert.NotEmpty(t, body["nonce"])
+	// Nonce must be a 64-char hex string (32 bytes).
+	assert.Len(t, body["nonce"], 64, "nonce should be 64 hex chars (32 bytes)")
+}
+
+func TestChallenge_InvalidPublicKey_Returns400(t *testing.T) {
+	store := &mockStore{}
+	router := newTestRouter(store)
+
+	rr := postJSON(router, "/challenge", models.ChallengeRequest{
+		PublicKey: "not-base64!!!",
+	})
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+// ---------- Verify ----------
+
+// inMemoryNonceStore wires up InsertAuthNonce + ConsumeAuthNonce with an in-memory map
+// so verify tests can exercise the full challenge -> sign -> verify flow.
+type inMemoryNonceStore struct {
+	nonces map[string][]byte // nonce -> publicKey
+}
+
+func newInMemoryNonceStore() *inMemoryNonceStore {
+	return &inMemoryNonceStore{nonces: make(map[string][]byte)}
+}
+
+func (s *inMemoryNonceStore) insertFn(_ context.Context, nonce string, pubKey []byte, _ time.Time) error {
+	s.nonces[nonce] = pubKey
+	return nil
+}
+
+func (s *inMemoryNonceStore) consumeFn(_ context.Context, nonce string) ([]byte, error) {
+	pk, ok := s.nonces[nonce]
+	if !ok {
+		return nil, errors.New("sql: no rows in result set")
+	}
+	delete(s.nonces, nonce)
+	return pk, nil
+}
+
+func TestVerify_ValidSignature_Returns200(t *testing.T) {
+	pubBase64, priv := generateEd25519KeyPair(t)
+	user := newTestUser("alice")
+	nonceStore := newInMemoryNonceStore()
+
 	store := &mockStore{
-		createUserFn: func(_ context.Context, username, displayName string, _ *string) (*models.User, error) {
+		insertAuthNonceFn:  nonceStore.insertFn,
+		consumeAuthNonceFn: nonceStore.consumeFn,
+		getUserByPublicKeyFn: func(_ context.Context, _ []byte) (*models.User, error) {
+			return user, nil
+		},
+	}
+	router := newTestRouter(store)
+
+	// Step 1: get nonce.
+	rr := postJSON(router, "/challenge", models.ChallengeRequest{PublicKey: pubBase64})
+	require.Equal(t, http.StatusOK, rr.Code)
+	var challengeResp map[string]string
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&challengeResp))
+	nonce := challengeResp["nonce"]
+
+	// Step 2: sign and verify.
+	sig := signNonce(nonce, priv)
+	rr = postJSON(router, "/verify", models.VerifyRequest{
+		PublicKey: pubBase64,
+		Nonce:     nonce,
+		Signature: sig,
+	})
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	resp := decodeAuthResponse(t, rr)
+	assert.NotEmpty(t, resp.Token)
+	assert.Equal(t, "alice", resp.User.Username)
+}
+
+func TestVerify_ExpiredNonce_Returns401(t *testing.T) {
+	pubBase64, _ := generateEd25519KeyPair(t)
+
+	store := &mockStore{
+		consumeAuthNonceFn: func(_ context.Context, _ string) ([]byte, error) {
+			return nil, errors.New("sql: no rows in result set")
+		},
+	}
+	router := newTestRouter(store)
+
+	rr := postJSON(router, "/verify", models.VerifyRequest{
+		PublicKey: pubBase64,
+		Nonce:     "aabbccdd",
+		Signature: base64.StdEncoding.EncodeToString(make([]byte, 64)),
+	})
+
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+	resp := decodeErrorResponse(t, rr)
+	assert.Contains(t, resp["error"], "Challenge expired")
+}
+
+func TestVerify_BadSignature_Returns401(t *testing.T) {
+	pubBase64, _ := generateEd25519KeyPair(t)
+	_, otherPriv := generateEd25519KeyPair(t)
+
+	nonceStore := newInMemoryNonceStore()
+	store := &mockStore{
+		insertAuthNonceFn:  nonceStore.insertFn,
+		consumeAuthNonceFn: nonceStore.consumeFn,
+		getUserByPublicKeyFn: func(_ context.Context, _ []byte) (*models.User, error) {
+			return newTestUser("alice"), nil
+		},
+	}
+	router := newTestRouter(store)
+
+	// Get a valid nonce.
+	rr := postJSON(router, "/challenge", models.ChallengeRequest{PublicKey: pubBase64})
+	require.Equal(t, http.StatusOK, rr.Code)
+	var challengeResp map[string]string
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&challengeResp))
+	nonce := challengeResp["nonce"]
+
+	// Sign with the wrong private key.
+	badSig := signNonce(nonce, otherPriv)
+	rr = postJSON(router, "/verify", models.VerifyRequest{
+		PublicKey: pubBase64,
+		Nonce:     nonce,
+		Signature: badSig,
+	})
+
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+	resp := decodeErrorResponse(t, rr)
+	assert.Equal(t, "Authentication failed", resp["error"])
+}
+
+func TestVerify_UnknownKey_Returns401(t *testing.T) {
+	pubBase64, priv := generateEd25519KeyPair(t)
+	nonceStore := newInMemoryNonceStore()
+
+	store := &mockStore{
+		insertAuthNonceFn:  nonceStore.insertFn,
+		consumeAuthNonceFn: nonceStore.consumeFn,
+		getUserByPublicKeyFn: func(_ context.Context, _ []byte) (*models.User, error) {
+			return nil, errors.New("user not found")
+		},
+	}
+	router := newTestRouter(store)
+
+	rr := postJSON(router, "/challenge", models.ChallengeRequest{PublicKey: pubBase64})
+	require.Equal(t, http.StatusOK, rr.Code)
+	var challengeResp map[string]string
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&challengeResp))
+	nonce := challengeResp["nonce"]
+
+	sig := signNonce(nonce, priv)
+	rr = postJSON(router, "/verify", models.VerifyRequest{
+		PublicKey: pubBase64,
+		Nonce:     nonce,
+		Signature: sig,
+	})
+
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+	resp := decodeErrorResponse(t, rr)
+	assert.Equal(t, "Authentication failed", resp["error"])
+}
+
+func TestVerify_InstanceBanned_Returns403(t *testing.T) {
+	pubBase64, priv := generateEd25519KeyPair(t)
+	user := newTestUser("alice")
+	nonceStore := newInMemoryNonceStore()
+
+	store := &mockStore{
+		insertAuthNonceFn:  nonceStore.insertFn,
+		consumeAuthNonceFn: nonceStore.consumeFn,
+		getUserByPublicKeyFn: func(_ context.Context, _ []byte) (*models.User, error) {
+			return user, nil
+		},
+		getActiveInstanceBanFn: func(_ context.Context, _ string) (*models.InstanceBan, error) {
+			return &models.InstanceBan{
+				ID:     uuid.New().String(),
+				UserID: user.ID,
+				Reason: "spam",
+			}, nil
+		},
+	}
+	router := newTestRouter(store)
+
+	rr := postJSON(router, "/challenge", models.ChallengeRequest{PublicKey: pubBase64})
+	require.Equal(t, http.StatusOK, rr.Code)
+	var challengeResp map[string]string
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&challengeResp))
+	nonce := challengeResp["nonce"]
+
+	sig := signNonce(nonce, priv)
+	rr = postJSON(router, "/verify", models.VerifyRequest{
+		PublicKey: pubBase64,
+		Nonce:     nonce,
+		Signature: sig,
+	})
+
+	assert.Equal(t, http.StatusForbidden, rr.Code)
+	resp := decodeErrorResponse(t, rr)
+	assert.Contains(t, resp["error"], "banned")
+}
+
+// ---------- Guest ----------
+
+func TestGuest_ReturnsJWT(t *testing.T) {
+	store := &mockStore{
+		createUserWithPublicKeyFn: func(_ context.Context, username, displayName string, _ []byte) (*models.User, error) {
 			return &models.User{
 				ID:          uuid.New().String(),
 				Username:    username,
@@ -440,12 +496,12 @@ func TestRegister_SubsequentUserIsMember(t *testing.T) {
 	}
 	router := newTestRouter(store)
 
-	rr := postJSON(router, "/register", models.RegisterRequest{
-		Username: "bob",
-		Password: "securepass",
-	})
+	rr := postJSON(router, "/guest", nil)
 
 	assert.Equal(t, http.StatusOK, rr.Code)
 	resp := decodeAuthResponse(t, rr)
-	assert.Equal(t, "member", resp.User.Role)
+	assert.NotEmpty(t, resp.Token)
+	assert.True(t, strings.HasPrefix(resp.User.Username, "guest_"),
+		"expected username to start with guest_, got %q", resp.User.Username)
+	assert.Equal(t, "Guest", resp.User.DisplayName)
 }
