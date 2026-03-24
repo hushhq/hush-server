@@ -2,14 +2,15 @@ package models
 
 import "time"
 
-// User is the domain user. PasswordHash is nil for OAuth/guest users.
+// User is the domain user. RootPublicKey is the Ed25519 root public key
+// derived from the user's BIP39 mnemonic; never included in JSON responses.
 type User struct {
-	ID           string     `json:"id"`
-	Username     string     `json:"username"`
-	PasswordHash *string    `json:"-"`
-	DisplayName  string     `json:"displayName"`
-	Role         string     `json:"role"`
-	CreatedAt    time.Time  `json:"createdAt"`
+	ID            string    `json:"id"`
+	Username      string    `json:"username"`
+	RootPublicKey []byte    `json:"-"`
+	DisplayName   string    `json:"displayName"`
+	Role          string    `json:"role"`
+	CreatedAt     time.Time `json:"createdAt"`
 }
 
 // Session is a stored session (token_hash, expires_at). ID is the session UUID.
@@ -21,16 +22,47 @@ type Session struct {
 }
 
 // RegisterRequest is the body for POST /api/auth/register.
+// PublicKey is the base64-encoded Ed25519 root public key derived from the
+// user's BIP39 mnemonic. No password field — identity is cryptographic.
 type RegisterRequest struct {
 	Username    string `json:"username"`
-	Password    string `json:"password"`
 	DisplayName string `json:"displayName"`
+	PublicKey   string `json:"publicKey"` // base64-encoded Ed25519 public key
 }
 
-// LoginRequest is the body for POST /api/auth/login.
-type LoginRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+// ChallengeRequest is the body for POST /api/auth/challenge.
+// The server returns a short-lived nonce that the client must sign.
+type ChallengeRequest struct {
+	PublicKey string `json:"publicKey"` // base64-encoded Ed25519 public key
+}
+
+// VerifyRequest is the body for POST /api/auth/verify.
+// The client signs the nonce received from /challenge and submits it here.
+type VerifyRequest struct {
+	PublicKey string `json:"publicKey"` // base64-encoded Ed25519 public key
+	Nonce     string `json:"nonce"`     // hex nonce from /challenge response
+	Signature string `json:"signature"` // base64-encoded Ed25519 signature over nonce bytes
+}
+
+// AuthNonce is a stored challenge nonce pending signature verification.
+type AuthNonce struct {
+	Nonce         string    `json:"-"`
+	UserPublicKey []byte    `json:"-"`
+	ExpiresAt     time.Time `json:"-"`
+}
+
+// DeviceKey records a certified public key for a user's device.
+// The first device (registered with root key) has a nil Certificate.
+// Subsequent devices must carry a Certificate = Sign(root_priv, device_pub).
+type DeviceKey struct {
+	ID              string     `json:"id"`
+	UserID          string     `json:"userId"`
+	DeviceID        string     `json:"deviceId"`
+	DevicePublicKey []byte     `json:"-"` // never sent in JSON responses
+	Certificate     []byte     `json:"-"` // root-key signature over DevicePublicKey; nil for first device
+	CertifiedAt     time.Time  `json:"certifiedAt"`
+	LastSeen        *time.Time `json:"lastSeen,omitempty"`
+	Label           string     `json:"label,omitempty"`
 }
 
 // AuthResponse is returned by register, login, guest (token + user).
