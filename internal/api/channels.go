@@ -65,7 +65,12 @@ func (h *channelsHandler) createChannel(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
 	}
-	// TODO(0O-03): Name validation removed — channel name is now encrypted in EncryptedMetadata.
+	// Plaintext name fallback: when MLS is not bootstrapped, clients send Name
+	// instead of EncryptedMetadata. Wrap it as a JSON blob so the client can
+	// read it back without a decryption key.
+	if len(req.EncryptedMetadata) == 0 && req.Name != "" {
+		req.EncryptedMetadata = []byte(`{"n":"` + req.Name + `","d":""}`)
+	}
 	if req.Type != "text" && req.Type != "voice" && req.Type != "category" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "type must be text, voice, or category"})
 		return

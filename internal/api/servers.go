@@ -72,6 +72,11 @@ func (h *serversHandler) createServer(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
 	}
+	// Plaintext name fallback: when MLS is not bootstrapped, clients send Name
+	// instead of EncryptedMetadata. Wrap it as a JSON blob for the metadata column.
+	if len(req.EncryptedMetadata) == 0 && req.Name != "" {
+		req.EncryptedMetadata = []byte(`{"n":"` + req.Name + `","d":""}`)
+	}
 	server, err := h.store.CreateServer(r.Context(), req.EncryptedMetadata)
 	if err != nil {
 		slog.Error("createServer: create server", "err", err)

@@ -185,6 +185,7 @@ type GuildBillingStats struct {
 // guild metadata MLS group (two-step creation flow).
 type CreateServerRequest struct {
 	EncryptedMetadata []byte  `json:"encryptedMetadata,omitempty"`
+	Name              string  `json:"name,omitempty"`
 	TemplateID        *string `json:"templateId,omitempty"`
 }
 
@@ -330,9 +331,12 @@ type ChangePermissionLevelRequest struct {
 }
 
 // CreateChannelRequest is the body for POST /api/channels.
-// Name is removed — clients send an encrypted metadata blob instead.
+// Clients should send EncryptedMetadata (MLS-encrypted blob). When MLS is not
+// yet bootstrapped, the plaintext Name fallback is accepted and stored as a
+// JSON metadata blob so the channel is still usable.
 type CreateChannelRequest struct {
 	EncryptedMetadata []byte  `json:"encryptedMetadata,omitempty"`
+	Name              string  `json:"name,omitempty"`
 	Type              string  `json:"type"`
 	VoiceMode         *string `json:"voiceMode,omitempty"`
 	ParentID          *string `json:"parentId,omitempty"`
