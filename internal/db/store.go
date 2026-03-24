@@ -12,9 +12,38 @@ import (
 // *Pool satisfies this interface. Use for dependency injection in tests.
 type Store interface {
 	// User/session methods
-	CreateUser(ctx context.Context, username, displayName string, passwordHash *string) (*models.User, error)
+
+	// CreateUserWithPublicKey inserts a user with a BIP39 Ed25519 root public key
+	// instead of a password. Returns the created user with a server-assigned ID.
+	CreateUserWithPublicKey(ctx context.Context, username, displayName string, publicKey []byte) (*models.User, error)
+	// GetUserByPublicKey returns the user whose root_public_key matches the
+	// given 32-byte Ed25519 public key, or sql.ErrNoRows if not found.
+	GetUserByPublicKey(ctx context.Context, publicKey []byte) (*models.User, error)
 	GetUserByUsername(ctx context.Context, username string) (*models.User, error)
 	GetUserByID(ctx context.Context, id string) (*models.User, error)
+
+	// BIP39 auth nonce methods
+	// InsertAuthNonce stores a challenge nonce associated with a public key.
+	InsertAuthNonce(ctx context.Context, nonce string, publicKey []byte, expiresAt time.Time) error
+	// ConsumeAuthNonce atomically deletes the nonce (if present and unexpired)
+	// and returns the associated public key. Returns sql.ErrNoRows if absent or expired.
+	ConsumeAuthNonce(ctx context.Context, nonce string) (publicKey []byte, err error)
+	// PurgeExpiredNonces deletes all auth_nonces where expires_at < now() and
+	// returns the number of rows deleted.
+	PurgeExpiredNonces(ctx context.Context) (int64, error)
+
+	// Device key methods
+	// InsertDeviceKey stores a certified device public key for a user.
+	// certificate may be nil for the first (root) device.
+	InsertDeviceKey(ctx context.Context, userID, deviceID string, devicePublicKey, certificate []byte) error
+	// ListDeviceKeys returns all device keys belonging to a user.
+	ListDeviceKeys(ctx context.Context, userID string) ([]models.DeviceKey, error)
+	// RevokeDeviceKey deletes a specific device key. No-op if not found.
+	RevokeDeviceKey(ctx context.Context, userID, deviceID string) error
+	// RevokeAllDeviceKeys deletes every device key for a user (used on account wipe).
+	RevokeAllDeviceKeys(ctx context.Context, userID string) error
+	// UpdateDeviceLastSeen sets last_seen = now() for the given device.
+	UpdateDeviceLastSeen(ctx context.Context, userID, deviceID string) error
 	CreateSession(ctx context.Context, sessionID, userID, tokenHash string, expiresAt time.Time) (*models.Session, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash string) (*models.Session, error)
 	DeleteSessionByID(ctx context.Context, sessionID string) error

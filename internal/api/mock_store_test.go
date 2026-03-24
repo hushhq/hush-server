@@ -23,10 +23,23 @@ var _ db.Store = (*mockStore)(nil)
 // mockStore implements db.Store with function fields for per-test customization.
 // Unset fields return sensible zero values so tests only set what they care about.
 type mockStore struct {
-	// User/session
-	createUserFn            func(ctx context.Context, username, displayName string, passwordHash *string) (*models.User, error)
-	getUserByUsernameFn     func(ctx context.Context, username string) (*models.User, error)
-	getUserByIDFn           func(ctx context.Context, id string) (*models.User, error)
+	// User/session — BIP39 public-key identity
+	createUserWithPublicKeyFn func(ctx context.Context, username, displayName string, publicKey []byte) (*models.User, error)
+	getUserByPublicKeyFn      func(ctx context.Context, publicKey []byte) (*models.User, error)
+	getUserByUsernameFn       func(ctx context.Context, username string) (*models.User, error)
+	getUserByIDFn             func(ctx context.Context, id string) (*models.User, error)
+
+	// BIP39 auth nonces
+	insertAuthNonceFn   func(ctx context.Context, nonce string, publicKey []byte, expiresAt time.Time) error
+	consumeAuthNonceFn  func(ctx context.Context, nonce string) ([]byte, error)
+	purgeExpiredNoncesFn func(ctx context.Context) (int64, error)
+
+	// Device keys
+	insertDeviceKeyFn      func(ctx context.Context, userID, deviceID string, devicePublicKey, certificate []byte) error
+	listDeviceKeysFn       func(ctx context.Context, userID string) ([]models.DeviceKey, error)
+	revokeDeviceKeyFn      func(ctx context.Context, userID, deviceID string) error
+	revokeAllDeviceKeysFn  func(ctx context.Context, userID string) error
+	updateDeviceLastSeenFn func(ctx context.Context, userID, deviceID string) error
 	createSessionFn         func(ctx context.Context, sessionID, userID, tokenHash string, expiresAt time.Time) (*models.Session, error)
 	getSessionByTokenHashFn func(ctx context.Context, tokenHash string) (*models.Session, error)
 	deleteSessionByIDFn     func(ctx context.Context, sessionID string) error
@@ -158,11 +171,18 @@ type mockStore struct {
 	updateGuildChannelCountsFn   func(ctx context.Context, serverID string) error
 }
 
-// ---------- User/session ----------
+// ---------- User/session — BIP39 public-key identity ----------
 
-func (m *mockStore) CreateUser(ctx context.Context, username, displayName string, passwordHash *string) (*models.User, error) {
-	if m.createUserFn != nil {
-		return m.createUserFn(ctx, username, displayName, passwordHash)
+func (m *mockStore) CreateUserWithPublicKey(ctx context.Context, username, displayName string, publicKey []byte) (*models.User, error) {
+	if m.createUserWithPublicKeyFn != nil {
+		return m.createUserWithPublicKeyFn(ctx, username, displayName, publicKey)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) GetUserByPublicKey(ctx context.Context, publicKey []byte) (*models.User, error) {
+	if m.getUserByPublicKeyFn != nil {
+		return m.getUserByPublicKeyFn(ctx, publicKey)
 	}
 	return nil, nil
 }
@@ -179,6 +199,66 @@ func (m *mockStore) GetUserByID(ctx context.Context, id string) (*models.User, e
 		return m.getUserByIDFn(ctx, id)
 	}
 	return nil, nil
+}
+
+// ---------- BIP39 auth nonces ----------
+
+func (m *mockStore) InsertAuthNonce(ctx context.Context, nonce string, publicKey []byte, expiresAt time.Time) error {
+	if m.insertAuthNonceFn != nil {
+		return m.insertAuthNonceFn(ctx, nonce, publicKey, expiresAt)
+	}
+	return nil
+}
+
+func (m *mockStore) ConsumeAuthNonce(ctx context.Context, nonce string) ([]byte, error) {
+	if m.consumeAuthNonceFn != nil {
+		return m.consumeAuthNonceFn(ctx, nonce)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) PurgeExpiredNonces(ctx context.Context) (int64, error) {
+	if m.purgeExpiredNoncesFn != nil {
+		return m.purgeExpiredNoncesFn(ctx)
+	}
+	return 0, nil
+}
+
+// ---------- Device keys ----------
+
+func (m *mockStore) InsertDeviceKey(ctx context.Context, userID, deviceID string, devicePublicKey, certificate []byte) error {
+	if m.insertDeviceKeyFn != nil {
+		return m.insertDeviceKeyFn(ctx, userID, deviceID, devicePublicKey, certificate)
+	}
+	return nil
+}
+
+func (m *mockStore) ListDeviceKeys(ctx context.Context, userID string) ([]models.DeviceKey, error) {
+	if m.listDeviceKeysFn != nil {
+		return m.listDeviceKeysFn(ctx, userID)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) RevokeDeviceKey(ctx context.Context, userID, deviceID string) error {
+	if m.revokeDeviceKeyFn != nil {
+		return m.revokeDeviceKeyFn(ctx, userID, deviceID)
+	}
+	return nil
+}
+
+func (m *mockStore) RevokeAllDeviceKeys(ctx context.Context, userID string) error {
+	if m.revokeAllDeviceKeysFn != nil {
+		return m.revokeAllDeviceKeysFn(ctx, userID)
+	}
+	return nil
+}
+
+func (m *mockStore) UpdateDeviceLastSeen(ctx context.Context, userID, deviceID string) error {
+	if m.updateDeviceLastSeenFn != nil {
+		return m.updateDeviceLastSeenFn(ctx, userID, deviceID)
+	}
+	return nil
 }
 
 func (m *mockStore) CreateSession(ctx context.Context, sessionID, userID, tokenHash string, expiresAt time.Time) (*models.Session, error) {

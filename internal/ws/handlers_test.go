@@ -24,7 +24,10 @@ type messageStoreMock struct {
 }
 
 // User/session stubs (unused in ws handler tests).
-func (m *messageStoreMock) CreateUser(context.Context, string, string, *string) (*models.User, error) {
+func (m *messageStoreMock) CreateUserWithPublicKey(context.Context, string, string, []byte) (*models.User, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) GetUserByPublicKey(context.Context, []byte) (*models.User, error) {
 	return nil, nil
 }
 func (m *messageStoreMock) GetUserByUsername(context.Context, string) (*models.User, error) {
@@ -33,6 +36,26 @@ func (m *messageStoreMock) GetUserByUsername(context.Context, string) (*models.U
 func (m *messageStoreMock) GetUserByID(context.Context, string) (*models.User, error) {
 	return nil, nil
 }
+
+// BIP39 auth nonce stubs.
+func (m *messageStoreMock) InsertAuthNonce(context.Context, string, []byte, time.Time) error {
+	return nil
+}
+func (m *messageStoreMock) ConsumeAuthNonce(context.Context, string) ([]byte, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) PurgeExpiredNonces(context.Context) (int64, error) { return 0, nil }
+
+// Device key stubs.
+func (m *messageStoreMock) InsertDeviceKey(context.Context, string, string, []byte, []byte) error {
+	return nil
+}
+func (m *messageStoreMock) ListDeviceKeys(context.Context, string) ([]models.DeviceKey, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) RevokeDeviceKey(context.Context, string, string) error  { return nil }
+func (m *messageStoreMock) RevokeAllDeviceKeys(context.Context, string) error      { return nil }
+func (m *messageStoreMock) UpdateDeviceLastSeen(context.Context, string, string) error { return nil }
 func (m *messageStoreMock) CreateSession(context.Context, string, string, string, time.Time) (*models.Session, error) {
 	return nil, nil
 }
