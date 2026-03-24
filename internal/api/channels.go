@@ -55,9 +55,9 @@ func (h *channelsHandler) createChannel(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
 		return
 	}
-	role := guildRoleFromContext(r.Context())
-	if !roleAtLeast(role, "admin") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required to create channels"})
+	level := guildLevelFromContext(r.Context())
+	if level < models.PermissionLevelAdmin {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin level or higher required to create channels"})
 		return
 	}
 	var req models.CreateChannelRequest
@@ -198,9 +198,9 @@ func (h *channelsHandler) deleteChannel(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "channel id required"})
 		return
 	}
-	role := guildRoleFromContext(r.Context())
-	if !roleAtLeast(role, "admin") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required to delete channel"})
+	level := guildLevelFromContext(r.Context())
+	if level < models.PermissionLevelAdmin {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin level or higher required to delete channel"})
 		return
 	}
 	// Block deletion of system channels.
@@ -236,9 +236,9 @@ func (h *channelsHandler) moveChannel(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "channel id required"})
 		return
 	}
-	role := guildRoleFromContext(r.Context())
-	if !roleAtLeast(role, "admin") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
+	level := guildLevelFromContext(r.Context())
+	if level < models.PermissionLevelAdmin {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin level or higher required"})
 		return
 	}
 	var req models.MoveChannelRequest

@@ -30,6 +30,7 @@ func ServerRoutes(store db.Store, hub GlobalBroadcaster, jwtSecret string) chi.R
 	r.Route("/{serverId}", func(r chi.Router) {
 		r.Use(RequireGuildMember(store))
 		r.Get("/", h.getServer)
+		r.Put("/", h.updateServer)
 		r.Delete("/", h.deleteServer)
 		r.Get("/members", h.listMembers)
 		r.Put("/members/{userId}/role", h.changeRole)
@@ -205,6 +206,40 @@ func (h *serversHandler) createServer(w http.ResponseWriter, r *http.Request) {
 	if failures > 0 {
 		EmitSystemMessage(ctx, h.store, h.hub, server.ID, "template_partial_failure", userID, nil, "Some default channels could not be created", nil)
 	}
+}
+
+// updateServer handles PUT /api/servers/{serverId}.
+// Requires admin+ permission (level 2). Updates the encrypted_metadata blob for the guild.
+// This is used in the two-step guild creation flow and after MLS epoch advances.
+// On success, broadcasts a server_updated WS event to all guild members.
+func (h *serversHandler) updateServer(w http.ResponseWriter, r *http.Request) {
+	serverID := chi.URLParam(r, "serverId")
+	level := guildLevelFromContext(r.Context())
+	if level < models.PermissionLevelAdmin {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin level or higher required to update guild metadata"})
+		return
+	}
+	var req struct {
+		EncryptedMetadata []byte `json:"encryptedMetadata"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+	if err := h.store.UpdateServerEncryptedMetadata(r.Context(), serverID, req.EncryptedMetadata); err != nil {
+		slog.Error("updateServer: update encrypted metadata", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update guild metadata"})
+		return
+	}
+	if h.hub != nil {
+		msg, _ := json.Marshal(map[string]interface{}{
+			"type":              "server_updated",
+			"server_id":         serverID,
+			"encryptedMetadata": req.EncryptedMetadata,
+		})
+		h.hub.BroadcastToServer(serverID, msg)
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // listMyServers handles GET /api/servers — returns guilds the caller belongs to.

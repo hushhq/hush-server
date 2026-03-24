@@ -52,12 +52,12 @@ type inviteHandler struct {
 }
 
 // inviteInfoResponse is returned for public GET /api/invites/:code.
-// Includes serverId so the frontend can navigate to the guild after claim.
+// Omits guild name — the server is a blind relay; clients decrypt names from the MLS group.
 type inviteInfoResponse struct {
-	Code      string `json:"code"`
-	GuildName string `json:"guildName"`
-	ExpiresAt string `json:"expiresAt"`
-	ServerID  string `json:"serverId"`
+	Code        string `json:"code"`
+	MemberCount int    `json:"memberCount"`
+	ExpiresAt   string `json:"expiresAt"`
+	ServerID    string `json:"serverId"`
 }
 
 func (h *inviteHandler) getInviteInfo(w http.ResponseWriter, r *http.Request) {
@@ -88,12 +88,11 @@ func (h *inviteHandler) getInviteInfo(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load guild info"})
 		return
 	}
-	// TODO(0O-03): GuildName is empty — guild name is now encrypted; client decrypts after joining.
 	writeJSON(w, http.StatusOK, inviteInfoResponse{
-		Code:      inv.Code,
-		GuildName: "",
-		ExpiresAt: inv.ExpiresAt.Format(time.RFC3339),
-		ServerID:  guild.ID,
+		Code:        inv.Code,
+		MemberCount: guild.MemberCount,
+		ExpiresAt:   inv.ExpiresAt.Format(time.RFC3339),
+		ServerID:    guild.ID,
 	})
 }
 
@@ -110,9 +109,9 @@ func (h *inviteHandler) createInvite(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
 		return
 	}
-	role := guildRoleFromContext(r.Context())
-	if !roleAtLeast(role, "mod") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "mod role or higher required to create invites"})
+	level := guildLevelFromContext(r.Context())
+	if level < models.PermissionLevelMod {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "mod level or higher required to create invites"})
 		return
 	}
 	var req createInviteRequest
@@ -157,9 +156,9 @@ type claimInviteRequest struct {
 }
 
 // claimInviteResponse is returned after a successful invite claim.
+// GuildName is omitted — the server is a blind relay; the client decrypts the name from MLS.
 type claimInviteResponse struct {
-	ServerID  string `json:"serverId"`
-	GuildName string `json:"guildName"`
+	ServerID string `json:"serverId"`
 }
 
 func (h *inviteHandler) claimInvite(w http.ResponseWriter, r *http.Request) {
@@ -226,12 +225,11 @@ func (h *inviteHandler) claimInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO(0O-03): guild name is encrypted, cannot include in member_joined payload.
 	// Broadcast member_joined so other connected users see the new member.
 	if h.hub != nil {
 		member := map[string]interface{}{
-			"id":   userID,
-			"role": "member",
+			"id":               userID,
+			"permissionLevel":  models.PermissionLevelMember,
 		}
 		if u, err := h.store.GetUserByID(r.Context(), userID); err == nil && u != nil {
 			member["username"] = u.Username
@@ -248,10 +246,8 @@ func (h *inviteHandler) claimInvite(w http.ResponseWriter, r *http.Request) {
 	// Emit system message: the joining user is the actor, no target.
 	EmitSystemMessage(r.Context(), h.store, h.hub, serverID, "member_joined", userID, nil, "", nil)
 
-	// TODO(0O-03): GuildName is empty — guild name is encrypted; client decrypts via MLS group.
 	writeJSON(w, http.StatusOK, claimInviteResponse{
-		ServerID:  serverID,
-		GuildName: "",
+		ServerID: serverID,
 	})
 }
 

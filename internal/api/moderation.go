@@ -211,9 +211,9 @@ func (h *moderationHandler) unbanMember(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "reason is required"})
 		return
 	}
-	actorRole := guildRoleFromContext(r.Context())
-	if !roleAtLeast(actorRole, "admin") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role or higher required"})
+	actorLevel := guildLevelFromContext(r.Context())
+	if actorLevel < models.PermissionLevelAdmin {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin level or higher required"})
 		return
 	}
 	ban, err := h.store.GetActiveBan(r.Context(), serverID, req.UserID)
@@ -331,9 +331,9 @@ func (h *moderationHandler) unmuteMember(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "reason is required"})
 		return
 	}
-	actorRole := guildRoleFromContext(r.Context())
-	if !roleAtLeast(actorRole, "mod") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "mod role or higher required"})
+	actorLevel := guildLevelFromContext(r.Context())
+	if actorLevel < models.PermissionLevelMod {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "mod level or higher required"})
 		return
 	}
 	mute, err := h.store.GetActiveMute(r.Context(), serverID, req.UserID)
@@ -385,9 +385,9 @@ func (h *moderationHandler) deleteMessage(w http.ResponseWriter, r *http.Request
 	}
 	isSender := msg.SenderID == actorID
 	if !isSender {
-		actorRole := guildRoleFromContext(r.Context())
-		if !roleAtLeast(actorRole, "mod") {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "mod role or higher required to delete others' messages"})
+		actorLevel := guildLevelFromContext(r.Context())
+		if actorLevel < models.PermissionLevelMod {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "mod level or higher required to delete others' messages"})
 			return
 		}
 	}
@@ -420,9 +420,9 @@ func (h *moderationHandler) deleteMessage(w http.ResponseWriter, r *http.Request
 // Required guild role: admin+. Returns active (non-lifted, non-expired) bans for the guild.
 func (h *moderationHandler) listBans(w http.ResponseWriter, r *http.Request) {
 	serverID := chi.URLParam(r, "serverId")
-	actorRole := guildRoleFromContext(r.Context())
-	if !roleAtLeast(actorRole, "admin") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role or higher required"})
+	actorLevel := guildLevelFromContext(r.Context())
+	if actorLevel < models.PermissionLevelAdmin {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin level or higher required"})
 		return
 	}
 	bans, err := h.store.ListActiveBans(r.Context(), serverID)
@@ -441,9 +441,9 @@ func (h *moderationHandler) listBans(w http.ResponseWriter, r *http.Request) {
 // Required guild role: admin+. Returns active (non-lifted, non-expired) mutes for the guild.
 func (h *moderationHandler) listMutes(w http.ResponseWriter, r *http.Request) {
 	serverID := chi.URLParam(r, "serverId")
-	actorRole := guildRoleFromContext(r.Context())
-	if !roleAtLeast(actorRole, "admin") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role or higher required"})
+	actorLevel := guildLevelFromContext(r.Context())
+	if actorLevel < models.PermissionLevelAdmin {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin level or higher required"})
 		return
 	}
 	mutes, err := h.store.ListActiveMutes(r.Context(), serverID)
@@ -467,9 +467,9 @@ func (h *moderationHandler) getAuditLog(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
 		return
 	}
-	actorRole := guildRoleFromContext(r.Context())
-	if !roleAtLeast(actorRole, "admin") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role or higher required"})
+	actorLevel := guildLevelFromContext(r.Context())
+	if actorLevel < models.PermissionLevelAdmin {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin level or higher required"})
 		return
 	}
 	limit := auditLogDefaultLimit

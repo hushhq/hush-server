@@ -158,6 +158,14 @@ func (h *MessageHandler) handleMessageSend(c *Client, raw []byte) {
 		sendError(c, "internal", "failed to store message")
 		return
 	}
+	// Fire-and-forget: increment the guild message count and update last_active_at.
+	go func() {
+		bgCtx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
+		defer cancel()
+		if err := h.store.IncrementGuildMessageCount(bgCtx, payload.ChannelID); err != nil {
+			slog.Warn("ws IncrementGuildMessageCount failed", "err", err, "channelID", payload.ChannelID)
+		}
+	}()
 	out := map[string]interface{}{
 		"type":       "message.new",
 		"id":         msg.ID,
