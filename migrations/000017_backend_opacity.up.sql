@@ -84,8 +84,20 @@ ALTER TABLE instance_config ADD COLUMN guild_discovery TEXT NOT NULL DEFAULT 'al
 -- 6. mls_group_info table (guild metadata MLS group support)
 -- ============================================================
 
+-- Drop the existing PK so channel_id can become nullable.
+-- channel_id is part of the composite PK (channel_id, group_type);
+-- PostgreSQL forbids DROP NOT NULL on PK columns.
+ALTER TABLE mls_group_info DROP CONSTRAINT mls_group_info_pkey;
+
+-- Also drop the FK on channel_id — we'll re-add it after making it nullable.
+ALTER TABLE mls_group_info DROP CONSTRAINT mls_group_info_channel_id_fkey;
+
 -- Allow NULL channel_id so rows can reference a server (guild metadata group) instead.
 ALTER TABLE mls_group_info ALTER COLUMN channel_id DROP NOT NULL;
+
+-- Re-add the FK (now nullable).
+ALTER TABLE mls_group_info ADD CONSTRAINT mls_group_info_channel_id_fkey
+    FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE;
 
 -- Add server_id reference for guild-level metadata groups.
 ALTER TABLE mls_group_info ADD COLUMN server_id UUID REFERENCES servers(id) ON DELETE CASCADE;
@@ -99,7 +111,10 @@ ALTER TABLE mls_group_info DROP CONSTRAINT mls_group_info_group_type_check;
 ALTER TABLE mls_group_info ADD CONSTRAINT mls_group_info_group_type_check
     CHECK (group_type IN ('text', 'voice', 'metadata'));
 
--- Add unique index on (server_id, group_type) for guild metadata group upserts.
--- The existing PK covers (channel_id, group_type); this index covers server-scoped rows.
-CREATE UNIQUE INDEX mls_group_info_server_type ON mls_group_info (server_id, group_type)
+-- New unique index for channel-scoped rows (replaces old PK for existing use case).
+CREATE UNIQUE INDEX IF NOT EXISTS mls_group_info_channel_type ON mls_group_info (channel_id, group_type)
+    WHERE channel_id IS NOT NULL;
+
+-- Unique index for server-scoped rows (guild metadata groups).
+CREATE UNIQUE INDEX IF NOT EXISTS mls_group_info_server_type ON mls_group_info (server_id, group_type)
     WHERE server_id IS NOT NULL;

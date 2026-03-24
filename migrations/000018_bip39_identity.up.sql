@@ -14,6 +14,11 @@ ALTER TABLE users DROP COLUMN IF EXISTS password_hash;
 -- future inserts must supply a real public key.
 ALTER TABLE users ADD COLUMN root_public_key BYTEA NOT NULL DEFAULT '\x00'::BYTEA;
 
+-- Assign unique placeholder keys to pre-existing users so the UNIQUE constraint
+-- can be created. These accounts predate BIP39 and must re-register.
+-- gen_random_bytes(32) produces unique 32-byte random values per row.
+UPDATE users SET root_public_key = gen_random_bytes(32) WHERE root_public_key = '\x00'::BYTEA;
+
 -- Enforce global uniqueness of root public keys.
 ALTER TABLE users ADD CONSTRAINT users_root_public_key_unique UNIQUE (root_public_key);
 
