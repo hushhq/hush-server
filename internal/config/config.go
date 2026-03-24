@@ -14,6 +14,7 @@ type Config struct {
 	JWTExpiry    time.Duration
 	CORSOrigin   string
 	Production   bool
+	AdminAPIKey      string // X-Admin-Key header value for /api/admin; empty disables admin routes
 	LiveKitAPIKey    string
 	LiveKitAPISecret string
 	LiveKitURL       string
@@ -43,6 +44,7 @@ func Load() Config {
 		JWTExpiry:        time.Duration(jwtExpiryHours) * time.Hour,
 		CORSOrigin:       os.Getenv("CORS_ORIGIN"),
 		Production:       production,
+		AdminAPIKey:      os.Getenv("ADMIN_API_KEY"),
 		LiveKitAPIKey:    os.Getenv("LIVEKIT_API_KEY"),
 		LiveKitAPISecret: os.Getenv("LIVEKIT_API_SECRET"),
 		LiveKitURL:       os.Getenv("LIVEKIT_URL"),

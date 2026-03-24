@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -22,35 +21,19 @@ type GlobalBroadcaster interface {
 	DisconnectUser(userID string)
 }
 
-// roleOrder maps role names to their numeric rank for comparison.
-var roleOrder = map[string]int{
-	"owner":  3,
-	"admin":  2,
-	"mod":    1,
-	"member": 0,
-}
-
-// roleAtLeast returns true if userRole is at least as privileged as required.
-func roleAtLeast(userRole, required string) bool {
-	return roleOrder[userRole] >= roleOrder[required]
-}
-
 // InstanceRoutes returns the router for /api/instance.
+// Owner-gated and admin-gated privileged operations have been moved to AdminAPIRoutes.
+// This router serves authenticated user-facing endpoints only.
 func InstanceRoutes(store db.Store, hub GlobalBroadcaster, jwtSecret string, cache *InstanceCache) chi.Router {
 	h := &instanceHandler{store: store, hub: hub, cache: cache}
 	r := chi.NewRouter()
 	r.Use(RequireAuth(jwtSecret, store))
 	r.Get("/", h.getConfig)
-	r.Put("/", h.updateConfig)
 	r.Get("/members", h.listMembers)
 	r.Get("/users", h.searchUsers)
 	r.Post("/bans", h.instanceBan)
 	r.Post("/unban", h.instanceUnban)
-	r.Get("/audit-log", h.instanceAuditLog)
 	r.Get("/server-templates", h.listServerTemplates)
-	r.Post("/server-templates", h.createServerTemplate)
-	r.Put("/server-templates/{templateId}", h.updateServerTemplate)
-	r.Delete("/server-templates/{templateId}", h.deleteServerTemplate)
 	return r
 }
 
@@ -61,7 +44,8 @@ type instanceHandler struct {
 }
 
 // instanceConfigResponse is the response for GET /api/instance.
-// TODO(0O-03): Bootstrapped and MyRole fields to be revisited when admin API key auth lands.
+// MyRole exposes the authenticated user's instance-level role so the client
+// can conditionally show admin UI elements.
 type instanceConfigResponse struct {
 	ID               string  `json:"id"`
 	Name             string  `json:"name"`
@@ -94,118 +78,8 @@ func (h *instanceHandler) getConfig(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// updateConfigRequest is the JSON body for PUT /api/instance.
-// ServerCreationPolicy removed; GuildDiscovery added.
-type updateConfigRequest struct {
-	Name             *string `json:"name"`
-	IconURL          *string `json:"iconUrl"`
-	RegistrationMode *string `json:"registrationMode"`
-	GuildDiscovery   *string `json:"guildDiscovery"`
-}
-
-func (h *instanceHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
-	userID := userIDFromContext(r.Context())
-	if userID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
-		return
-	}
-	role, err := h.store.GetUserRole(r.Context(), userID)
-	if err != nil {
-		slog.Error("get user role", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify role"})
-		return
-	}
-	if !roleAtLeast(role, "owner") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "owner role required"})
-		return
-	}
-	var req updateConfigRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
-		return
-	}
-	if req.Name != nil {
-		trimmed := strings.TrimSpace(*req.Name)
-		if trimmed == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name cannot be empty"})
-			return
-		}
-		req.Name = &trimmed
-	}
-	if req.RegistrationMode != nil {
-		switch *req.RegistrationMode {
-		case "open", "invite_only", "closed":
-		default:
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "registrationMode must be open, invite_only, or closed"})
-			return
-		}
-	}
-	if req.GuildDiscovery != nil {
-		switch *req.GuildDiscovery {
-		case "disabled", "allowed", "required":
-		default:
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "guildDiscovery must be disabled, allowed, or required"})
-			return
-		}
-	}
-
-	// Capture old config for audit log
-	oldCfg, _ := h.store.GetInstanceConfig(r.Context())
-
-	if err := h.store.UpdateInstanceConfig(r.Context(), req.Name, req.IconURL, req.RegistrationMode, req.GuildDiscovery); err != nil {
-		slog.Error("update instance config", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update instance config"})
-		return
-	}
-
-	// Audit log config_change with old/new values
-	if oldCfg != nil {
-		metadata := map[string]interface{}{}
-		if req.Name != nil && *req.Name != oldCfg.Name {
-			metadata["name"] = map[string]string{"old": oldCfg.Name, "new": *req.Name}
-		}
-		if req.RegistrationMode != nil && *req.RegistrationMode != oldCfg.RegistrationMode {
-			metadata["registration_mode"] = map[string]string{"old": oldCfg.RegistrationMode, "new": *req.RegistrationMode}
-		}
-		if req.GuildDiscovery != nil && *req.GuildDiscovery != oldCfg.GuildDiscovery {
-			metadata["guild_discovery"] = map[string]string{"old": oldCfg.GuildDiscovery, "new": *req.GuildDiscovery}
-		}
-		if len(metadata) > 0 {
-			if err := h.store.InsertInstanceAuditLog(r.Context(), userID, nil, "config_change", "instance config updated", metadata); err != nil {
-				slog.Error("insert instance audit log for config change", "err", err)
-			}
-		}
-	}
-
-	// Fetch updated config for cache refresh and WS broadcast payload.
-	newCfg, cfgErr := h.store.GetInstanceConfig(r.Context())
-	if cfgErr != nil {
-		slog.Warn("config refresh failed after update", "err", cfgErr)
-		newCfg = nil
-	}
-
-	// Refresh handshake cache so GET /api/handshake reflects the updated config.
-	if h.cache != nil && newCfg != nil {
-		voiceKeyRotationHours, vkrhErr := h.store.GetVoiceKeyRotationHours(r.Context())
-		if vkrhErr != nil {
-			slog.Warn("config refresh: failed to read voice_key_rotation_hours, using default", "err", vkrhErr)
-			voiceKeyRotationHours = 2
-		}
-		h.cache.Set(newCfg.Name, newCfg.IconURL, newCfg.RegistrationMode, newCfg.GuildDiscovery, voiceKeyRotationHours)
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-	if h.hub != nil {
-		payload := map[string]interface{}{"type": "instance_updated"}
-		if newCfg != nil {
-			payload["name"] = newCfg.Name
-			payload["icon_url"] = newCfg.IconURL
-			payload["registration_mode"] = newCfg.RegistrationMode
-		}
-		msg, _ := json.Marshal(payload)
-		h.hub.BroadcastToAll(msg)
-	}
-}
+// updateConfig is no longer on InstanceRoutes — it has moved to AdminAPIRoutes (PUT /api/admin/config).
+// This stub is intentionally absent; see admin.go.
 
 func (h *instanceHandler) listMembers(w http.ResponseWriter, r *http.Request) {
 	members, err := h.store.ListMembers(r.Context())
@@ -229,7 +103,7 @@ func (h *instanceHandler) searchUsers(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify role"})
 		return
 	}
-	if !roleAtLeast(role, "admin") {
+	if role != "admin" && role != "owner" {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
 		return
 	}
@@ -259,7 +133,7 @@ func (h *instanceHandler) instanceBan(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify role"})
 		return
 	}
-	if !roleAtLeast(role, "admin") {
+	if role != "admin" && role != "owner" {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
 		return
 	}
@@ -288,10 +162,7 @@ func (h *instanceHandler) instanceBan(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify target role"})
 		return
 	}
-	if targetRole == "owner" {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "cannot ban the instance owner"})
-		return
-	}
+	// Admin cannot ban other admins — only the instance operator (API key level) can.
 	if role == "admin" && targetRole == "admin" {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin cannot ban another admin"})
 		return
@@ -363,7 +234,7 @@ func (h *instanceHandler) instanceUnban(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify role"})
 		return
 	}
-	if !roleAtLeast(role, "admin") {
+	if role != "admin" && role != "owner" {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
 		return
 	}
@@ -402,58 +273,7 @@ func (h *instanceHandler) instanceUnban(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// instanceAuditLog handles GET /api/instance/audit-log
-func (h *instanceHandler) instanceAuditLog(w http.ResponseWriter, r *http.Request) {
-	actorID := userIDFromContext(r.Context())
-	role, err := h.store.GetUserRole(r.Context(), actorID)
-	if err != nil {
-		slog.Error("get user role", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify role"})
-		return
-	}
-	if !roleAtLeast(role, "owner") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "owner role required"})
-		return
-	}
-
-	// Parse query params
-	limit := 50
-	offset := 0
-	if v := r.URL.Query().Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			limit = n
-		}
-	}
-	if limit > 100 {
-		limit = 100
-	}
-	if v := r.URL.Query().Get("offset"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-			offset = n
-		}
-	}
-
-	var filter *db.InstanceAuditLogFilter
-	action := r.URL.Query().Get("action")
-	targetID := r.URL.Query().Get("target_id")
-	if action != "" || targetID != "" {
-		filter = &db.InstanceAuditLogFilter{
-			Action:   action,
-			TargetID: targetID,
-		}
-	}
-
-	entries, err := h.store.ListInstanceAuditLog(r.Context(), limit, offset, filter)
-	if err != nil {
-		slog.Error("list instance audit log", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load audit log"})
-		return
-	}
-	if entries == nil {
-		entries = []models.InstanceAuditLogEntry{}
-	}
-	writeJSON(w, http.StatusOK, entries)
-}
+// instanceAuditLog moved to AdminAPIRoutes (GET /api/admin/audit-log). See admin.go.
 
 // listServerTemplates handles GET /api/instance/server-templates.
 // Available to all authenticated users (needed for template picker in guild creation).
@@ -467,171 +287,5 @@ func (h *instanceHandler) listServerTemplates(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, templates)
 }
 
-// validChannelTypes enumerates allowed channel types in the server template.
-var validChannelTypes = map[string]bool{
-	"text":     true,
-	"voice":    true,
-	"category": true,
-	"system":   true,
-}
-
-// validateTemplateChannels validates a slice of template channels.
-func validateTemplateChannels(channels []models.TemplateChannel) string {
-	if len(channels) == 0 {
-		return "channels must not be empty"
-	}
-	hasSystem := false
-	for _, tc := range channels {
-		if strings.TrimSpace(tc.Name) == "" {
-			return "channel name must not be empty"
-		}
-		if !validChannelTypes[tc.Type] {
-			return "invalid channel type: " + tc.Type
-		}
-		if tc.Type == "voice" {
-			if tc.VoiceMode == nil {
-				return "voice channel must have voiceMode"
-			}
-			if *tc.VoiceMode != "quality" && *tc.VoiceMode != "low-latency" {
-				return "voiceMode must be quality or low-latency"
-			}
-		} else if tc.VoiceMode != nil {
-			return "only voice channels may have voiceMode"
-		}
-		if tc.Type == "category" && tc.ParentRef != nil {
-			return "categories cannot have parentRef"
-		}
-		if tc.Type == "system" {
-			hasSystem = true
-		}
-	}
-	if !hasSystem {
-		return "system channel is required in template"
-	}
-	return ""
-}
-
-// serverTemplateRequest is the JSON body for POST/PUT server templates.
-type serverTemplateRequest struct {
-	Name      string                   `json:"name"`
-	Channels  []models.TemplateChannel `json:"channels"`
-	IsDefault bool                     `json:"isDefault"`
-}
-
-// createServerTemplate handles POST /api/instance/server-templates.
-func (h *instanceHandler) createServerTemplate(w http.ResponseWriter, r *http.Request) {
-	userID := userIDFromContext(r.Context())
-	role, err := h.store.GetUserRole(r.Context(), userID)
-	if err != nil {
-		slog.Error("get user role", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify role"})
-		return
-	}
-	if !roleAtLeast(role, "owner") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "owner role required"})
-		return
-	}
-	var req serverTemplateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
-		return
-	}
-	if strings.TrimSpace(req.Name) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
-		return
-	}
-	if errMsg := validateTemplateChannels(req.Channels); errMsg != "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": errMsg})
-		return
-	}
-	channelsJSON, err := json.Marshal(req.Channels)
-	if err != nil {
-		slog.Error("marshal template channels", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to encode channels"})
-		return
-	}
-	tmpl, err := h.store.CreateServerTemplate(r.Context(), strings.TrimSpace(req.Name), channelsJSON, req.IsDefault)
-	if err != nil {
-		slog.Error("create server template", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create template"})
-		return
-	}
-	if err := h.store.InsertInstanceAuditLog(r.Context(), userID, nil, "template_created", "server template created: "+tmpl.Name, nil); err != nil {
-		slog.Error("insert instance audit log for template create", "err", err)
-	}
-	writeJSON(w, http.StatusCreated, tmpl)
-}
-
-// updateServerTemplate handles PUT /api/instance/server-templates/{templateId}.
-func (h *instanceHandler) updateServerTemplate(w http.ResponseWriter, r *http.Request) {
-	userID := userIDFromContext(r.Context())
-	templateID := chi.URLParam(r, "templateId")
-	role, err := h.store.GetUserRole(r.Context(), userID)
-	if err != nil {
-		slog.Error("get user role", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify role"})
-		return
-	}
-	if !roleAtLeast(role, "owner") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "owner role required"})
-		return
-	}
-	var req serverTemplateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
-		return
-	}
-	if strings.TrimSpace(req.Name) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
-		return
-	}
-	if errMsg := validateTemplateChannels(req.Channels); errMsg != "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": errMsg})
-		return
-	}
-	channelsJSON, err := json.Marshal(req.Channels)
-	if err != nil {
-		slog.Error("marshal template channels", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to encode channels"})
-		return
-	}
-	if err := h.store.UpdateServerTemplate(r.Context(), templateID, strings.TrimSpace(req.Name), channelsJSON, req.IsDefault); err != nil {
-		slog.Error("update server template", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update template"})
-		return
-	}
-	if err := h.store.InsertInstanceAuditLog(r.Context(), userID, nil, "template_updated", "server template updated: "+req.Name, nil); err != nil {
-		slog.Error("insert instance audit log for template update", "err", err)
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// deleteServerTemplate handles DELETE /api/instance/server-templates/{templateId}.
-func (h *instanceHandler) deleteServerTemplate(w http.ResponseWriter, r *http.Request) {
-	userID := userIDFromContext(r.Context())
-	templateID := chi.URLParam(r, "templateId")
-	role, err := h.store.GetUserRole(r.Context(), userID)
-	if err != nil {
-		slog.Error("get user role", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify role"})
-		return
-	}
-	if !roleAtLeast(role, "owner") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "owner role required"})
-		return
-	}
-	existing, err := h.store.GetServerTemplateByID(r.Context(), templateID)
-	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "template not found"})
-		return
-	}
-	if err := h.store.DeleteServerTemplate(r.Context(), templateID); err != nil {
-		slog.Error("delete server template", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to delete template"})
-		return
-	}
-	if err := h.store.InsertInstanceAuditLog(r.Context(), userID, nil, "template_deleted", "server template deleted: "+existing.Name, nil); err != nil {
-		slog.Error("insert instance audit log for template delete", "err", err)
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
+// Server template CRUD (create/update/delete) moved to AdminAPIRoutes. See admin.go.
+// listServerTemplates stays here — it's available to all authenticated users for the template picker.

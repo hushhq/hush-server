@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"hush.app/server/internal/db"
+	"hush.app/server/internal/models"
 	"hush.app/server/internal/version"
 
 	"github.com/go-chi/chi/v5"
@@ -42,6 +43,10 @@ func MLSRoutes(store db.Store, hub MLSBroadcaster, jwtSecret string) chi.Router 
 	r.Get("/groups/{channelId}/commits", h.getCommitsSinceEpoch)
 	r.Get("/pending-welcomes", h.getPendingWelcomes)
 	r.Delete("/pending-welcomes/{welcomeId}", h.deletePendingWelcome)
+	// Guild-scoped GroupInfo: encrypted guild metadata blob (name, icon, etc.)
+	r.Get("/guilds/{guildId}/group-info", h.getGuildGroupInfo)
+	r.Put("/guilds/{guildId}/group-info", h.putGuildGroupInfo)
+	r.Delete("/guilds/{guildId}/group-info", h.deleteGuildGroupInfo)
 	return r
 }
 
@@ -514,6 +519,121 @@ func (h *mlsHandler) deletePendingWelcome(w http.ResponseWriter, r *http.Request
 	if err := h.store.DeletePendingWelcome(r.Context(), welcomeID); err != nil {
 		slog.Error("mls: delete pending welcome", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to delete pending welcome"})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ── Guild metadata GroupInfo routes ──────────────────────────────────────────
+// These routes store/retrieve an encrypted blob that contains guild-level
+// metadata (name, icon, description, etc.). The server is a blind relay and
+// never inspects the plaintext; the blob is an MLS GroupInfo message whose
+// extensions carry the encrypted metadata.
+
+// guildGroupInfoResponse is returned by GET /api/mls/guilds/:guildId/group-info.
+type guildGroupInfoResponse struct {
+	GroupInfo string `json:"groupInfo"` // base64-encoded blob
+	Epoch     int64  `json:"epoch"`
+}
+
+// guildGroupInfoRequest is the body for PUT /api/mls/guilds/:guildId/group-info.
+type guildGroupInfoRequest struct {
+	GroupInfo string `json:"groupInfo"` // base64-encoded blob
+	Epoch     int64  `json:"epoch"`
+}
+
+// getGuildGroupInfo handles GET /api/mls/guilds/:guildId/group-info.
+// Returns the current encrypted guild metadata GroupInfo blob and epoch.
+// Returns 404 when no blob has been stored yet.
+func (h *mlsHandler) getGuildGroupInfo(w http.ResponseWriter, r *http.Request) {
+	guildID := chi.URLParam(r, "guildId")
+	if _, err := uuid.Parse(guildID); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid guildId"})
+		return
+	}
+
+	blob, epoch, err := h.store.GetMLSGuildMetadataGroupInfo(r.Context(), guildID)
+	if err != nil {
+		slog.Error("mls: get guild group info", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to get guild group info"})
+		return
+	}
+	if blob == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "guild group info not found"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, guildGroupInfoResponse{
+		GroupInfo: base64.StdEncoding.EncodeToString(blob),
+		Epoch:     epoch,
+	})
+}
+
+// putGuildGroupInfo handles PUT /api/mls/guilds/:guildId/group-info.
+// Upserts the encrypted guild metadata GroupInfo blob.
+// Only guild admins (permission level >= admin) may call this endpoint.
+// Returns 204 on success.
+func (h *mlsHandler) putGuildGroupInfo(w http.ResponseWriter, r *http.Request) {
+	guildID := chi.URLParam(r, "guildId")
+	if _, err := uuid.Parse(guildID); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid guildId"})
+		return
+	}
+
+	level := guildLevelFromContext(r.Context())
+	if level < models.PermissionLevelAdmin {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin permission required"})
+		return
+	}
+
+	var req guildGroupInfoRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+	if req.GroupInfo == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "groupInfo is required"})
+		return
+	}
+
+	blob, err := base64.StdEncoding.DecodeString(req.GroupInfo)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid groupInfo base64"})
+		return
+	}
+	if len(blob) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "groupInfo must not be empty"})
+		return
+	}
+
+	if err := h.store.UpsertMLSGuildMetadataGroupInfo(r.Context(), guildID, blob, req.Epoch); err != nil {
+		slog.Error("mls: upsert guild group info", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to store guild group info"})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// deleteGuildGroupInfo handles DELETE /api/mls/guilds/:guildId/group-info.
+// Removes the encrypted guild metadata GroupInfo blob (e.g., when the guild is deleted).
+// Only guild admins (permission level >= admin) may call this endpoint.
+// Returns 204 on success.
+func (h *mlsHandler) deleteGuildGroupInfo(w http.ResponseWriter, r *http.Request) {
+	guildID := chi.URLParam(r, "guildId")
+	if _, err := uuid.Parse(guildID); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid guildId"})
+		return
+	}
+
+	level := guildLevelFromContext(r.Context())
+	if level < models.PermissionLevelAdmin {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin permission required"})
+		return
+	}
+
+	if err := h.store.DeleteMLSGuildMetadataGroupInfo(r.Context(), guildID); err != nil {
+		slog.Error("mls: delete guild group info", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to delete guild group info"})
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

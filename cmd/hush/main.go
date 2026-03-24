@@ -180,8 +180,9 @@ func main() {
 		// Public invite info (unauthenticated) + claim (authenticated, not guild-scoped).
 		r.Mount("/api/invites", api.PublicInviteRoutes(pool, cfg.JWTSecret, wsHub))
 
-		// Instance-operator admin endpoints.
-		r.Mount("/api/admin", api.AdminRoutes(pool, cfg.JWTSecret))
+		// Instance-operator admin endpoints — authenticated by X-Admin-Key header, not JWT.
+		// AdminAPIKey empty means no admin key is configured; the middleware rejects all requests.
+		r.Mount("/api/admin", api.AdminAPIRoutes(pool, cfg.AdminAPIKey, wsHub, handshakeCache))
 
 		r.Get("/ws", ws.Handler(wsHub, cfg.JWTSecret, pool, cfg.CORSOrigin))
 		r.Mount("/api/livekit", api.LiveKitRoutes(pool, cfg.JWTSecret, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret))
