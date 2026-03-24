@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"hush.app/server/internal/db"
+	"hush.app/server/internal/models"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -671,6 +672,127 @@ func TestMLS_DeletePendingWelcome_Valid_Returns204(t *testing.T) {
 	rr := deleteMLS(router, "/pending-welcomes/"+welcomeID, token)
 	require.Equal(t, http.StatusNoContent, rr.Code)
 	assert.True(t, deleteCalled, "DeletePendingWelcome must be called with the correct ID")
+}
+
+// ---------- Guild GroupInfo routes ----------
+
+// mlsRouterWithGuildLevel wraps the MLS router to inject a guild permission level
+// into the request context, simulating what RequireGuildMember does in production.
+func mlsRouterWithGuildLevel(store *mockStore, level int) http.Handler {
+	inner := mlsRouter(store, &mockMLSHub{})
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := withGuildLevel(r.Context(), level)
+		inner.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func TestGetGuildGroupInfo_NotFound_Returns404(t *testing.T) {
+	store := &mockStore{
+		getMLSGuildMetadataGroupInfoFn: func(_ context.Context, _ string) ([]byte, int64, error) {
+			return nil, 0, nil // no record yet
+		},
+	}
+	token := makeAuth(store, uuid.New().String())
+	router := mlsRouter(store, &mockMLSHub{})
+
+	guildID := uuid.New().String()
+	rr := getMLS(router, "/guilds/"+guildID+"/group-info", token)
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+}
+
+func TestGetGuildGroupInfo_Found_Returns200WithBlob(t *testing.T) {
+	guildID := uuid.New().String()
+	expectedBlob := []byte("encrypted-guild-metadata")
+
+	store := &mockStore{
+		getMLSGuildMetadataGroupInfoFn: func(_ context.Context, gid string) ([]byte, int64, error) {
+			if gid == guildID {
+				return expectedBlob, 3, nil
+			}
+			return nil, 0, nil
+		},
+	}
+	token := makeAuth(store, uuid.New().String())
+	router := mlsRouter(store, &mockMLSHub{})
+
+	rr := getMLS(router, "/guilds/"+guildID+"/group-info", token)
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	var resp guildGroupInfoResponse
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.NotEmpty(t, resp.GroupInfo)
+	assert.Equal(t, int64(3), resp.Epoch)
+}
+
+func TestPutGuildGroupInfo_AdminLevel_Returns204(t *testing.T) {
+	guildID := uuid.New().String()
+
+	var storedBlob []byte
+	var storedEpoch int64
+	store := &mockStore{
+		upsertMLSGuildMetadataGroupInfoFn: func(_ context.Context, gid string, blob []byte, epoch int64) error {
+			storedBlob = blob
+			storedEpoch = epoch
+			return nil
+		},
+	}
+	token := makeAuth(store, uuid.New().String())
+	// Inject admin-level context so the handler's permission check passes.
+	router := mlsRouterWithGuildLevel(store, models.PermissionLevelAdmin)
+
+	encoded := base64.StdEncoding.EncodeToString([]byte("guild-blob"))
+	rr := putMLS(router, "/guilds/"+guildID+"/group-info", token, map[string]interface{}{
+		"groupInfo": encoded,
+		"epoch":     int64(5),
+	})
+	require.Equal(t, http.StatusNoContent, rr.Code)
+	assert.Equal(t, []byte("guild-blob"), storedBlob)
+	assert.Equal(t, int64(5), storedEpoch)
+}
+
+func TestPutGuildGroupInfo_MemberLevel_Returns403(t *testing.T) {
+	guildID := uuid.New().String()
+	store := &mockStore{}
+	token := makeAuth(store, uuid.New().String())
+	// Member level (0) is below admin (2) — handler must reject.
+	router := mlsRouterWithGuildLevel(store, models.PermissionLevelMember)
+
+	encoded := base64.StdEncoding.EncodeToString([]byte("guild-blob"))
+	rr := putMLS(router, "/guilds/"+guildID+"/group-info", token, map[string]interface{}{
+		"groupInfo": encoded,
+		"epoch":     int64(1),
+	})
+	assert.Equal(t, http.StatusForbidden, rr.Code)
+}
+
+func TestDeleteGuildGroupInfo_AdminLevel_Returns204(t *testing.T) {
+	guildID := uuid.New().String()
+
+	deleteCalled := false
+	store := &mockStore{
+		deleteMLSGuildMetadataGroupInfoFn: func(_ context.Context, gid string) error {
+			if gid == guildID {
+				deleteCalled = true
+			}
+			return nil
+		},
+	}
+	token := makeAuth(store, uuid.New().String())
+	router := mlsRouterWithGuildLevel(store, models.PermissionLevelAdmin)
+
+	rr := deleteMLS(router, "/guilds/"+guildID+"/group-info", token)
+	require.Equal(t, http.StatusNoContent, rr.Code)
+	assert.True(t, deleteCalled, "DeleteMLSGuildMetadataGroupInfo must be called")
+}
+
+func TestDeleteGuildGroupInfo_MemberLevel_Returns403(t *testing.T) {
+	guildID := uuid.New().String()
+	store := &mockStore{}
+	token := makeAuth(store, uuid.New().String())
+	router := mlsRouterWithGuildLevel(store, models.PermissionLevelMember)
+
+	rr := deleteMLS(router, "/guilds/"+guildID+"/group-info", token)
+	assert.Equal(t, http.StatusForbidden, rr.Code)
 }
 
 // ---------- Mock hub ----------
