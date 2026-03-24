@@ -51,6 +51,9 @@ func AuthRoutes(store db.Store, jwtSecret string, jwtExpiry time.Duration) chi.R
 		r.Get("/me", h.me)
 	})
 
+	// Device management and multi-device linking (require auth — mounted inline).
+	r.Group(DeviceRoutes(store, jwtSecret))
+
 	go h.purgeNoncesLoop()
 
 	return r
