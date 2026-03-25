@@ -33,7 +33,7 @@ func (p *Pool) UpsertMLSGroupInfo(ctx context.Context, channelID string, groupTy
 	_, err := p.Exec(ctx, `
 		INSERT INTO mls_group_info (channel_id, group_type, group_info_bytes, epoch, updated_at)
 		VALUES ($1, $2, $3, $4, now())
-		ON CONFLICT (channel_id, group_type) DO UPDATE SET
+		ON CONFLICT (channel_id, group_type) WHERE channel_id IS NOT NULL DO UPDATE SET
 			group_info_bytes = EXCLUDED.group_info_bytes,
 			epoch            = EXCLUDED.epoch,
 			updated_at       = now()`,
@@ -196,7 +196,7 @@ func (p *Pool) UpsertMLSGuildMetadataGroupInfo(ctx context.Context, serverID str
 	_, err := p.Exec(ctx, `
 		INSERT INTO mls_group_info (server_id, group_type, group_info_bytes, epoch, updated_at)
 		VALUES ($1, 'metadata', $2, $3, now())
-		ON CONFLICT (server_id, group_type) DO UPDATE SET
+		ON CONFLICT (server_id, group_type) WHERE server_id IS NOT NULL DO UPDATE SET
 			group_info_bytes = EXCLUDED.group_info_bytes,
 			epoch            = EXCLUDED.epoch,
 			updated_at       = now()`,
