@@ -580,8 +580,11 @@ func (h *mlsHandler) putGuildGroupInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	level := guildLevelFromContext(r.Context())
-	if level < models.PermissionLevelAdmin {
+	// Guild-scoped MLS routes are not mounted under RequireGuildMember middleware,
+	// so we look up the membership level directly.
+	userID := userIDFromContext(r.Context())
+	level, err := h.store.GetServerMemberLevel(r.Context(), guildID, userID)
+	if err != nil || level < models.PermissionLevelAdmin {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin permission required"})
 		return
 	}
