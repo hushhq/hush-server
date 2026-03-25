@@ -11,9 +11,13 @@ import (
 	"syscall"
 	"time"
 
+	"encoding/hex"
+
 	"hush.app/server/internal/api"
 	"hush.app/server/internal/config"
 	"hush.app/server/internal/db"
+	"hush.app/server/internal/models"
+	"hush.app/server/internal/transparency"
 	"hush.app/server/internal/ws"
 
 	"github.com/go-chi/chi/v5"
@@ -24,6 +28,37 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"golang.org/x/time/rate"
 )
+
+// poolTransparencyStore adapts db.Pool to satisfy transparency.TransparencyStore.
+// The interface uses clean method names and takes *LogEntry; the pool uses
+// verbose names and individual fields. This adapter bridges the two without
+// creating a circular import between db and transparency packages.
+type poolTransparencyStore struct {
+	pool *db.Pool
+}
+
+func (a *poolTransparencyStore) InsertLogEntry(
+	ctx context.Context, leafIndex uint64, entry *transparency.LogEntry,
+	cborBytes, leafHash, logSig []byte,
+) error {
+	return a.pool.InsertTransparencyLogEntry(
+		ctx, leafIndex, string(entry.OperationType),
+		entry.UserPublicKey, entry.SubjectKey,
+		cborBytes, leafHash, entry.UserSignature, logSig,
+	)
+}
+
+func (a *poolTransparencyStore) GetLogEntriesByPubKey(ctx context.Context, pubKey []byte) ([]models.TransparencyLogEntry, error) {
+	return a.pool.GetTransparencyLogEntriesByPubKey(ctx, pubKey)
+}
+
+func (a *poolTransparencyStore) GetLatestTreeHead(ctx context.Context) (*models.TransparencyTreeHead, error) {
+	return a.pool.GetLatestTransparencyTreeHead(ctx)
+}
+
+func (a *poolTransparencyStore) InsertTreeHead(ctx context.Context, treeSize uint64, rootHash, fringe, headSig []byte) error {
+	return a.pool.InsertTransparencyTreeHead(ctx, treeSize, rootHash, fringe, headSig)
+}
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -37,6 +72,7 @@ func main() {
 	handshakeCache := api.NewInstanceCache()
 
 	var pool *db.Pool
+	var transparencySvc *transparency.TransparencyService
 	if cfg.DatabaseURL != "" {
 		wd, err := os.Getwd()
 		if err != nil {
@@ -106,6 +142,28 @@ func main() {
 			}
 		}()
 
+		// Transparency log: load signing key, create service, recover tree state.
+		// If no key is configured, transparency is disabled for this instance.
+		logSigner, signerErr := transparency.LoadLogSignerFromEnv()
+		if signerErr != nil {
+			slog.Info("transparency: log signer not configured, transparency disabled", "err", signerErr)
+		} else {
+			tStore := &poolTransparencyStore{pool: pool}
+			var tErr error
+			transparencySvc, tErr = transparency.NewTransparencyService(tStore, logSigner)
+			if tErr != nil {
+				slog.Error("transparency: service init failed, transparency disabled", "err", tErr)
+				transparencySvc = nil
+			} else {
+				slog.Info("transparency: service initialized", "tree_size", transparencySvc.TreeSize())
+				// Set transparency info in handshake cache.
+				pubKeyHex := hex.EncodeToString(logSigner.PublicKey())
+				// transparency_url is self (this instance serves its own log).
+				selfURL := "/api/transparency"
+				handshakeCache.SetTransparencyInfo(&selfURL, &pubKeyHex)
+			}
+		}
+
 		// MLS KeyPackage cleanup: purge consumed rows older than 30 days and
 		// unconsumed rows whose expiry has passed. Last-resort packages are never deleted.
 		go func() {
@@ -160,20 +218,29 @@ func main() {
 	r.Get("/api/handshake", api.HandshakeHandler(handshakeCache, cfg.LiveKitAPIKey != ""))
 
 	wsHub := ws.NewHub()
+	// Wire WS broadcaster into transparency service (nil-safe on both sides).
+	if transparencySvc != nil {
+		transparencySvc.SetBroadcaster(wsHub)
+	}
 	if pool != nil && cfg.JWTSecret != "" {
 		// Auth endpoints: per-IP limit — 60 requests per minute, burst 30. SEC-01.
 		// Generous to accommodate React StrictMode (double-fires effects),
 		// multi-instance boot (challenge+verify per instance), and /me polling.
 		r.Route("/api/auth", func(sub chi.Router) {
 			sub.Use(api.IPRateLimiter(rate.Limit(60.0/60.0), 30))
-			sub.Mount("/", api.AuthRoutes(pool, cfg.JWTSecret, cfg.JWTExpiry))
+			sub.Mount("/", api.AuthRoutes(pool, cfg.JWTSecret, cfg.JWTExpiry, transparencySvc))
 		})
 		// MLS key management: per-user limit — 10 requests per minute.
 		r.Route("/api/mls", func(sub chi.Router) {
 			sub.Use(api.UserRateLimiter(rate.Limit(10.0/60.0), 10))
-			sub.Mount("/", api.MLSRoutes(pool, wsHub, cfg.JWTSecret))
+			sub.Mount("/", api.MLSRoutes(pool, wsHub, cfg.JWTSecret, transparencySvc))
 		})
 		r.Mount("/api/instance", api.InstanceRoutes(pool, wsHub, cfg.JWTSecret, handshakeCache))
+
+		// Transparency log verification endpoint.
+		if transparencySvc != nil {
+			r.Mount("/api/transparency", api.TransparencyRoutes(transparencySvc, pool, cfg.JWTSecret))
+		}
 
 		// Guild-scoped API: auth and RequireGuildMember applied inside ServerRoutes.
 		// Channels, guild invites, and moderation are all mounted under /{serverId}.

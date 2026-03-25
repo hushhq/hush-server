@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"hush.app/server/internal/db"
+	"hush.app/server/internal/transparency"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -38,8 +39,12 @@ var linkCodeCharset = []byte("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
 //	DELETE /devices?all=true  — revoke all devices
 //	POST   /link-request      — register a new device's public key; returns 8-char code
 //	POST   /link-verify       — verify code + certificate; inserts certified device
-func DeviceRoutes(store db.Store, jwtSecret string) func(r chi.Router) {
-	h := &deviceHandler{store: store}
+//
+// transparencySvc may be nil when the transparency log is not configured for
+// this instance. Device certify and revoke operations append synchronously
+// when the service is non-nil (non-fatal on failure).
+func DeviceRoutes(store db.Store, jwtSecret string, transparencySvc *transparency.TransparencyService) func(r chi.Router) {
+	h := &deviceHandler{store: store, transparencySvc: transparencySvc}
 	return func(r chi.Router) {
 		r.Group(func(r chi.Router) {
 			r.Use(RequireAuth(jwtSecret, store))
@@ -60,7 +65,8 @@ func DeviceRoutes(store db.Store, jwtSecret string) func(r chi.Router) {
 }
 
 type deviceHandler struct {
-	store db.Store
+	store           db.Store
+	transparencySvc *transparency.TransparencyService
 }
 
 // ---------- List ----------
@@ -183,6 +189,20 @@ func (h *deviceHandler) certifyDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Append transparency log entry synchronously. The user's root key is the
+	// signing device's public key; the subject key is the newly certified device.
+	if h.transparencySvc != nil {
+		entry := &transparency.LogEntry{
+			OperationType: transparency.OpDeviceAdd,
+			UserPublicKey: signingPub,
+			SubjectKey:    newDevicePubBytes,
+			Timestamp:     time.Now().Unix(),
+		}
+		if logErr := h.transparencySvc.AppendAndNotify(r.Context(), entry, userID); logErr != nil {
+			slog.Error("transparency: append device_add entry", "err", logErr, "user_id", userID)
+		}
+	}
+
 	w.WriteHeader(http.StatusCreated)
 }
 
@@ -202,10 +222,27 @@ func (h *deviceHandler) revokeDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Look up the device's public key before revocation so we can log the subject.
+	revokedPub, _ := h.findDevicePublicKey(r.Context(), userID, deviceID)
+
 	if err := h.store.RevokeDeviceKey(r.Context(), userID, deviceID); err != nil {
 		slog.Error("revoke device key", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not revoke device"})
 		return
+	}
+
+	// Append transparency log entry synchronously.
+	// UserPublicKey is the user's root key (obtained from auth context if available).
+	// We use revokedPub as SubjectKey so verifiers can identify which device was revoked.
+	if h.transparencySvc != nil && revokedPub != nil {
+		entry := &transparency.LogEntry{
+			OperationType: transparency.OpDeviceRevoke,
+			SubjectKey:    revokedPub,
+			Timestamp:     time.Now().Unix(),
+		}
+		if logErr := h.transparencySvc.AppendAndNotify(r.Context(), entry, userID); logErr != nil {
+			slog.Error("transparency: append device_revoke entry", "err", logErr, "user_id", userID)
+		}
 	}
 
 	w.WriteHeader(http.StatusNoContent)

@@ -31,7 +31,7 @@ var testJWTExpiry = 1 * time.Hour
 // ---------- helpers ----------
 
 func newTestRouter(store *mockStore) http.Handler {
-	return AuthRoutes(store, testJWTSecret, testJWTExpiry)
+	return AuthRoutes(store, testJWTSecret, testJWTExpiry, nil)
 }
 
 func postJSON(handler http.Handler, path string, body interface{}) *httptest.ResponseRecorder {

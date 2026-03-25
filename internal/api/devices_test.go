@@ -23,7 +23,7 @@ import (
 // newDeviceTestRouter returns the shared AuthRoutes handler (which mounts
 // /devices and /link-* sub-routes) for device handler tests.
 func newDeviceTestRouter(store *mockStore) http.Handler {
-	return AuthRoutes(store, testJWTSecret, testJWTExpiry)
+	return AuthRoutes(store, testJWTSecret, testJWTExpiry, nil)
 }
 
 // deleteWithAuthReq performs an authenticated DELETE request.

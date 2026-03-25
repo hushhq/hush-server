@@ -3,6 +3,8 @@ package transparency
 import (
 	"context"
 	"crypto/ed25519"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
 	"sync"
@@ -10,6 +12,11 @@ import (
 
 	"hush.app/server/internal/models"
 )
+
+// Broadcaster sends WS messages to connected users. Implemented by ws.Hub.
+type Broadcaster interface {
+	BroadcastToUser(userID string, message []byte)
+}
 
 // AppendResult is returned by AppendEntry with proof data the caller can
 // forward to the client for immediate verification.
@@ -37,10 +44,11 @@ type ProofResponse struct {
 // RecoverFromDB. It is protected by a mutex so concurrent handler goroutines
 // can safely call AppendEntry.
 type TransparencyService struct {
-	mu     sync.Mutex
-	tree   *MerkleTree
-	signer *LogSigner
-	store  TransparencyStore
+	mu          sync.Mutex
+	tree        *MerkleTree
+	signer      *LogSigner
+	store       TransparencyStore
+	broadcaster Broadcaster
 }
 
 // NewTransparencyService creates a service and recovers the Merkle tree
@@ -246,6 +254,32 @@ func (s *TransparencyService) SignerPublicKey() ed25519.PublicKey {
 	return s.signer.PublicKey()
 }
 
+// SetBroadcaster wires the WS hub for transparency.key_change notifications.
+// Called once in main.go after the hub is created. Nil-safe: the service works
+// without a broadcaster; key_change events are simply not sent.
+func (s *TransparencyService) SetBroadcaster(b Broadcaster) {
+	s.broadcaster = b
+}
+
+// broadcastKeyChange notifies the user via WS that a transparency entry was
+// appended for their public key. The client uses this to trigger re-verification.
+func (s *TransparencyService) broadcastKeyChange(userID string, entry *LogEntry, result *AppendResult) {
+	if s.broadcaster == nil || userID == "" {
+		return
+	}
+	payload, err := json.Marshal(map[string]interface{}{
+		"type":      "transparency.key_change",
+		"operation": string(entry.OperationType),
+		"leafIndex": result.LeafIndex,
+		"treeRoot":  hex.EncodeToString(result.RootHash[:]),
+	})
+	if err != nil {
+		log.Printf("transparency: marshal key_change event: %v", err)
+		return
+	}
+	s.broadcaster.BroadcastToUser(userID, payload)
+}
+
 // AppendEntrySkipSig appends an entry without requiring a user signature.
 // Used by server handlers in MVP mode (T.1 Plan 02) before client-side signing
 // is implemented in Plan 03. The UserSignature field of the entry is set to nil.
@@ -253,6 +287,19 @@ func (s *TransparencyService) AppendEntrySkipSig(ctx context.Context, entry *Log
 	entry.UserSignature = nil
 	_, err := s.AppendEntry(ctx, entry)
 	return err
+}
+
+// AppendAndNotify appends an entry (skipping user signature in MVP mode) and
+// broadcasts a transparency.key_change WS event to the specified user.
+// Used by handlers that know the user ID and want fire-and-forget notification.
+func (s *TransparencyService) AppendAndNotify(ctx context.Context, entry *LogEntry, userID string) error {
+	entry.UserSignature = nil
+	result, err := s.AppendEntry(ctx, entry)
+	if err != nil {
+		return err
+	}
+	s.broadcastKeyChange(userID, entry, result)
+	return nil
 }
 
 // nowUnix is a variable to allow time injection in tests.

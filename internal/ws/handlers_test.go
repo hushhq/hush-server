@@ -310,6 +310,20 @@ func (m *messageStoreMock) IncrementGuildMessageCount(context.Context, string) e
 func (m *messageStoreMock) IncrementGuildMemberCount(context.Context, string, int) error  { return nil }
 func (m *messageStoreMock) UpdateGuildChannelCounts(context.Context, string) error        { return nil }
 
+// Transparency log stubs (T.1).
+func (m *messageStoreMock) InsertTransparencyLogEntry(context.Context, uint64, string, []byte, []byte, []byte, []byte, []byte, []byte) error {
+	return nil
+}
+func (m *messageStoreMock) GetTransparencyLogEntriesByPubKey(context.Context, []byte) ([]models.TransparencyLogEntry, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) GetLatestTransparencyTreeHead(context.Context) (*models.TransparencyTreeHead, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) InsertTransparencyTreeHead(context.Context, uint64, []byte, []byte, []byte) error {
+	return nil
+}
+
 // drainUntilType reads from c.send until a message with the given type is received or timeout.
 func drainUntilType(t *testing.T, c *Client, wantType string, timeout time.Duration) []byte {
 	t.Helper()

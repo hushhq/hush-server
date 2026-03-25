@@ -15,6 +15,7 @@ import (
 	"hush.app/server/internal/auth"
 	"hush.app/server/internal/db"
 	"hush.app/server/internal/models"
+	"hush.app/server/internal/transparency"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -35,9 +36,12 @@ var usernameRE = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
 // It also starts a background goroutine that purges expired auth nonces every
 // noncePurgeInterval. The goroutine has no shutdown signal — process exit
 // terminates it, consistent with the system_messages cleanup pattern.
-func AuthRoutes(store db.Store, jwtSecret string, jwtExpiry time.Duration) chi.Router {
+//
+// transparencySvc may be nil when the transparency log is not configured for
+// this instance. All transparency operations nil-guard before use.
+func AuthRoutes(store db.Store, jwtSecret string, jwtExpiry time.Duration, transparencySvc *transparency.TransparencyService) chi.Router {
 	r := chi.NewRouter()
-	h := &authHandler{store: store, jwtSecret: jwtSecret, jwtExpiry: jwtExpiry}
+	h := &authHandler{store: store, jwtSecret: jwtSecret, jwtExpiry: jwtExpiry, transparencySvc: transparencySvc}
 
 	r.Post("/register", h.register)
 	r.Get("/check-username/{username}", h.checkUsername)
@@ -50,7 +54,7 @@ func AuthRoutes(store db.Store, jwtSecret string, jwtExpiry time.Duration) chi.R
 	})
 
 	// Device management and multi-device linking (require auth — mounted inline).
-	r.Group(DeviceRoutes(store, jwtSecret))
+	r.Group(DeviceRoutes(store, jwtSecret, transparencySvc))
 
 	go h.purgeNoncesLoop()
 
@@ -58,9 +62,10 @@ func AuthRoutes(store db.Store, jwtSecret string, jwtExpiry time.Duration) chi.R
 }
 
 type authHandler struct {
-	store     db.Store
-	jwtSecret string
-	jwtExpiry time.Duration
+	store           db.Store
+	jwtSecret       string
+	jwtExpiry       time.Duration
+	transparencySvc *transparency.TransparencyService
 }
 
 // purgeNoncesLoop runs PurgeExpiredNonces every noncePurgeInterval.
@@ -159,6 +164,22 @@ func (h *authHandler) register(w http.ResponseWriter, r *http.Request) {
 	if err := h.store.InsertDeviceKey(r.Context(), user.ID, deviceID, publicKeyBytes, nil); err != nil {
 		slog.Error("insert device key on register", "err", err)
 		// Non-fatal: device key is supplementary metadata; proceed with auth.
+	}
+
+	// Append transparency log entry synchronously before responding.
+	// On failure, log the error but still return 201 — the user was created
+	// successfully. Log failure is non-fatal per Pitfall 4 in RESEARCH.md.
+	if h.transparencySvc != nil {
+		entry := &transparency.LogEntry{
+			OperationType: transparency.OpRegister,
+			UserPublicKey: publicKeyBytes,
+			Timestamp:     time.Now().Unix(),
+			// UserSignature is nil in MVP mode; Plan 03 adds client-side signing.
+			// transparency_sig from req body (future field) will be wired in Plan 03.
+		}
+		if logErr := h.transparencySvc.AppendAndNotify(r.Context(), entry, user.ID); logErr != nil {
+			slog.Error("transparency: append register entry", "err", logErr, "user_id", user.ID)
+		}
 	}
 
 	h.sendAuthResponse(w, r, user)

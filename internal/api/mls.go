@@ -12,6 +12,7 @@ import (
 
 	"hush.app/server/internal/db"
 	"hush.app/server/internal/models"
+	"hush.app/server/internal/transparency"
 	"hush.app/server/internal/version"
 
 	"github.com/go-chi/chi/v5"
@@ -29,9 +30,13 @@ type MLSBroadcaster interface {
 // MLSRoutes returns the router for /api/mls (mount at /api/mls).
 // Route order is significant: /key-packages/count must be registered before
 // /key-packages/{userId}/{deviceId} to prevent chi matching "count" as a userId.
-func MLSRoutes(store db.Store, hub MLSBroadcaster, jwtSecret string) chi.Router {
+//
+// transparencySvc may be nil when the transparency log is not configured for
+// this instance. KeyPackage uploads and credential updates append asynchronously
+// when the service is non-nil (fire-and-forget, non-fatal).
+func MLSRoutes(store db.Store, hub MLSBroadcaster, jwtSecret string, transparencySvc *transparency.TransparencyService) chi.Router {
 	r := chi.NewRouter()
-	h := &mlsHandler{store: store, hub: hub}
+	h := &mlsHandler{store: store, hub: hub, transparencySvc: transparencySvc}
 	r.Use(RequireAuth(jwtSecret, store))
 	r.Post("/credentials", h.uploadCredential)
 	r.Post("/key-packages", h.uploadKeyPackages)
@@ -51,8 +56,9 @@ func MLSRoutes(store db.Store, hub MLSBroadcaster, jwtSecret string) chi.Router 
 }
 
 type mlsHandler struct {
-	store db.Store
-	hub   MLSBroadcaster
+	store           db.Store
+	hub             MLSBroadcaster
+	transparencySvc *transparency.TransparencyService
 }
 
 // uploadCredentialRequest is the body for POST /api/mls/credentials.
@@ -104,6 +110,28 @@ func (h *mlsHandler) uploadCredential(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "upload failed"})
 		return
 	}
+
+	// Async transparency append — does not block the 204 response.
+	// Credential updates are frequent; async pattern prevents latency spikes.
+	if h.transparencySvc != nil {
+		signingPubKeyCopy := make([]byte, len(req.SigningPublicKey))
+		copy(signingPubKeyCopy, req.SigningPublicKey)
+		svc := h.transparencySvc
+		uid := userID
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			entry := &transparency.LogEntry{
+				OperationType: transparency.OpMLSCredential,
+				SubjectKey:    signingPubKeyCopy,
+				Timestamp:     time.Now().Unix(),
+			}
+			if err := svc.AppendAndNotify(ctx, entry, uid); err != nil {
+				slog.Error("async transparency append failed", "op", "mls_credential", "err", err)
+			}
+		}()
+	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -160,6 +188,25 @@ func (h *mlsHandler) uploadKeyPackages(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "upload failed"})
 		return
 	}
+
+	// Async transparency append — does not block the 204 response.
+	// KeyPackage rotation is frequent; async pattern prevents latency spikes.
+	if h.transparencySvc != nil {
+		svc := h.transparencySvc
+		uid := userID
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			entry := &transparency.LogEntry{
+				OperationType: transparency.OpKeyPackage,
+				Timestamp:     time.Now().Unix(),
+			}
+			if err := svc.AppendAndNotify(ctx, entry, uid); err != nil {
+				slog.Error("async transparency append failed", "op", "keypackage", "err", err)
+			}
+		}()
+	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 

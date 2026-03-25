@@ -21,7 +21,7 @@ import (
 
 // mlsRouter builds the MLS chi router with the given store and hub.
 func mlsRouter(store *mockStore, hub MLSBroadcaster) http.Handler {
-	return MLSRoutes(store, hub, testJWTSecret)
+	return MLSRoutes(store, hub, testJWTSecret, nil)
 }
 
 func postMLS(handler http.Handler, path, token string, body interface{}) *httptest.ResponseRecorder {
