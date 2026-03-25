@@ -16,12 +16,14 @@ import (
 
 func TestInstanceCache_ZeroValue_ReturnsDefaults(t *testing.T) {
 	cache := NewInstanceCache()
-	name, iconURL, regMode, scp, vkrh := cache.snapshot()
+	name, iconURL, regMode, scp, vkrh, tURL, lPub := cache.snapshot()
 	assert.Equal(t, "", name)
 	assert.Nil(t, iconURL)
 	assert.Equal(t, "", regMode)
 	assert.Equal(t, "allowed", scp, "zero-value cache must default guild_discovery to 'allowed'")
 	assert.Equal(t, voiceKeyRotationHoursDefault, vkrh, "zero-value cache must use default voice key rotation hours")
+	assert.Nil(t, tURL, "zero-value cache must have nil transparencyURL")
+	assert.Nil(t, lPub, "zero-value cache must have nil logPublicKey")
 }
 
 func TestInstanceCache_Set_ReflectsValues(t *testing.T) {
@@ -29,7 +31,7 @@ func TestInstanceCache_Set_ReflectsValues(t *testing.T) {
 	icon := "https://example.com/icon.png"
 	cache.Set("My Hush", &icon, "invite_only", "admin_only", 4)
 
-	name, iconURL, regMode, scp, vkrh := cache.snapshot()
+	name, iconURL, regMode, scp, vkrh, _, _ := cache.snapshot()
 	assert.Equal(t, "My Hush", name)
 	require.NotNil(t, iconURL)
 	assert.Equal(t, "https://example.com/icon.png", *iconURL)
@@ -42,7 +44,7 @@ func TestInstanceCache_Set_NilIconURL(t *testing.T) {
 	cache := NewInstanceCache()
 	cache.Set("Test", nil, "open", "any_member", 2)
 
-	_, iconURL, _, _, _ := cache.snapshot()
+	_, iconURL, _, _, _, _, _ := cache.snapshot()
 	assert.Nil(t, iconURL)
 }
 

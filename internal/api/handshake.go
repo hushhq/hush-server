@@ -17,6 +17,8 @@ type InstanceCache struct {
 	registrationMode      string
 	guildDiscovery        string
 	voiceKeyRotationHours int
+	transparencyURL       *string
+	logPublicKey          *string
 }
 
 // voiceKeyRotationHoursDefault is the default voice group key rotation interval.
@@ -34,8 +36,11 @@ func NewInstanceCache() *InstanceCache {
 	}
 }
 
-// Set updates all cached fields under a write lock. Called on startup (from
-// GetInstanceConfig) and after updateConfig writes to the database.
+// Set updates the instance configuration fields under a write lock. Called on
+// startup (from GetInstanceConfig) and after updateConfig writes to the database.
+//
+// This method does not touch transparency fields (transparencyURL, logPublicKey).
+// Use SetTransparencyInfo to update those separately after the log signer is loaded.
 func (c *InstanceCache) Set(name string, iconURL *string, regMode string, guildDiscovery string, voiceKeyRotationHours int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -55,8 +60,36 @@ func (c *InstanceCache) Set(name string, iconURL *string, regMode string, guildD
 	}
 }
 
+// SetTransparencyInfo stores the transparency log URL and log signer public key
+// in the cache. Called once at startup after the TransparencyService is initialized.
+// Neither field is updated by the admin config endpoint — they change only on restart.
+func (c *InstanceCache) SetTransparencyInfo(transparencyURL *string, logPublicKey *string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if transparencyURL != nil {
+		v := *transparencyURL
+		c.transparencyURL = &v
+	} else {
+		c.transparencyURL = nil
+	}
+	if logPublicKey != nil {
+		v := *logPublicKey
+		c.logPublicKey = &v
+	} else {
+		c.logPublicKey = nil
+	}
+}
+
 // snapshot returns a consistent copy of all cached fields under a read lock.
-func (c *InstanceCache) snapshot() (name string, iconURL *string, regMode string, guildDiscovery string, voiceKeyRotationHours int) {
+func (c *InstanceCache) snapshot() (
+	name string,
+	iconURL *string,
+	regMode string,
+	guildDiscovery string,
+	voiceKeyRotationHours int,
+	transparencyURL *string,
+	logPublicKey *string,
+) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	var ico *string
@@ -72,7 +105,17 @@ func (c *InstanceCache) snapshot() (name string, iconURL *string, regMode string
 	if gd == "" {
 		gd = "allowed"
 	}
-	return c.name, ico, c.registrationMode, gd, vkrh
+	var tURL *string
+	if c.transparencyURL != nil {
+		v := *c.transparencyURL
+		tURL = &v
+	}
+	var lPub *string
+	if c.logPublicKey != nil {
+		v := *c.logPublicKey
+		lPub = &v
+	}
+	return c.name, ico, c.registrationMode, gd, vkrh, tURL, lPub
 }
 
 // handshakeResponse is the JSON shape returned by GET /api/handshake.
@@ -87,6 +130,13 @@ type handshakeResponse struct {
 	IconURL                *string         `json:"iconUrl,omitempty"`
 	RegistrationMode       string          `json:"registrationMode"`
 	VoiceKeyRotationHours  int             `json:"voice_key_rotation_hours"`
+	// TransparencyURL is the base URL of the instance's transparency log API.
+	// Omitted when transparency logging is not configured for this instance.
+	TransparencyURL *string `json:"transparency_url,omitempty"`
+	// LogPublicKey is the hex-encoded Ed25519 public key of the log signer.
+	// Clients use this key to verify log countersignatures.
+	// Omitted when transparency logging is not configured.
+	LogPublicKey *string `json:"log_public_key,omitempty"`
 }
 
 // HandshakeHandler returns an http.HandlerFunc that serves GET /api/handshake.
@@ -94,7 +144,7 @@ type handshakeResponse struct {
 // only from the in-memory cache and version constants, never from the database.
 func HandshakeHandler(cache *InstanceCache, voiceEnabled bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		name, iconURL, regMode, guildDiscovery, voiceKeyRotationHours := cache.snapshot()
+		name, iconURL, regMode, guildDiscovery, voiceKeyRotationHours, transparencyURL, logPublicKey := cache.snapshot()
 
 		resp := handshakeResponse{
 			ServerVersion:          version.ServerVersion,
@@ -111,6 +161,8 @@ func HandshakeHandler(cache *InstanceCache, voiceEnabled bool) http.HandlerFunc 
 			IconURL:               iconURL,
 			RegistrationMode:      regMode,
 			VoiceKeyRotationHours: voiceKeyRotationHours,
+			TransparencyURL:       transparencyURL,
+			LogPublicKey:          logPublicKey,
 		}
 
 		writeJSON(w, http.StatusOK, resp)

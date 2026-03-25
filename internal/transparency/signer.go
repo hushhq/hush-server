@@ -103,3 +103,9 @@ func generateEphemeralSigner() (*LogSigner, error) {
 	}
 	return &LogSigner{privKey: priv, pubKey: pub}, nil
 }
+
+// NewEphemeralLogSigner generates a fresh random Ed25519 keypair.
+// Exported for use in tests that need a valid LogSigner without environment variables.
+func NewEphemeralLogSigner() (*LogSigner, error) {
+	return generateEphemeralSigner()
+}

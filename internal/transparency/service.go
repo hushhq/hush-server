@@ -74,20 +74,24 @@ func (s *TransparencyService) RecoverFromDB(ctx context.Context) error {
 	return nil
 }
 
-// AppendEntry verifies the user's signature, appends the entry to the Merkle
-// tree, countersigns, persists both the entry and the new tree head, and
-// returns an AppendResult for immediate client verification.
+// AppendEntry verifies the user's signature (when present), appends the entry
+// to the Merkle tree, countersigns, persists both the entry and the new tree
+// head, and returns an AppendResult for immediate client verification.
 //
-// The user signature over SerializeForUserSign() is verified before any DB
-// write. A failed verification returns an error without modifying state.
+// When UserSignature is nil or empty the signature verification step is skipped.
+// This is the MVP mode — client-side signing is added in T.1 Plan 03. A non-nil,
+// non-empty UserSignature that fails verification returns an error without
+// modifying tree state.
 func (s *TransparencyService) AppendEntry(ctx context.Context, entry *LogEntry) (*AppendResult, error) {
-	// 1. Verify user signature over fields 1-4.
-	payload, err := entry.SerializeForUserSign()
-	if err != nil {
-		return nil, fmt.Errorf("transparency: serialize for verify: %w", err)
-	}
-	if !ed25519.Verify(entry.UserPublicKey, payload, entry.UserSignature) {
-		return nil, fmt.Errorf("transparency: user signature verification failed")
+	// 1. Verify user signature over fields 1-4 (skip when nil/empty for MVP).
+	if len(entry.UserSignature) > 0 {
+		payload, err := entry.SerializeForUserSign()
+		if err != nil {
+			return nil, fmt.Errorf("transparency: serialize for verify: %w", err)
+		}
+		if !ed25519.Verify(entry.UserPublicKey, payload, entry.UserSignature) {
+			return nil, fmt.Errorf("transparency: user signature verification failed")
+		}
 	}
 
 	// 2. Compute full CBOR and leaf hash.
@@ -240,6 +244,15 @@ func (s *TransparencyService) RootHash() [32]byte {
 // the instance handshake response.
 func (s *TransparencyService) SignerPublicKey() ed25519.PublicKey {
 	return s.signer.PublicKey()
+}
+
+// AppendEntrySkipSig appends an entry without requiring a user signature.
+// Used by server handlers in MVP mode (T.1 Plan 02) before client-side signing
+// is implemented in Plan 03. The UserSignature field of the entry is set to nil.
+func (s *TransparencyService) AppendEntrySkipSig(ctx context.Context, entry *LogEntry) error {
+	entry.UserSignature = nil
+	_, err := s.AppendEntry(ctx, entry)
+	return err
 }
 
 // nowUnix is a variable to allow time injection in tests.
