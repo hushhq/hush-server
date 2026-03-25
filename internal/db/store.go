@@ -189,6 +189,19 @@ type Store interface {
 	IncrementGuildMemberCount(ctx context.Context, serverID string, delta int) error
 	// UpdateGuildChannelCounts recalculates text_channel_count and voice_channel_count for the guild.
 	UpdateGuildChannelCounts(ctx context.Context, serverID string) error
+
+	// Transparency log methods (migration 000019).
+	// InsertTransparencyLogEntry persists a signed log entry after it is appended
+	// to the Merkle tree. All byte slices are mandatory.
+	InsertTransparencyLogEntry(ctx context.Context, leafIndex uint64, operation string, userPubKey, subjectKey, entryCBOR, leafHash, userSig, logSig []byte) error
+	// GetTransparencyLogEntriesByPubKey returns all log entries for a public key,
+	// ordered by leaf_index ASC. Returns an empty slice when no entries exist.
+	GetTransparencyLogEntriesByPubKey(ctx context.Context, pubKey []byte) ([]models.TransparencyLogEntry, error)
+	// GetLatestTransparencyTreeHead returns the highest tree_size row, or nil
+	// when the log is empty (no error).
+	GetLatestTransparencyTreeHead(ctx context.Context) (*models.TransparencyTreeHead, error)
+	// InsertTransparencyTreeHead persists the Merkle tree state after each append.
+	InsertTransparencyTreeHead(ctx context.Context, treeSize uint64, rootHash, fringe, headSig []byte) error
 }
 
 // InstanceAuditLogFilter filters instance audit log queries.

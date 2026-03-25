@@ -411,3 +411,38 @@ type InstanceUnbanRequest struct {
 	UserID string `json:"userId"`
 	Reason string `json:"reason"`
 }
+
+// TransparencyLogEntry mirrors one row from the transparency_log_entries table.
+// It is returned by GetTransparencyLogEntriesByPubKey for proof generation.
+type TransparencyLogEntry struct {
+	ID          int64     `json:"id"`
+	LeafIndex   uint64    `json:"leafIndex"`
+	Operation   string    `json:"operation"`
+	UserPubKey  []byte    `json:"-"`
+	SubjectKey  []byte    `json:"subjectKey,omitempty"`
+	EntryCBOR   []byte    `json:"-"`
+	LeafHash    []byte    `json:"leafHash"`
+	UserSig     []byte    `json:"-"`
+	LogSig      []byte    `json:"logSig"`
+	LoggedAt    time.Time `json:"loggedAt"`
+}
+
+// TransparencyTreeHead mirrors one row from the transparency_tree_heads table.
+// The most recent row is loaded on startup to reconstruct the Merkle tree fringe.
+type TransparencyTreeHead struct {
+	TreeSize  uint64    `json:"treeSize"`
+	RootHash  []byte    `json:"rootHash"`
+	Fringe    []byte    `json:"-"` // serialized [][32]byte — not sent to clients
+	HeadSig   []byte    `json:"headSig"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+// MerkleInclusionProof is returned by the transparency verify API endpoint.
+// Clients use WebCrypto SHA-256 to recompute the root from the audit path.
+type MerkleInclusionProof struct {
+	LeafIndex    uint64   `json:"leafIndex"`
+	TreeSize     uint64   `json:"treeSize"`
+	AuditPath    [][]byte `json:"auditPath"`    // sibling hashes from leaf to root
+	RootHash     []byte   `json:"rootHash"`
+	LogSignature []byte   `json:"logSignature"` // log's countersignature over this proof
+}

@@ -14,10 +14,14 @@ type Config struct {
 	JWTExpiry    time.Duration
 	CORSOrigin   string
 	Production   bool
-	AdminAPIKey      string // X-Admin-Key header value for /api/admin; empty disables admin routes
-	LiveKitAPIKey    string
-	LiveKitAPISecret string
-	LiveKitURL       string
+	AdminAPIKey              string // X-Admin-Key header value for /api/admin; empty disables admin routes
+	LiveKitAPIKey            string
+	LiveKitAPISecret         string
+	LiveKitURL               string
+	// TransparencyLogPrivateKey is the hex-encoded 32-byte Ed25519 seed for the
+	// transparency log signing keypair. If empty in dev mode, an ephemeral key
+	// is generated with a warning. Required in production.
+	TransparencyLogPrivateKey string
 }
 
 // Load reads configuration from environment variables.
@@ -38,15 +42,16 @@ func Load() Config {
 	production := prod == "1" || prod == "true" || prod == "yes"
 
 	return Config{
-		Port:             port,
-		DatabaseURL:      os.Getenv("DATABASE_URL"),
-		JWTSecret:        os.Getenv("JWT_SECRET"),
-		JWTExpiry:        time.Duration(jwtExpiryHours) * time.Hour,
-		CORSOrigin:       os.Getenv("CORS_ORIGIN"),
-		Production:       production,
-		AdminAPIKey:      os.Getenv("ADMIN_API_KEY"),
-		LiveKitAPIKey:    os.Getenv("LIVEKIT_API_KEY"),
-		LiveKitAPISecret: os.Getenv("LIVEKIT_API_SECRET"),
-		LiveKitURL:       os.Getenv("LIVEKIT_URL"),
+		Port:                     port,
+		DatabaseURL:              os.Getenv("DATABASE_URL"),
+		JWTSecret:                os.Getenv("JWT_SECRET"),
+		JWTExpiry:                time.Duration(jwtExpiryHours) * time.Hour,
+		CORSOrigin:               os.Getenv("CORS_ORIGIN"),
+		Production:               production,
+		AdminAPIKey:              os.Getenv("ADMIN_API_KEY"),
+		LiveKitAPIKey:            os.Getenv("LIVEKIT_API_KEY"),
+		LiveKitAPISecret:         os.Getenv("LIVEKIT_API_SECRET"),
+		LiveKitURL:               os.Getenv("LIVEKIT_URL"),
+		TransparencyLogPrivateKey: os.Getenv("TRANSPARENCY_LOG_PRIVATE_KEY"),
 	}
 }

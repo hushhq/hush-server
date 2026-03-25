@@ -169,6 +169,12 @@ type mockStore struct {
 	incrementGuildMessageCountFn func(ctx context.Context, channelID string) error
 	incrementGuildMemberCountFn  func(ctx context.Context, serverID string, delta int) error
 	updateGuildChannelCountsFn   func(ctx context.Context, serverID string) error
+
+	// Transparency log methods
+	insertTransparencyLogEntryFn          func(ctx context.Context, leafIndex uint64, operation string, userPubKey, subjectKey, entryCBOR, leafHash, userSig, logSig []byte) error
+	getTransparencyLogEntriesByPubKeyFn   func(ctx context.Context, pubKey []byte) ([]models.TransparencyLogEntry, error)
+	getLatestTransparencyTreeHeadFn       func(ctx context.Context) (*models.TransparencyTreeHead, error)
+	insertTransparencyTreeHeadFn          func(ctx context.Context, treeSize uint64, rootHash, fringe, headSig []byte) error
 }
 
 // ---------- User/session — BIP39 public-key identity ----------
@@ -908,6 +914,36 @@ func (m *mockStore) IncrementGuildMemberCount(ctx context.Context, serverID stri
 func (m *mockStore) UpdateGuildChannelCounts(ctx context.Context, serverID string) error {
 	if m.updateGuildChannelCountsFn != nil {
 		return m.updateGuildChannelCountsFn(ctx, serverID)
+	}
+	return nil
+}
+
+// ---------- Transparency log ----------
+
+func (m *mockStore) InsertTransparencyLogEntry(ctx context.Context, leafIndex uint64, operation string, userPubKey, subjectKey, entryCBOR, leafHash, userSig, logSig []byte) error {
+	if m.insertTransparencyLogEntryFn != nil {
+		return m.insertTransparencyLogEntryFn(ctx, leafIndex, operation, userPubKey, subjectKey, entryCBOR, leafHash, userSig, logSig)
+	}
+	return nil
+}
+
+func (m *mockStore) GetTransparencyLogEntriesByPubKey(ctx context.Context, pubKey []byte) ([]models.TransparencyLogEntry, error) {
+	if m.getTransparencyLogEntriesByPubKeyFn != nil {
+		return m.getTransparencyLogEntriesByPubKeyFn(ctx, pubKey)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) GetLatestTransparencyTreeHead(ctx context.Context) (*models.TransparencyTreeHead, error) {
+	if m.getLatestTransparencyTreeHeadFn != nil {
+		return m.getLatestTransparencyTreeHeadFn(ctx)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) InsertTransparencyTreeHead(ctx context.Context, treeSize uint64, rootHash, fringe, headSig []byte) error {
+	if m.insertTransparencyTreeHeadFn != nil {
+		return m.insertTransparencyTreeHeadFn(ctx, treeSize, rootHash, fringe, headSig)
 	}
 	return nil
 }
