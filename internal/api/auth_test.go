@@ -480,28 +480,3 @@ func TestVerify_InstanceBanned_Returns403(t *testing.T) {
 	assert.Contains(t, resp["error"], "banned")
 }
 
-// ---------- Guest ----------
-
-func TestGuest_ReturnsJWT(t *testing.T) {
-	store := &mockStore{
-		createUserWithPublicKeyFn: func(_ context.Context, username, displayName string, _ []byte) (*models.User, error) {
-			return &models.User{
-				ID:          uuid.New().String(),
-				Username:    username,
-				DisplayName: displayName,
-				Role:        "member",
-				CreatedAt:   time.Now(),
-			}, nil
-		},
-	}
-	router := newTestRouter(store)
-
-	rr := postJSON(router, "/guest", nil)
-
-	assert.Equal(t, http.StatusOK, rr.Code)
-	resp := decodeAuthResponse(t, rr)
-	assert.NotEmpty(t, resp.Token)
-	assert.True(t, strings.HasPrefix(resp.User.Username, "guest_"),
-		"expected username to start with guest_, got %q", resp.User.Username)
-	assert.Equal(t, "Guest", resp.User.DisplayName)
-}

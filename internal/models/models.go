@@ -67,7 +67,7 @@ type DeviceKey struct {
 	Label           string     `json:"label,omitempty"`
 }
 
-// AuthResponse is returned by register, login, guest (token + user).
+// AuthResponse is returned by register and login (token + user).
 type AuthResponse struct {
 	Token string `json:"token"`
 	User  User   `json:"user"`

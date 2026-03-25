@@ -2,8 +2,6 @@ package api
 
 import (
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
@@ -45,7 +43,6 @@ func AuthRoutes(store db.Store, jwtSecret string, jwtExpiry time.Duration) chi.R
 	r.Get("/check-username/{username}", h.checkUsername)
 	r.Post("/challenge", h.challenge)
 	r.Post("/verify", h.verify)
-	r.Post("/guest", h.guest)
 	r.Group(func(r chi.Router) {
 		r.Use(RequireAuth(jwtSecret, store))
 		r.Post("/logout", h.logout)
@@ -272,29 +269,6 @@ func (h *authHandler) verify(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}()
-}
-
-// guest handles POST /api/auth/guest.
-// Generates an ephemeral Ed25519 keypair server-side, creates a guest user,
-// and returns a JWT. The private key is discarded — guest accounts have no
-// challenge-response auth; they can only log out. (IDEN-07)
-func (h *authHandler) guest(w http.ResponseWriter, r *http.Request) {
-	pub, _, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		slog.Error("generate guest keypair", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "guest creation failed"})
-		return
-	}
-
-	username := "guest_" + uuid.New().String()[:8]
-	user, err := h.store.CreateUserWithPublicKey(r.Context(), username, "Guest", pub)
-	if err != nil {
-		slog.Error("create guest user", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "guest creation failed"})
-		return
-	}
-
-	h.sendAuthResponse(w, r, user)
 }
 
 func (h *authHandler) sendAuthResponse(w http.ResponseWriter, r *http.Request, user *models.User) {
