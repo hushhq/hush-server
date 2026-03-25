@@ -366,27 +366,28 @@ func (h *mlsHandler) postCommit(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "commitBytes is required"})
 		return
 	}
-	if req.GroupInfo == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "groupInfo is required"})
-		return
-	}
-
 	commitBytes, err := base64.StdEncoding.DecodeString(req.CommitBytes)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid commitBytes base64"})
 		return
 	}
-	groupInfoBytes, err := base64.StdEncoding.DecodeString(req.GroupInfo)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid groupInfo base64"})
-		return
-	}
 
 	ctx := r.Context()
-	if err := h.store.UpsertMLSGroupInfo(ctx, channelID, groupType, groupInfoBytes, req.Epoch); err != nil {
-		slog.Error("mls: upsert group info on commit", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to store group info"})
-		return
+
+	// GroupInfo is optional — External Commits from joiners don't have updated
+	// GroupInfo until after mergePendingCommit. The joiner updates GroupInfo
+	// separately via PUT /groups/:id/info.
+	if req.GroupInfo != "" {
+		groupInfoBytes, giErr := base64.StdEncoding.DecodeString(req.GroupInfo)
+		if giErr != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid groupInfo base64"})
+			return
+		}
+		if err := h.store.UpsertMLSGroupInfo(ctx, channelID, groupType, groupInfoBytes, req.Epoch); err != nil {
+			slog.Error("mls: upsert group info on commit", "err", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to store group info"})
+			return
+		}
 	}
 	if err := h.store.AppendMLSCommit(ctx, channelID, req.Epoch, commitBytes, userID); err != nil {
 		slog.Error("mls: append commit", "err", err)
