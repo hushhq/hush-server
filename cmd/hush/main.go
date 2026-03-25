@@ -161,9 +161,11 @@ func main() {
 
 	wsHub := ws.NewHub()
 	if pool != nil && cfg.JWTSecret != "" {
-		// Auth endpoints: stricter per-IP limit — 5 requests per minute. SEC-01.
+		// Auth endpoints: stricter per-IP limit — 20 requests per minute. SEC-01.
+		// Raised from 5/min: multi-instance boot does challenge+verify per instance
+		// plus /me calls from multiple React effects on mount.
 		r.Route("/api/auth", func(sub chi.Router) {
-			sub.Use(api.IPRateLimiter(rate.Limit(5.0/60.0), 5))
+			sub.Use(api.IPRateLimiter(rate.Limit(20.0/60.0), 20))
 			sub.Mount("/", api.AuthRoutes(pool, cfg.JWTSecret, cfg.JWTExpiry))
 		})
 		// MLS key management: per-user limit — 10 requests per minute.
