@@ -17,7 +17,8 @@ func (p *Pool) CreateServer(ctx context.Context, encryptedMetadata []byte) (*mod
 		VALUES ($1)
 		RETURNING id, encrypted_metadata, member_count, text_channel_count, voice_channel_count,
 		          storage_bytes, message_count, active_members_30d, last_active_at,
-		          access_policy, discoverable, admin_label_encrypted, created_at`,
+		          access_policy, discoverable, admin_label_encrypted, created_at,
+		          is_dm, category, public_name, public_description`,
 		encryptedMetadata,
 	)
 	return scanServer(row)
@@ -44,7 +45,8 @@ func (p *Pool) GetServerByID(ctx context.Context, serverID string) (*models.Serv
 	row := p.QueryRow(ctx, `
 		SELECT id, encrypted_metadata, member_count, text_channel_count, voice_channel_count,
 		       storage_bytes, message_count, active_members_30d, last_active_at,
-		       access_policy, discoverable, admin_label_encrypted, created_at
+		       access_policy, discoverable, admin_label_encrypted, created_at,
+		       is_dm, category, public_name, public_description
 		FROM servers WHERE id = $1`, serverID)
 	s, err := scanServer(row)
 	if err != nil {
@@ -61,7 +63,8 @@ func (p *Pool) ListServersForUser(ctx context.Context, userID string) ([]models.
 	rows, err := p.Query(ctx, `
 		SELECT s.id, s.encrypted_metadata, s.member_count, s.text_channel_count, s.voice_channel_count,
 		       s.storage_bytes, s.message_count, s.active_members_30d, s.last_active_at,
-		       s.access_policy, s.discoverable, s.admin_label_encrypted, s.created_at
+		       s.access_policy, s.discoverable, s.admin_label_encrypted, s.created_at,
+		       s.is_dm, s.category, s.public_name, s.public_description
 		FROM servers s
 		JOIN server_members sm ON sm.server_id = s.id
 		WHERE sm.user_id = $1
@@ -154,6 +157,7 @@ func scanServer(row pgx.Row) (*models.Server, error) {
 		&s.ID, &s.EncryptedMetadata, &s.MemberCount, &s.TextChannelCount, &s.VoiceChannelCount,
 		&s.StorageBytes, &s.MessageCount, &s.ActiveMembers30d, &s.LastActiveAt,
 		&s.AccessPolicy, &s.Discoverable, &s.AdminLabelEncrypted, &s.CreatedAt,
+		&s.IsDm, &s.Category, &s.PublicName, &s.PublicDescription,
 	)
 	if err != nil {
 		return nil, err

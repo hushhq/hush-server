@@ -134,6 +134,8 @@ const (
 
 // Server is a guild within this Hush instance.
 // All plaintext name/icon/owner fields are removed — the backend is a blind relay.
+// Exception: PublicName and PublicDescription are plaintext when Discoverable=true —
+// guild admins explicitly opt in to this exposure by enabling discoverability.
 type Server struct {
 	ID                  string     `json:"id"`
 	EncryptedMetadata   []byte     `json:"encryptedMetadata,omitempty"`
@@ -148,6 +150,11 @@ type Server struct {
 	Discoverable        bool       `json:"discoverable"`
 	AdminLabelEncrypted []byte     `json:"adminLabelEncrypted,omitempty"`
 	CreatedAt           time.Time  `json:"createdAt"`
+	// DM and discovery fields (migration 000021).
+	IsDm             bool    `json:"isDm"`
+	Category         *string `json:"category,omitempty"`
+	PublicName       *string `json:"publicName,omitempty"`
+	PublicDescription *string `json:"publicDescription,omitempty"`
 }
 
 // ServerMember records a user's membership and integer permission level within a guild.
@@ -446,4 +453,37 @@ type MerkleInclusionProof struct {
 	AuditPath    [][]byte `json:"auditPath"`    // sibling hashes from leaf to root
 	RootHash     []byte   `json:"rootHash"`
 	LogSignature []byte   `json:"logSignature"` // log's countersignature over this proof
+}
+
+// CreateDMRequest is the body for POST /api/guilds/dm.
+type CreateDMRequest struct {
+	OtherUserID string `json:"otherUserId"`
+}
+
+// DiscoverGuild is one card in the GET /api/guilds/discover response.
+// Only fields that discoverable guild admins have opted to expose are included.
+type DiscoverGuild struct {
+	ID               string    `json:"id"`
+	PublicName       string    `json:"publicName"`
+	PublicDescription string   `json:"publicDescription"`
+	Category         string    `json:"category"`
+	AccessPolicy     string    `json:"accessPolicy"`
+	MemberCount      int       `json:"memberCount"`
+	CreatedAt        time.Time `json:"createdAt"`
+}
+
+// UserSearchPublicResult is a user record safe for public search endpoints.
+// Contains only identity fields — no ban status, roles, or credentials.
+type UserSearchPublicResult struct {
+	ID          string `json:"id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"displayName"`
+}
+
+// DMResponse is returned by POST /api/guilds/dm.
+// Wraps the DM guild server with the other participant's identity.
+type DMResponse struct {
+	Server    Server                 `json:"server"`
+	OtherUser UserSearchPublicResult `json:"otherUser"`
+	ChannelID string                 `json:"channelId"`
 }

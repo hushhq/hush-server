@@ -191,6 +191,22 @@ type Store interface {
 	// UpdateGuildChannelCounts recalculates text_channel_count and voice_channel_count for the guild.
 	UpdateGuildChannelCounts(ctx context.Context, serverID string) error
 
+	// DM and discovery methods (migration 000021).
+
+	// FindDMGuild returns the DM guild for the given user pair, or sql.ErrNoRows
+	// when no DM exists yet. User IDs are canonically ordered internally.
+	FindDMGuild(ctx context.Context, userAID, userBID string) (*models.Server, error)
+	// CreateDMGuild creates a DM guild for the two users in a single transaction.
+	// Inserts the servers row (is_dm=true), dm_pairs entry, both server_members
+	// (PermissionLevelOwner), and one text channel. Returns the new server.
+	CreateDMGuild(ctx context.Context, userAID, userBID string) (*models.Server, *models.Channel, error)
+	// DiscoverGuilds returns publicly discoverable guilds filtered by category,
+	// search query, and sort order. Returns results and total count for pagination.
+	DiscoverGuilds(ctx context.Context, category, search, sort string, page, pageSize int) ([]models.DiscoverGuild, int, error)
+	// SearchUsersPublic returns users matching the query on username or displayName.
+	// Only id, username, and displayName are returned — no ban/role info.
+	SearchUsersPublic(ctx context.Context, query string, limit int) ([]models.UserSearchPublicResult, error)
+
 	// Transparency log methods (migration 000019).
 	// InsertTransparencyLogEntry persists a signed log entry after it is appended
 	// to the Merkle tree. All byte slices are mandatory.
