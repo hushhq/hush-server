@@ -86,6 +86,56 @@ func TestCreateServer_Unauthenticated_Returns401(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, rr.Code)
 }
 
+// TestCreateServer_PolicyDisabled verifies that createServer returns 403
+// when the instance server_creation_policy is "disabled".
+func TestCreateServer_PolicyDisabled(t *testing.T) {
+	userID := uuid.New().String()
+	store := &mockStore{
+		getInstanceConfigFn: func(_ context.Context) (*models.InstanceConfig, error) {
+			return &models.InstanceConfig{
+				ID:                   "inst-1",
+				Name:                 "Test Instance",
+				RegistrationMode:     "open",
+				ServerCreationPolicy: "disabled",
+			}, nil
+		},
+	}
+	token := makeAuth(store, userID)
+	router := serversRouter(store)
+
+	rr := postServerJSON(router, "/", models.CreateServerRequest{EncryptedMetadata: []byte(`{}`)}, token)
+	require.Equal(t, http.StatusForbidden, rr.Code)
+
+	var body map[string]string
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&body))
+	assert.Contains(t, body["error"], "disabled")
+}
+
+// TestCreateServer_PolicyPaid verifies that createServer returns 403
+// with a subscription message when server_creation_policy is "paid".
+func TestCreateServer_PolicyPaid(t *testing.T) {
+	userID := uuid.New().String()
+	store := &mockStore{
+		getInstanceConfigFn: func(_ context.Context) (*models.InstanceConfig, error) {
+			return &models.InstanceConfig{
+				ID:                   "inst-1",
+				Name:                 "Test Instance",
+				RegistrationMode:     "open",
+				ServerCreationPolicy: "paid",
+			}, nil
+		},
+	}
+	token := makeAuth(store, userID)
+	router := serversRouter(store)
+
+	rr := postServerJSON(router, "/", models.CreateServerRequest{EncryptedMetadata: []byte(`{}`)}, token)
+	require.Equal(t, http.StatusForbidden, rr.Code)
+
+	var body map[string]string
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&body))
+	assert.Contains(t, body["error"], "subscription")
+}
+
 // ---------- GET / (listMyServers) ----------
 
 func TestListMyServers(t *testing.T) {

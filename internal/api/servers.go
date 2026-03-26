@@ -59,14 +59,33 @@ type serversHandler struct {
 }
 
 // createServer handles POST /api/servers.
-// Enforces server_creation_policy. The creator is auto-added as guild owner.
+// Guild creation is gated by the instance server_creation_policy (open/paid/disabled).
+// Guild-level access control is additionally handled by access_policy and discoverable
+// flags on the guild itself.
 func (h *serversHandler) createServer(w http.ResponseWriter, r *http.Request) {
 	userID := userIDFromContext(r.Context())
 	if userID == "" {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
 		return
 	}
-	// TODO(0O-03): serverCreationPolicy removed — creation access handled in Plan 03.
+	cfg, err := h.store.GetInstanceConfig(r.Context())
+	if err != nil {
+		slog.Error("createServer: fetch instance config", "err", err)
+		writeJSON(w, http.StatusInternalServerError,
+			map[string]string{"error": "failed to verify creation policy"})
+		return
+	}
+	switch cfg.ServerCreationPolicy {
+	case "disabled":
+		writeJSON(w, http.StatusForbidden,
+			map[string]string{"error": "server creation is disabled on this instance"})
+		return
+	case "paid":
+		writeJSON(w, http.StatusForbidden,
+			map[string]string{"error": "This instance requires a subscription to create servers."})
+		return
+	// "open": fall through — any authenticated user can create.
+	}
 	var req models.CreateServerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
@@ -117,7 +136,7 @@ func (h *serversHandler) createServer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if !hasSystem {
-		// TODO(0O-03): system channel Name field on TemplateChannel is display-only after migration 000017.
+		// Name is display-only (metadata is encrypted); channel type determines behavior.
 		template = append([]models.TemplateChannel{{Name: "system", Type: "system", Position: -1}}, template...)
 	}
 
@@ -318,7 +337,6 @@ func (h *serversHandler) listMembers(w http.ResponseWriter, r *http.Request) {
 }
 
 // changePermissionLevelRequest is the JSON body for PUT /api/servers/{serverId}/members/{userId}/level.
-// TODO(0O-03): Full permission level change handler will be rewritten in Plan 03.
 type changePermissionLevelRequest struct {
 	PermissionLevel int `json:"permissionLevel"`
 }

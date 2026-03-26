@@ -155,16 +155,11 @@ func (h *instanceHandler) instanceBan(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cannot ban yourself"})
 		return
 	}
-	// Check target role — cannot ban owner; admin cannot ban another admin
+	// Check target role — admin cannot ban another admin (only instance operator can).
 	targetRole, err := h.store.GetUserRole(r.Context(), req.UserID)
 	if err != nil {
 		slog.Error("get target user role", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify target role"})
-		return
-	}
-	// Cannot ban the instance owner regardless of actor role.
-	if targetRole == "owner" {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "cannot ban the instance owner"})
 		return
 	}
 	// Admin cannot ban other admins — only the instance operator (API key level) can.

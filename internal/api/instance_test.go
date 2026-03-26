@@ -335,29 +335,6 @@ func TestSearchUsers_ReturnsBanStatus(t *testing.T) {
 	assert.Equal(t, "tos violation", *results[0].BanReason)
 }
 
-func TestInstanceBan_CannotBanOwner_Returns403(t *testing.T) {
-	actorID := uuid.New().String()
-	ownerID := uuid.New().String()
-	store := &mockStore{}
-	token := makeAuth(store, actorID)
-	store.getUserRoleFn = func(_ context.Context, uid string) (string, error) {
-		if uid == actorID {
-			return "admin", nil
-		}
-		return "owner", nil
-	}
-
-	router := instanceRouter(store)
-	rr := postServerJSON(router, "/bans", models.InstanceBanRequest{
-		UserID: ownerID,
-		Reason: "attempted owner ban",
-	}, token)
-
-	require.Equal(t, http.StatusForbidden, rr.Code)
-	errBody := decodeError(t, rr)
-	assert.Contains(t, errBody["error"], "cannot ban the instance owner")
-}
-
 // ---------- Routes moved to /api/admin (AdminAPIRoutes) ----------
 // Tests for PUT /api/admin/config, GET /api/admin/audit-log, and server template
 // CRUD are in admin_test.go.
