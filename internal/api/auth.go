@@ -169,6 +169,14 @@ func (h *authHandler) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Block registration if the username belongs to a banned user (IROLE-03).
+	if existing, _ := h.store.GetUserByUsername(r.Context(), req.Username); existing != nil {
+		if ban, _ := h.store.GetActiveInstanceBan(r.Context(), existing.ID); ban != nil {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "Registration blocked. Reason: " + ban.Reason})
+			return
+		}
+	}
+
 	user, err := h.store.CreateUserWithPublicKey(r.Context(), req.Username, req.DisplayName, publicKeyBytes)
 	if err != nil {
 		errStr := err.Error()
