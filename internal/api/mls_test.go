@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"fmt"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -735,10 +736,12 @@ func TestPutGuildGroupInfo_AdminLevel_Returns204(t *testing.T) {
 			storedEpoch = epoch
 			return nil
 		},
+		getServerMemberLevelFn: func(_ context.Context, _, _ string) (int, error) {
+			return models.PermissionLevelAdmin, nil
+		},
 	}
 	token := makeAuth(store, uuid.New().String())
-	// Inject admin-level context so the handler's permission check passes.
-	router := mlsRouterWithGuildLevel(store, models.PermissionLevelAdmin)
+	router := mlsRouter(store, &mockMLSHub{})
 
 	encoded := base64.StdEncoding.EncodeToString([]byte("guild-blob"))
 	rr := putMLS(router, "/guilds/"+guildID+"/group-info", token, map[string]interface{}{
@@ -750,12 +753,36 @@ func TestPutGuildGroupInfo_AdminLevel_Returns204(t *testing.T) {
 	assert.Equal(t, int64(5), storedEpoch)
 }
 
-func TestPutGuildGroupInfo_MemberLevel_Returns403(t *testing.T) {
+func TestPutGuildGroupInfo_MemberLevel_Returns204(t *testing.T) {
 	guildID := uuid.New().String()
-	store := &mockStore{}
+	store := &mockStore{
+		upsertMLSGuildMetadataGroupInfoFn: func(_ context.Context, _ string, _ []byte, _ int64) error {
+			return nil
+		},
+		getServerMemberLevelFn: func(_ context.Context, _, _ string) (int, error) {
+			return models.PermissionLevelMember, nil
+		},
+	}
 	token := makeAuth(store, uuid.New().String())
-	// Member level (0) is below admin (2) — handler must reject.
-	router := mlsRouterWithGuildLevel(store, models.PermissionLevelMember)
+	router := mlsRouter(store, &mockMLSHub{})
+
+	encoded := base64.StdEncoding.EncodeToString([]byte("guild-blob"))
+	rr := putMLS(router, "/guilds/"+guildID+"/group-info", token, map[string]interface{}{
+		"groupInfo": encoded,
+		"epoch":     int64(1),
+	})
+	assert.Equal(t, http.StatusNoContent, rr.Code)
+}
+
+func TestPutGuildGroupInfo_NonMember_Returns403(t *testing.T) {
+	guildID := uuid.New().String()
+	store := &mockStore{
+		getServerMemberLevelFn: func(_ context.Context, _, _ string) (int, error) {
+			return 0, fmt.Errorf("not a member")
+		},
+	}
+	token := makeAuth(store, uuid.New().String())
+	router := mlsRouter(store, &mockMLSHub{})
 
 	encoded := base64.StdEncoding.EncodeToString([]byte("guild-blob"))
 	rr := putMLS(router, "/guilds/"+guildID+"/group-info", token, map[string]interface{}{
@@ -776,9 +803,12 @@ func TestDeleteGuildGroupInfo_AdminLevel_Returns204(t *testing.T) {
 			}
 			return nil
 		},
+		getServerMemberLevelFn: func(_ context.Context, _, _ string) (int, error) {
+			return models.PermissionLevelAdmin, nil
+		},
 	}
 	token := makeAuth(store, uuid.New().String())
-	router := mlsRouterWithGuildLevel(store, models.PermissionLevelAdmin)
+	router := mlsRouter(store, &mockMLSHub{})
 
 	rr := deleteMLS(router, "/guilds/"+guildID+"/group-info", token)
 	require.Equal(t, http.StatusNoContent, rr.Code)
@@ -787,9 +817,13 @@ func TestDeleteGuildGroupInfo_AdminLevel_Returns204(t *testing.T) {
 
 func TestDeleteGuildGroupInfo_MemberLevel_Returns403(t *testing.T) {
 	guildID := uuid.New().String()
-	store := &mockStore{}
+	store := &mockStore{
+		getServerMemberLevelFn: func(_ context.Context, _, _ string) (int, error) {
+			return models.PermissionLevelMember, nil
+		},
+	}
 	token := makeAuth(store, uuid.New().String())
-	router := mlsRouterWithGuildLevel(store, models.PermissionLevelMember)
+	router := mlsRouter(store, &mockMLSHub{})
 
 	rr := deleteMLS(router, "/guilds/"+guildID+"/group-info", token)
 	assert.Equal(t, http.StatusForbidden, rr.Code)
