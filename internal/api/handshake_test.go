@@ -16,7 +16,7 @@ import (
 
 func TestInstanceCache_ZeroValue_ReturnsDefaults(t *testing.T) {
 	cache := NewInstanceCache()
-	name, iconURL, regMode, scp, vkrh, tURL, lPub := cache.snapshot()
+	name, iconURL, regMode, scp, vkrh, tURL, lPub, _ := cache.snapshot()
 	assert.Equal(t, "", name)
 	assert.Nil(t, iconURL)
 	assert.Equal(t, "", regMode)
@@ -29,9 +29,9 @@ func TestInstanceCache_ZeroValue_ReturnsDefaults(t *testing.T) {
 func TestInstanceCache_Set_ReflectsValues(t *testing.T) {
 	cache := NewInstanceCache()
 	icon := "https://example.com/icon.png"
-	cache.Set("My Hush", &icon, "invite_only", "admin_only", 4)
+	cache.Set("My Hush", &icon, "invite_only", "admin_only", 4, "open")
 
-	name, iconURL, regMode, scp, vkrh, _, _ := cache.snapshot()
+	name, iconURL, regMode, scp, vkrh, _, _, _ := cache.snapshot()
 	assert.Equal(t, "My Hush", name)
 	require.NotNil(t, iconURL)
 	assert.Equal(t, "https://example.com/icon.png", *iconURL)
@@ -42,9 +42,9 @@ func TestInstanceCache_Set_ReflectsValues(t *testing.T) {
 
 func TestInstanceCache_Set_NilIconURL(t *testing.T) {
 	cache := NewInstanceCache()
-	cache.Set("Test", nil, "open", "any_member", 2)
+	cache.Set("Test", nil, "open", "any_member", 2, "open")
 
-	_, iconURL, _, _, _, _, _ := cache.snapshot()
+	_, iconURL, _, _, _, _, _, _ := cache.snapshot()
 	assert.Nil(t, iconURL)
 }
 
@@ -52,7 +52,7 @@ func TestInstanceCache_Set_NilIconURL(t *testing.T) {
 
 func TestHandshake_Returns200_NoAuth(t *testing.T) {
 	cache := NewInstanceCache()
-	cache.Set("Hush Instance", nil, "open", "any_member", 2)
+	cache.Set("Hush Instance", nil, "open", "any_member", 2, "open")
 	handler := HandshakeHandler(cache, true)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/handshake", nil)
@@ -66,7 +66,7 @@ func TestHandshake_Returns200_NoAuth(t *testing.T) {
 func TestHandshake_ContainsAllRequiredFields(t *testing.T) {
 	cache := NewInstanceCache()
 	icon := "https://example.com/icon.png"
-	cache.Set("My Instance", &icon, "invite_only", "admin_only", 2)
+	cache.Set("My Instance", &icon, "invite_only", "admin_only", 2, "open")
 	handler := HandshakeHandler(cache, true)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/handshake", nil)
@@ -195,7 +195,7 @@ func TestHandshake_UninitializedCache_ReturnsZeroValues(t *testing.T) {
 func TestHandshake_InstanceIdentity_PopulatedFromCache(t *testing.T) {
 	cache := NewInstanceCache()
 	icon := "https://hush.example.com/logo.png"
-	cache.Set("Hush Corp", &icon, "invite_only", "admin_only", 2)
+	cache.Set("Hush Corp", &icon, "invite_only", "admin_only", 2, "open")
 
 	handler := HandshakeHandler(cache, true)
 	req := httptest.NewRequest(http.MethodGet, "/api/handshake", nil)
@@ -214,7 +214,7 @@ func TestHandshake_InstanceIdentity_PopulatedFromCache(t *testing.T) {
 
 func TestHandshake_VoiceKeyRotationHours_InResponse(t *testing.T) {
 	cache := NewInstanceCache()
-	cache.Set("Test", nil, "open", "any_member", 4)
+	cache.Set("Test", nil, "open", "any_member", 4, "open")
 
 	handler := HandshakeHandler(cache, true)
 	req := httptest.NewRequest(http.MethodGet, "/api/handshake", nil)
@@ -240,4 +240,40 @@ func TestHandshake_VoiceKeyRotationHours_DefaultIs2(t *testing.T) {
 	var resp handshakeResponse
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
 	assert.Equal(t, voiceKeyRotationHoursDefault, resp.VoiceKeyRotationHours, "default voice_key_rotation_hours must be 2")
+}
+
+// TestHandshake_ServerCreationPolicy verifies that a non-default serverCreationPolicy
+// value set via cache.Set round-trips through the handshake response JSON.
+func TestHandshake_ServerCreationPolicy(t *testing.T) {
+	cache := NewInstanceCache()
+	cache.Set("Test Instance", nil, "open", "allowed", 2, "disabled")
+
+	handler := HandshakeHandler(cache, true)
+	req := httptest.NewRequest(http.MethodGet, "/api/handshake", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	var body map[string]interface{}
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&body))
+	assert.Equal(t, "disabled", body["server_creation_policy"], "server_creation_policy must reflect the cached value")
+}
+
+// TestHandshake_ServerCreationPolicy_DefaultIsOpen verifies the handshake response
+// includes server_creation_policy="open" when the cache uses its default value.
+func TestHandshake_ServerCreationPolicy_DefaultIsOpen(t *testing.T) {
+	cache := NewInstanceCache()
+	// Do NOT call Set — verify default is "open"
+
+	handler := HandshakeHandler(cache, true)
+	req := httptest.NewRequest(http.MethodGet, "/api/handshake", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	var body map[string]interface{}
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&body))
+	assert.Equal(t, "open", body["server_creation_policy"], "default server_creation_policy must be 'open'")
 }

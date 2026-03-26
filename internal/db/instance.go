@@ -16,10 +16,10 @@ import (
 // GetInstanceConfig returns the single instance configuration row.
 func (p *Pool) GetInstanceConfig(ctx context.Context) (*models.InstanceConfig, error) {
 	row := p.QueryRow(ctx, `
-		SELECT id, name, icon_url, registration_mode, guild_discovery, created_at
+		SELECT id, name, icon_url, registration_mode, guild_discovery, server_creation_policy, created_at
 		FROM instance_config LIMIT 1`)
 	var c models.InstanceConfig
-	if err := row.Scan(&c.ID, &c.Name, &c.IconURL, &c.RegistrationMode, &c.GuildDiscovery, &c.CreatedAt); err != nil {
+	if err := row.Scan(&c.ID, &c.Name, &c.IconURL, &c.RegistrationMode, &c.GuildDiscovery, &c.ServerCreationPolicy, &c.CreatedAt); err != nil {
 		return nil, err
 	}
 	return &c, nil
@@ -146,13 +146,13 @@ func (p *Pool) DeleteServerTemplate(ctx context.Context, id string) error {
 }
 
 // UpdateInstanceConfig updates only the non-nil fields of instance_config.
-// guildDiscovery replaces the removed serverCreationPolicy parameter.
-func (p *Pool) UpdateInstanceConfig(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string) error {
-	if name == nil && iconURL == nil && registrationMode == nil && guildDiscovery == nil {
+// serverCreationPolicy must be one of "open", "paid", or "disabled" when non-nil.
+func (p *Pool) UpdateInstanceConfig(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string, serverCreationPolicy *string) error {
+	if name == nil && iconURL == nil && registrationMode == nil && guildDiscovery == nil && serverCreationPolicy == nil {
 		return nil
 	}
-	setClauses := make([]string, 0, 4)
-	args := make([]any, 0, 4)
+	setClauses := make([]string, 0, 5)
+	args := make([]any, 0, 5)
 	idx := 1
 	if name != nil {
 		setClauses = append(setClauses, fmt.Sprintf("name = $%d", idx))
@@ -172,6 +172,11 @@ func (p *Pool) UpdateInstanceConfig(ctx context.Context, name *string, iconURL *
 	if guildDiscovery != nil {
 		setClauses = append(setClauses, fmt.Sprintf("guild_discovery = $%d", idx))
 		args = append(args, *guildDiscovery)
+		idx++
+	}
+	if serverCreationPolicy != nil {
+		setClauses = append(setClauses, fmt.Sprintf("server_creation_policy = $%d", idx))
+		args = append(args, *serverCreationPolicy)
 		idx++
 	}
 	query := "UPDATE instance_config SET " + strings.Join(setClauses, ", ")

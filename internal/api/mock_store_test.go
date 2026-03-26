@@ -66,7 +66,7 @@ type mockStore struct {
 
 	// Instance
 	getInstanceConfigFn    func(ctx context.Context) (*models.InstanceConfig, error)
-	updateInstanceConfigFn func(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string) error
+	updateInstanceConfigFn func(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string, serverCreationPolicy *string) error
 	getUserRoleFn          func(ctx context.Context, userID string) (string, error)
 	updateUserRoleFn       func(ctx context.Context, userID, role string) error
 	listMembersFn          func(ctx context.Context) ([]models.Member, error)
@@ -392,15 +392,16 @@ func (m *mockStore) GetInstanceConfig(ctx context.Context) (*models.InstanceConf
 		return m.getInstanceConfigFn(ctx)
 	}
 	return &models.InstanceConfig{
-		ID:             "inst-1",
-		Name:             "Test Instance",
-		RegistrationMode: "open",
+		ID:                   "inst-1",
+		Name:                 "Test Instance",
+		RegistrationMode:     "open",
+		ServerCreationPolicy: "open",
 	}, nil
 }
 
-func (m *mockStore) UpdateInstanceConfig(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string) error {
+func (m *mockStore) UpdateInstanceConfig(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string, serverCreationPolicy *string) error {
 	if m.updateInstanceConfigFn != nil {
-		return m.updateInstanceConfigFn(ctx, name, iconURL, registrationMode, guildDiscovery)
+		return m.updateInstanceConfigFn(ctx, name, iconURL, registrationMode, guildDiscovery, serverCreationPolicy)
 	}
 	return nil
 }

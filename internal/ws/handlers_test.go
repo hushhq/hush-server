@@ -117,7 +117,7 @@ func (m *messageStoreMock) IsChannelMember(ctx context.Context, channelID, userI
 func (m *messageStoreMock) GetInstanceConfig(context.Context) (*models.InstanceConfig, error) {
 	return nil, nil
 }
-func (m *messageStoreMock) UpdateInstanceConfig(context.Context, *string, *string, *string, *string) error {
+func (m *messageStoreMock) UpdateInstanceConfig(context.Context, *string, *string, *string, *string, *string) error {
 	return nil
 }
 func (m *messageStoreMock) GetUserRole(context.Context, string) (string, error)  { return "member", nil }

@@ -112,7 +112,7 @@ func main() {
 				slog.Warn("handshake cache: failed to read voice_key_rotation_hours, using default", "err", vkrhErr)
 				voiceKeyRotationHours = 2
 			}
-			handshakeCache.Set(icfg.Name, icfg.IconURL, icfg.RegistrationMode, icfg.GuildDiscovery, voiceKeyRotationHours)
+			handshakeCache.Set(icfg.Name, icfg.IconURL, icfg.RegistrationMode, icfg.GuildDiscovery, voiceKeyRotationHours, icfg.ServerCreationPolicy)
 		}
 
 		// System message cleanup: prune expired messages every 6 hours.

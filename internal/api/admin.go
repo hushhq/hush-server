@@ -95,13 +95,13 @@ func (h *adminHandler) health(w http.ResponseWriter, r *http.Request) {
 }
 
 // adminConfigResponse is the response for GET /api/admin/config.
-// Excludes owner_id and server_creation_policy (removed in opacity model).
 type adminConfigResponse struct {
-	ID               string  `json:"id"`
-	Name             string  `json:"name"`
-	IconURL          *string `json:"iconUrl"`
-	RegistrationMode string  `json:"registrationMode"`
-	GuildDiscovery   string  `json:"guildDiscovery"`
+	ID                   string  `json:"id"`
+	Name                 string  `json:"name"`
+	IconURL              *string `json:"iconUrl"`
+	RegistrationMode     string  `json:"registrationMode"`
+	GuildDiscovery       string  `json:"guildDiscovery"`
+	ServerCreationPolicy string  `json:"serverCreationPolicy"`
 }
 
 // getConfig handles GET /api/admin/config.
@@ -113,20 +113,22 @@ func (h *adminHandler) getConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, adminConfigResponse{
-		ID:               cfg.ID,
-		Name:             cfg.Name,
-		IconURL:          cfg.IconURL,
-		RegistrationMode: cfg.RegistrationMode,
-		GuildDiscovery:   cfg.GuildDiscovery,
+		ID:                   cfg.ID,
+		Name:                 cfg.Name,
+		IconURL:              cfg.IconURL,
+		RegistrationMode:     cfg.RegistrationMode,
+		GuildDiscovery:       cfg.GuildDiscovery,
+		ServerCreationPolicy: cfg.ServerCreationPolicy,
 	})
 }
 
 // adminUpdateConfigRequest is the body for PUT /api/admin/config.
 type adminUpdateConfigRequest struct {
-	Name             *string `json:"name"`
-	IconURL          *string `json:"iconUrl"`
-	RegistrationMode *string `json:"registrationMode"`
-	GuildDiscovery   *string `json:"guildDiscovery"`
+	Name                 *string `json:"name"`
+	IconURL              *string `json:"iconUrl"`
+	RegistrationMode     *string `json:"registrationMode"`
+	GuildDiscovery       *string `json:"guildDiscovery"`
+	ServerCreationPolicy *string `json:"serverCreationPolicy"`
 }
 
 // updateConfig handles PUT /api/admin/config.
@@ -161,10 +163,18 @@ func (h *adminHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if req.ServerCreationPolicy != nil {
+		switch *req.ServerCreationPolicy {
+		case "open", "paid", "disabled":
+		default:
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "serverCreationPolicy must be open, paid, or disabled"})
+			return
+		}
+	}
 
 	oldCfg, _ := h.store.GetInstanceConfig(r.Context())
 
-	if err := h.store.UpdateInstanceConfig(r.Context(), req.Name, req.IconURL, req.RegistrationMode, req.GuildDiscovery); err != nil {
+	if err := h.store.UpdateInstanceConfig(r.Context(), req.Name, req.IconURL, req.RegistrationMode, req.GuildDiscovery, req.ServerCreationPolicy); err != nil {
 		slog.Error("admin updateConfig", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update config"})
 		return
@@ -181,6 +191,9 @@ func (h *adminHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.GuildDiscovery != nil && *req.GuildDiscovery != oldCfg.GuildDiscovery {
 			metadata["guild_discovery"] = map[string]string{"old": oldCfg.GuildDiscovery, "new": *req.GuildDiscovery}
+		}
+		if req.ServerCreationPolicy != nil && *req.ServerCreationPolicy != oldCfg.ServerCreationPolicy {
+			metadata["server_creation_policy"] = map[string]string{"old": oldCfg.ServerCreationPolicy, "new": *req.ServerCreationPolicy}
 		}
 		if len(metadata) > 0 {
 			if err := h.store.InsertInstanceAuditLog(r.Context(), "admin-api", nil, "config_change", "instance config updated via admin API", metadata); err != nil {
@@ -201,7 +214,7 @@ func (h *adminHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("admin updateConfig: failed to read voice_key_rotation_hours, using default", "err", vkrhErr)
 			voiceKeyRotationHours = 2
 		}
-		h.cache.Set(newCfg.Name, newCfg.IconURL, newCfg.RegistrationMode, newCfg.GuildDiscovery, voiceKeyRotationHours)
+		h.cache.Set(newCfg.Name, newCfg.IconURL, newCfg.RegistrationMode, newCfg.GuildDiscovery, voiceKeyRotationHours, newCfg.ServerCreationPolicy)
 	}
 
 	w.WriteHeader(http.StatusNoContent)

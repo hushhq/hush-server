@@ -182,7 +182,7 @@ func TestAdminUpdateConfig_GuildDiscovery_Returns204(t *testing.T) {
 				RegistrationMode: "open",
 			}, nil
 		},
-		updateInstanceConfigFn: func(_ context.Context, name, iconURL, regMode, guildDiscovery *string) error {
+		updateInstanceConfigFn: func(_ context.Context, name, iconURL, regMode, guildDiscovery, serverCreationPolicy *string) error {
 			updatedGuildDiscovery = guildDiscovery
 			return nil
 		},
@@ -227,7 +227,7 @@ func TestAdminUpdateConfig_AuditLogWritten(t *testing.T) {
 				GuildDiscovery:   "disabled",
 			}, nil
 		},
-		updateInstanceConfigFn: func(_ context.Context, _, _, _, _ *string) error {
+		updateInstanceConfigFn: func(_ context.Context, _, _, _, _, _ *string) error {
 			return nil
 		},
 		getVoiceKeyRotationHoursFn: func(_ context.Context) (int, error) {

@@ -221,7 +221,7 @@ func TestHandshake_TransparencyURL_OmittedByDefault(t *testing.T) {
 
 func TestHandshake_TransparencyURL_PresentWhenConfigured(t *testing.T) {
 	cache := NewInstanceCache()
-	cache.Set("Test", nil, "open", "allowed", 2)
+	cache.Set("Test", nil, "open", "allowed", 2, "open")
 	tURL := "https://transparency.example.com"
 	logPubHex := hex.EncodeToString(make([]byte, 32))
 	cache.SetTransparencyInfo(&tURL, &logPubHex)

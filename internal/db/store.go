@@ -70,8 +70,9 @@ type Store interface {
 
 	// Instance config methods
 	GetInstanceConfig(ctx context.Context) (*models.InstanceConfig, error)
-	// UpdateInstanceConfig updates only the non-nil fields; guildDiscovery replaces serverCreationPolicy.
-	UpdateInstanceConfig(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string) error
+	// UpdateInstanceConfig updates only the non-nil fields. serverCreationPolicy must be
+	// one of "open", "paid", or "disabled" when non-nil.
+	UpdateInstanceConfig(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string, serverCreationPolicy *string) error
 	GetUserRole(ctx context.Context, userID string) (string, error)
 	UpdateUserRole(ctx context.Context, userID, role string) error
 	ListMembers(ctx context.Context) ([]models.Member, error)
