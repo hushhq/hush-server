@@ -162,6 +162,11 @@ func (h *instanceHandler) instanceBan(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify target role"})
 		return
 	}
+	// Cannot ban the instance owner regardless of actor role.
+	if targetRole == "owner" {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "cannot ban the instance owner"})
+		return
+	}
 	// Admin cannot ban other admins — only the instance operator (API key level) can.
 	if role == "admin" && targetRole == "admin" {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin cannot ban another admin"})

@@ -292,6 +292,83 @@ func TestRegister_ClosedMode_Returns403(t *testing.T) {
 	assert.Contains(t, resp["error"], "closed")
 }
 
+// TestRegister_BannedUsername_Returns403 verifies IROLE-03: a banned user
+// cannot re-register with the same username on this instance.
+//
+// IMPLEMENTATION GAP (escalated): register() in auth.go does not call
+// GetActiveInstanceBan or GetUserByUsername before CreateUserWithPublicKey.
+// Only verify() checks for active bans. The ban check described in 0G-01-PLAN.md
+// was never implemented for the register path.
+//
+// Expected when fixed: 403 with error containing "Registration blocked".
+// Actual currently: falls through to CreateUserWithPublicKey (no ban check).
+//
+// This test is marked as a known-failing escalation. The username lookup and
+// ban check are wired in the mock; the absence of a 403 response proves the
+// implementation gap.
+func TestRegister_BannedUsername_Returns403(t *testing.T) {
+	pubBase64, _ := generateEd25519KeyPair(t)
+	bannedUser := newTestUser("alice")
+
+	banCheckCalled := false
+	store := &mockStore{
+		// Probe for existing public key finds no match (different device/key).
+		getUserByPublicKeyFn: func(_ context.Context, _ []byte) (*models.User, error) {
+			return nil, nil
+		},
+		// Username lookup returns the banned user's record.
+		getUserByUsernameFn: func(_ context.Context, username string) (*models.User, error) {
+			if username == "alice" {
+				return bannedUser, nil
+			}
+			return nil, nil
+		},
+		// Active ban exists for the banned user.
+		getActiveInstanceBanFn: func(_ context.Context, userID string) (*models.InstanceBan, error) {
+			banCheckCalled = true
+			if userID == bannedUser.ID {
+				return &models.InstanceBan{
+					ID:     "ban-1",
+					UserID: bannedUser.ID,
+					Reason: "spam",
+				}, nil
+			}
+			return nil, nil
+		},
+		getInstanceConfigFn: func(_ context.Context) (*models.InstanceConfig, error) {
+			return &models.InstanceConfig{
+				ID:               "inst-1",
+				RegistrationMode: "open",
+			}, nil
+		},
+		// Stub CreateUserWithPublicKey to prevent nil-dereference panic when the
+		// ban check is absent and execution falls through.
+		createUserWithPublicKeyFn: func(_ context.Context, _, _ string, _ []byte) (*models.User, error) {
+			return newTestUser("alice"), nil
+		},
+	}
+	router := newTestRouter(store)
+
+	rr := postJSON(router, "/register", models.RegisterRequest{
+		Username:  "alice",
+		PublicKey: pubBase64,
+	})
+
+	// When the implementation is correct: 403 with "Registration blocked".
+	// When the implementation is missing the ban check: 200 OK (falls through).
+	if rr.Code == http.StatusOK {
+		// Confirm the ban check was not called — proving the implementation gap.
+		assert.False(t, banCheckCalled, "GetActiveInstanceBan was unexpectedly called on register path")
+		t.Fatalf("IMPLEMENTATION GAP (IROLE-03): register() returned 200 for a banned username; "+
+			"expected 403. GetUserByUsername + GetActiveInstanceBan are not called in register(). "+
+			"Fix: add ban check in auth.go register() before CreateUserWithPublicKey. "+
+			"See 0G-01-PLAN.md Task 2 auth.go section.")
+	}
+	assert.Equal(t, http.StatusForbidden, rr.Code)
+	resp := decodeErrorResponse(t, rr)
+	assert.Contains(t, resp["error"], "Registration blocked")
+}
+
 // ---------- Challenge ----------
 
 func TestChallenge_ReturnsNonce(t *testing.T) {

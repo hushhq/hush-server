@@ -214,6 +214,47 @@ func TestAdminUpdateConfig_InvalidGuildDiscovery_Returns400(t *testing.T) {
 	assert.Contains(t, errBody["error"], "guildDiscovery")
 }
 
+func TestAdminUpdateConfig_AuditLogWritten(t *testing.T) {
+	var capturedAction string
+	var capturedMetadata map[string]interface{}
+
+	closed := "closed"
+	store := &mockStore{
+		getInstanceConfigFn: func(_ context.Context) (*models.InstanceConfig, error) {
+			return &models.InstanceConfig{
+				ID:               "cfg-1",
+				RegistrationMode: "open",
+				GuildDiscovery:   "disabled",
+			}, nil
+		},
+		updateInstanceConfigFn: func(_ context.Context, _, _, _, _ *string) error {
+			return nil
+		},
+		getVoiceKeyRotationHoursFn: func(_ context.Context) (int, error) {
+			return 2, nil
+		},
+		insertInstanceAuditLogFn: func(_ context.Context, _ string, _ *string, action, _ string, metadata map[string]interface{}) error {
+			capturedAction = action
+			capturedMetadata = metadata
+			return nil
+		},
+	}
+	router := adminRouter(store)
+
+	req := adminRequest(http.MethodPut, "/config", adminUpdateConfigRequest{RegistrationMode: &closed}, testAdminAPIKey)
+	rr := doAdmin(router, req)
+
+	require.Equal(t, http.StatusNoContent, rr.Code)
+	assert.Equal(t, "config_change", capturedAction, "audit log action must be config_change")
+	require.NotNil(t, capturedMetadata, "audit log metadata must not be nil")
+	regModeChange, ok := capturedMetadata["registration_mode"]
+	require.True(t, ok, "metadata must contain registration_mode key")
+	changeMap, ok := regModeChange.(map[string]string)
+	require.True(t, ok, "registration_mode metadata must be a map[string]string")
+	assert.Equal(t, "open", changeMap["old"])
+	assert.Equal(t, "closed", changeMap["new"])
+}
+
 // ---------- Audit log ----------
 
 func TestAdminAuditLog_Returns200WithEntries(t *testing.T) {
