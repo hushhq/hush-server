@@ -141,6 +141,34 @@ func (h *authHandler) register(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Probe for existing user with this public key — account recovery detection.
+	// GetUserByPublicKey error (e.g. DB issue) is fail-open: fall through to
+	// CreateUserWithPublicKey which will either succeed or return its own error.
+	if existingUser, _ := h.store.GetUserByPublicKey(r.Context(), publicKeyBytes); existingUser != nil {
+		// Account recovery: same root public key re-registering (new device, lost device).
+		// This is the highest-risk operation per CONTEXT.md; log synchronously.
+		if h.transparencySvc != nil {
+			entry := &transparency.LogEntry{
+				OperationType: transparency.OpAccountRecovery,
+				UserPublicKey: publicKeyBytes,
+				Timestamp:     time.Now().Unix(),
+			}
+			if logErr := h.transparencySvc.AppendAndNotify(r.Context(), entry, existingUser.ID); logErr != nil {
+				slog.Error("transparency: append account_recovery entry", "err", logErr, "user_id", existingUser.ID)
+			}
+		}
+		// Re-insert device key for the new device (ON CONFLICT DO UPDATE — idempotent).
+		deviceID := req.DeviceID
+		if deviceID == "" {
+			deviceID = uuid.New().String()
+		}
+		if err := h.store.InsertDeviceKey(r.Context(), existingUser.ID, deviceID, publicKeyBytes, nil); err != nil {
+			slog.Error("insert device key on account recovery", "err", err)
+		}
+		h.sendAuthResponse(w, r, existingUser)
+		return
+	}
+
 	user, err := h.store.CreateUserWithPublicKey(r.Context(), req.Username, req.DisplayName, publicKeyBytes)
 	if err != nil {
 		errStr := err.Error()

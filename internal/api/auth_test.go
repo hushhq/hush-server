@@ -223,6 +223,34 @@ func TestRegister_DuplicatePublicKey_Returns409(t *testing.T) {
 	assert.Contains(t, resp["error"], "Public key already registered")
 }
 
+func TestRegister_AccountRecovery_ExistingPublicKey_ReturnsAuthResponse(t *testing.T) {
+	pubBase64, _ := generateEd25519KeyPair(t)
+	existingUser := newTestUser("alice")
+
+	store := &mockStore{
+		// Probe finds the existing user — account recovery path taken.
+		getUserByPublicKeyFn: func(_ context.Context, _ []byte) (*models.User, error) {
+			return existingUser, nil
+		},
+		// CreateUserWithPublicKey must NOT be called in the recovery path.
+		createUserWithPublicKeyFn: func(_ context.Context, _, _ string, _ []byte) (*models.User, error) {
+			return nil, errors.New("should not be called in account recovery path")
+		},
+	}
+	router := newTestRouter(store)
+
+	rr := postJSON(router, "/register", models.RegisterRequest{
+		Username:  "alice",
+		PublicKey: pubBase64,
+	})
+
+	// Recovery path returns 200 OK with a valid auth response (same as normal register).
+	assert.Equal(t, http.StatusOK, rr.Code)
+	resp := decodeAuthResponse(t, rr)
+	assert.NotEmpty(t, resp.Token)
+	assert.Equal(t, existingUser.ID, resp.User.ID)
+}
+
 func TestRegister_DuplicateUsername_Returns409(t *testing.T) {
 	pubBase64, _ := generateEd25519KeyPair(t)
 	store := &mockStore{
