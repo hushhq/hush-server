@@ -246,6 +246,9 @@ func main() {
 		// Channels, guild invites, and moderation are all mounted under /{serverId}.
 		r.Mount("/api/servers", api.ServerRoutes(pool, wsHub, cfg.JWTSecret))
 
+		// Guild discovery, DM creation, and public user search.
+		r.Mount("/api/guilds", api.GuildRoutes(pool, wsHub, cfg.JWTSecret))
+
 		// Public invite info (unauthenticated) + claim (authenticated, not guild-scoped).
 		r.Mount("/api/invites", api.PublicInviteRoutes(pool, cfg.JWTSecret, wsHub))
 

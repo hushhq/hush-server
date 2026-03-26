@@ -175,6 +175,12 @@ type mockStore struct {
 	getTransparencyLogEntriesByPubKeyFn   func(ctx context.Context, pubKey []byte) ([]models.TransparencyLogEntry, error)
 	getLatestTransparencyTreeHeadFn       func(ctx context.Context) (*models.TransparencyTreeHead, error)
 	insertTransparencyTreeHeadFn          func(ctx context.Context, treeSize uint64, rootHash, fringe, headSig []byte) error
+
+	// DM and discovery methods
+	findDMGuildFn      func(ctx context.Context, userAID, userBID string) (*models.Server, error)
+	createDMGuildFn    func(ctx context.Context, userAID, userBID string) (*models.Server, *models.Channel, error)
+	discoverGuildsFn   func(ctx context.Context, category, search, sort string, page, pageSize int) ([]models.DiscoverGuild, int, error)
+	searchUsersPublicFn func(ctx context.Context, query string, limit int) ([]models.UserSearchPublicResult, error)
 }
 
 // ---------- User/session — BIP39 public-key identity ----------
@@ -947,6 +953,36 @@ func (m *mockStore) InsertTransparencyTreeHead(ctx context.Context, treeSize uin
 		return m.insertTransparencyTreeHeadFn(ctx, treeSize, rootHash, fringe, headSig)
 	}
 	return nil
+}
+
+// ---------- DM and discovery methods ----------
+
+func (m *mockStore) FindDMGuild(ctx context.Context, userAID, userBID string) (*models.Server, error) {
+	if m.findDMGuildFn != nil {
+		return m.findDMGuildFn(ctx, userAID, userBID)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) CreateDMGuild(ctx context.Context, userAID, userBID string) (*models.Server, *models.Channel, error) {
+	if m.createDMGuildFn != nil {
+		return m.createDMGuildFn(ctx, userAID, userBID)
+	}
+	return nil, nil, nil
+}
+
+func (m *mockStore) DiscoverGuilds(ctx context.Context, category, search, sort string, page, pageSize int) ([]models.DiscoverGuild, int, error) {
+	if m.discoverGuildsFn != nil {
+		return m.discoverGuildsFn(ctx, category, search, sort, page, pageSize)
+	}
+	return []models.DiscoverGuild{}, 0, nil
+}
+
+func (m *mockStore) SearchUsersPublic(ctx context.Context, query string, limit int) ([]models.UserSearchPublicResult, error) {
+	if m.searchUsersPublicFn != nil {
+		return m.searchUsersPublicFn(ctx, query, limit)
+	}
+	return []models.UserSearchPublicResult{}, nil
 }
 
 // ---------- Shared test helpers ----------

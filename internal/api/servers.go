@@ -20,7 +20,9 @@ func fallbackTemplate() []models.TemplateChannel {
 
 // ServerRoutes mounts guild CRUD, member management, and nested sub-routes
 // (channels, guild invites, moderation). Auth is applied at the top level;
-// RequireGuildMember is applied to all /{serverId} sub-routes.
+// RequireGuildMember is applied to all member-only /{serverId} sub-routes.
+// The /join endpoint is intentionally outside RequireGuildMember — the user
+// is not yet a member when they hit that route.
 func ServerRoutes(store db.Store, hub GlobalBroadcaster, jwtSecret string) chi.Router {
 	h := &serversHandler{store: store, hub: hub}
 	r := chi.NewRouter()
@@ -28,17 +30,22 @@ func ServerRoutes(store db.Store, hub GlobalBroadcaster, jwtSecret string) chi.R
 	r.Post("/", h.createServer)
 	r.Get("/", h.listMyServers)
 	r.Route("/{serverId}", func(r chi.Router) {
-		r.Use(RequireGuildMember(store))
-		r.Get("/", h.getServer)
-		r.Put("/", h.updateServer)
-		r.Delete("/", h.deleteServer)
-		r.Get("/members", h.listMembers)
-		r.Put("/members/{userId}/role", h.changeRole)
-		r.Post("/leave", h.leaveServer)
-		r.Mount("/channels", ChannelRoutes(store, hub))
-		r.Mount("/invites", GuildInviteRoutes(store))
-		r.Mount("/moderation", ModerationRoutes(store, hub))
-		r.Mount("/system-messages", SystemMessagesRoutes(store))
+		// Join is outside RequireGuildMember — caller is not a member yet.
+		r.Post("/join", h.joinServer)
+		// All other /{serverId} routes require guild membership.
+		r.Group(func(r chi.Router) {
+			r.Use(RequireGuildMember(store))
+			r.Get("/", h.getServer)
+			r.Put("/", h.updateServer)
+			r.Delete("/", h.deleteServer)
+			r.Get("/members", h.listMembers)
+			r.Put("/members/{userId}/role", h.changeRole)
+			r.Post("/leave", h.leaveServer)
+			r.Mount("/channels", ChannelRoutes(store, hub))
+			r.Mount("/invites", GuildInviteRoutes(store))
+			r.Mount("/moderation", ModerationRoutes(store, hub))
+			r.Mount("/system-messages", SystemMessagesRoutes(store))
+		})
 	})
 	return r
 }
@@ -435,6 +442,97 @@ func (h *serversHandler) leaveServer(w http.ResponseWriter, r *http.Request) {
 	// Emit system message.
 	EmitSystemMessage(r.Context(), h.store, h.hub, serverID, "member_left", actorID, nil, "", nil)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// joinServer handles POST /api/servers/{serverId}/join.
+// Allows any authenticated, non-banned user to join an open and discoverable guild.
+// Mounted OUTSIDE RequireGuildMember so non-members can reach it.
+func (h *serversHandler) joinServer(w http.ResponseWriter, r *http.Request) {
+	serverID := chi.URLParam(r, "serverId")
+	userID := userIDFromContext(r.Context())
+	if userID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+
+	server, err := h.store.GetServerByID(r.Context(), serverID)
+	if err != nil {
+		slog.Error("joinServer: get server", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to look up guild"})
+		return
+	}
+	if server == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "guild not found"})
+		return
+	}
+
+	// Only open, discoverable guilds can be joined without an invite.
+	// DM guilds are never joinable via this endpoint.
+	if server.IsDm {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "DM guilds cannot be joined via this endpoint"})
+		return
+	}
+	if !server.Discoverable {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "guild is not discoverable"})
+		return
+	}
+	switch server.AccessPolicy {
+	case "open":
+		// Allowed — fall through.
+	case "request":
+		// MVP: return 202 Accepted with a descriptive message. Full request flow is future work.
+		writeJSON(w, http.StatusAccepted, map[string]string{
+			"message": "join request submitted — waiting for guild admin approval",
+		})
+		return
+	default:
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "guild is not open to direct joins"})
+		return
+	}
+
+	// Check whether the user is already a member.
+	_, err = h.store.GetServerMemberLevel(r.Context(), serverID, userID)
+	if err == nil {
+		// No error means the row was found — user is already a member.
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "already a member of this guild"})
+		return
+	}
+
+	// Check for an active guild ban.
+	ban, err := h.store.GetActiveBan(r.Context(), serverID, userID)
+	if err != nil {
+		slog.Error("joinServer: check ban", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify membership eligibility"})
+		return
+	}
+	if ban != nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "you are banned from this guild"})
+		return
+	}
+
+	if err := h.store.AddServerMember(r.Context(), serverID, userID, models.PermissionLevelMember); err != nil {
+		slog.Error("joinServer: add member", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to join guild"})
+		return
+	}
+	if err := h.store.IncrementGuildMemberCount(r.Context(), serverID, 1); err != nil {
+		slog.Error("joinServer: increment member count", "err", err)
+		// Non-fatal: membership was added. Log and continue.
+	}
+
+	// Broadcast member_joined WS event (nil-check hub per CLAUDE.md pattern).
+	if h.hub != nil {
+		msg, _ := json.Marshal(map[string]interface{}{
+			"type":      "member_joined",
+			"server_id": serverID,
+			"user_id":   userID,
+		})
+		h.hub.BroadcastToServer(serverID, msg)
+	}
+
+	EmitSystemMessage(r.Context(), h.store, h.hub, serverID, "member_joined", userID, nil, "", nil)
+
+	writeJSON(w, http.StatusCreated, server)
 }
 
 // listGuildBillingStats handles GET /api/admin/guilds.

@@ -324,6 +324,20 @@ func (m *messageStoreMock) InsertTransparencyTreeHead(context.Context, uint64, [
 	return nil
 }
 
+// DM and discovery stubs (GC.2-01).
+func (m *messageStoreMock) FindDMGuild(context.Context, string, string) (*models.Server, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) CreateDMGuild(context.Context, string, string) (*models.Server, *models.Channel, error) {
+	return nil, nil, nil
+}
+func (m *messageStoreMock) DiscoverGuilds(context.Context, string, string, string, int, int) ([]models.DiscoverGuild, int, error) {
+	return nil, 0, nil
+}
+func (m *messageStoreMock) SearchUsersPublic(context.Context, string, int) ([]models.UserSearchPublicResult, error) {
+	return nil, nil
+}
+
 // drainUntilType reads from c.send until a message with the given type is received or timeout.
 func drainUntilType(t *testing.T, c *Client, wantType string, timeout time.Duration) []byte {
 	t.Helper()
