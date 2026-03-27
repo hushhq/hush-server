@@ -32,7 +32,7 @@ ALTER TABLE servers
 -- user_a_id < user_b_id canonical ordering makes the UNIQUE constraint
 -- catch duplicates regardless of call-site parameter order.
 CREATE TABLE IF NOT EXISTS dm_pairs (
-    server_id   TEXT        NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+    server_id   UUID        NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
     user_a_id   TEXT        NOT NULL,
     user_b_id   TEXT        NOT NULL,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),

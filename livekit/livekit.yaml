@@ -1,6 +1,6 @@
 # LiveKit Server Configuration
-# Minimal config for latest LiveKit version
-# See: https://docs.livekit.io/deploy/configuration/
+# Keys and webhook api_key are injected from env vars at container startup.
+# See docker-compose.yml entrypoint.
 
 port: 7880
 
@@ -10,15 +10,10 @@ rtc:
   port_range_end: 50100
   tcp_port: 7881
   use_external_ip: false
-  # For local Docker dev: server advertises 127.0.0.1, host browser uses same via port mapping
-  node_ip: 127.0.0.1
-  stun_servers:
-    - stun.l.google.com:19302
+  node_ip: __NODE_IP__
 
-# Must match LIVEKIT_API_KEY / LIVEKIT_API_SECRET in .env so token service and server agree.
-# For localhost dev, use devkey/devsecret (setup.sh keeps these when domain is localhost).
 keys:
-  devkey: devsecret
+  __LIVEKIT_API_KEY__: __LIVEKIT_API_SECRET__
 
 room:
   auto_create: true
@@ -32,7 +27,7 @@ room:
 webhook:
   urls:
     - http://hush-api:8080/api/livekit/webhook
-  api_key: devkey
+  api_key: __LIVEKIT_API_KEY__
 
 logging:
   level: info

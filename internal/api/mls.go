@@ -677,8 +677,9 @@ func (h *mlsHandler) deleteGuildGroupInfo(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	level := guildLevelFromContext(r.Context())
-	if level < models.PermissionLevelAdmin {
+	userID := userIDFromContext(r.Context())
+	level, err := h.store.GetServerMemberLevel(r.Context(), guildID, userID)
+	if err != nil || level < models.PermissionLevelAdmin {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin permission required"})
 		return
 	}

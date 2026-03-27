@@ -91,7 +91,7 @@ func (h *deviceHandler) listDevices(w http.ResponseWriter, r *http.Request) {
 	type deviceView struct {
 		ID          string     `json:"id"`
 		DeviceID    string     `json:"deviceId"`
-		Label       string     `json:"label,omitempty"`
+		Label       *string    `json:"label,omitempty"`
 		CertifiedAt time.Time  `json:"certifiedAt"`
 		LastSeen    *time.Time `json:"lastSeen,omitempty"`
 	}

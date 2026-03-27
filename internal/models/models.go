@@ -64,7 +64,7 @@ type DeviceKey struct {
 	Certificate     []byte     `json:"-"` // root-key signature over DevicePublicKey; nil for first device
 	CertifiedAt     time.Time  `json:"certifiedAt"`
 	LastSeen        *time.Time `json:"lastSeen,omitempty"`
-	Label           string     `json:"label,omitempty"`
+	Label           *string    `json:"label,omitempty"`
 }
 
 // AuthResponse is returned by register and login (token + user).

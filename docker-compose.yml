@@ -14,8 +14,8 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init-hush-db.sql:/docker-entrypoint-initdb.d/02-hush.sql:ro
-    ports:
-      - "5432:5432"
+    # port 5432 not exposed to host — host postgres already uses it
+    # use `docker exec -it hush-postgres psql` for direct access
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hush}"]
       interval: 10s
@@ -31,6 +31,7 @@ services:
       dockerfile: Dockerfile
     container_name: hush-api
     environment:
+      - HOST=0.0.0.0
       - PORT=8080
       - DATABASE_URL=postgres://${POSTGRES_USER:-hush}:${POSTGRES_PASSWORD:-hush}@postgres:5432/${POSTGRES_DB:-hush}?sslmode=disable
       - JWT_SECRET=${JWT_SECRET:-dev-jwt-secret-change-in-production}
@@ -41,6 +42,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"
     restart: unless-stopped
     networks:
       - hush-network
@@ -63,12 +66,21 @@ services:
   livekit:
     image: livekit/livekit-server:latest
     container_name: hush-livekit
-    command: --config /etc/livekit.yaml
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        sed -e "s/__LIVEKIT_API_KEY__/$$LIVEKIT_API_KEY/g" \
+            -e "s/__LIVEKIT_API_SECRET__/$$LIVEKIT_API_SECRET/g" \
+            -e "s/__NODE_IP__/$$NODE_IP/g" \
+            /etc/livekit.yaml.tmpl > /tmp/livekit.yaml
+        exec /livekit-server --config /tmp/livekit.yaml
     environment:
       - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
       - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
+      - NODE_IP=${NODE_IP}
     volumes:
-      - ./livekit/livekit.yaml:/etc/livekit.yaml:ro
+      - ./livekit/livekit.yaml:/etc/livekit.yaml.tmpl:ro
     ports:
       - "7880:7880"      # WebSocket
       - "7881:7881"      # RTC
@@ -81,6 +93,8 @@ services:
     build:
       context: .
       dockerfile: client/Dockerfile
+      args:
+        - VITE_DEBUG_TOOLBAR=${VITE_DEBUG_TOOLBAR:-true}
     container_name: hush-caddy
     extra_hosts:
       - "host.docker.internal:host-gateway"

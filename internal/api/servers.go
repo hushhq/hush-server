@@ -174,9 +174,16 @@ func (h *serversHandler) createServer(w http.ResponseWriter, r *http.Request) {
 			}
 			continue
 		}
-		// EncryptedMetadata is nil for template channels (no client to encrypt yet).
-		// Clients will populate encrypted_metadata after joining the guild metadata MLS group.
-		ch, err := h.store.CreateChannel(ctx, server.ID, nil, tc.Type, tc.VoiceMode, nil, tc.Position)
+		// Seed encrypted_metadata with the hardcoded template name so channels
+		// are visible before MLS is bootstrapped. This is safe because default
+		// template names are server-defined constants, not user content.
+		// NOTE: when user-created templates are implemented, user-chosen channel
+		// names MUST be opaque — only hardcoded default templates get plaintext seeding.
+		var meta []byte
+		if tc.Name != "" {
+			meta = []byte(`{"n":"` + tc.Name + `","d":""}`)
+		}
+		ch, err := h.store.CreateChannel(ctx, server.ID, meta, tc.Type, tc.VoiceMode, nil, tc.Position)
 		if err != nil {
 			slog.Error("createServer: create template channel", "err", err, "position", tc.Position)
 			failures++
@@ -216,7 +223,12 @@ func (h *serversHandler) createServer(w http.ResponseWriter, r *http.Request) {
 		if existing != nil {
 			continue
 		}
-		ch, err := h.store.CreateChannel(ctx, server.ID, nil, tc.Type, tc.VoiceMode, &parentID, tc.Position)
+		// Same plaintext seeding as pass 1 — see note above re: user-created templates.
+		var meta []byte
+		if tc.Name != "" {
+			meta = []byte(`{"n":"` + tc.Name + `","d":""}`)
+		}
+		ch, err := h.store.CreateChannel(ctx, server.ID, meta, tc.Type, tc.VoiceMode, &parentID, tc.Position)
 		if err != nil {
 			slog.Error("createServer: create template channel", "err", err, "position", tc.Position)
 			failures++

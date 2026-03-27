@@ -74,7 +74,7 @@ func TestListDevices_ReturnsDeviceList(t *testing.T) {
 				DeviceID:    "device-1",
 				CertifiedAt: certifiedAt,
 				LastSeen:    &lastSeen,
-				Label:       "iPhone",
+				Label:       ptr("iPhone"),
 			},
 		}, nil
 	}
@@ -370,3 +370,5 @@ func TestLinkVerify_ValidCode_Returns201(t *testing.T) {
 	require.Equal(t, http.StatusCreated, rr.Code, "body: %s", rr.Body.String())
 	assert.Equal(t, "new-device-via-code", insertedDeviceID)
 }
+
+func ptr(s string) *string { return &s }

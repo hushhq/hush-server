@@ -196,7 +196,6 @@ func (h *inviteHandler) claimInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if ban != nil {
-		// TODO(0O-03): guild name is encrypted; use server ID as fallback.
 		resp := map[string]interface{}{
 			"error": "You are banned from this guild.",
 		}
