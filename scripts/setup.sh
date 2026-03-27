@@ -1,79 +1,293 @@
 #!/bin/sh
-# Hush one-command self-host setup. POSIX sh compatible.
+# Hush self-hoster onboarding script.
+# Deploys a production Hush instance with TLS in under 10 minutes.
+#
+# Usage:
+#   ./scripts/setup.sh                          # interactive mode
+#   ./scripts/setup.sh --domain chat.example.com --email ops@example.com
+#   ./scripts/setup.sh --force --domain chat.example.com --email ops@example.com
+#
+# Flags:
+#   --domain DOMAIN   Domain name pointing to this server (required for TLS)
+#   --email  EMAIL    Email for Let's Encrypt certificate notifications
+#   --force           Overwrite existing .env without prompting
+#
+# Exit codes:
+#   0  Success
+#   1  Dependency or configuration failure
+#   2  Health check failure after startup
 
+set -eu
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+COMPOSE_FILE="docker-compose.prod.yml"
+CADDY_TMPL="caddy/Caddyfile.self-hoster.tmpl"
+CADDY_OUT="caddy/Caddyfile.self-hoster"
+LIVEKIT_TMPL="livekit/livekit.yaml"
+HEALTH_URL="http://localhost:8080/api/health"
+HANDSHAKE_URL="http://localhost:8080/api/handshake"
+LOG_PREFIX="[hush]"
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+log() { printf '%s %s\n' "$LOG_PREFIX" "$1"; }
+err() { printf '%s ERROR: %s\n' "$LOG_PREFIX" "$1" >&2; }
+die() { err "$1"; exit "${2:-1}"; }
+
+# ---------------------------------------------------------------------------
+# Parse arguments
+# ---------------------------------------------------------------------------
+domain=""
+email=""
+force=0
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --domain) domain="$2"; shift 2 ;;
+    --email)  email="$2";  shift 2 ;;
+    --force)  force=1;     shift   ;;
+    *) die "Unknown flag: $1" 1 ;;
+  esac
+done
+
+# ---------------------------------------------------------------------------
+# Resolve script directory and move to project root
+# ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_ROOT"
 
-# 1. Dependency checks
-missing=""
-for cmd in docker docker-compose openssl; do
-  if ! command -v "$cmd" >/dev/null 2>&1; then
-    missing="${missing:+$missing }$cmd"
-  fi
-done
-if [ -n "$missing" ]; then
-  echo "Missing required tools: $missing. Install them and try again."
-  exit 1
+# ---------------------------------------------------------------------------
+# Step 1: Dependency check
+# ---------------------------------------------------------------------------
+log "Checking dependencies..."
+
+# Detect docker compose subcommand vs standalone docker-compose
+DOCKER_COMPOSE=""
+if docker compose version >/dev/null 2>&1; then
+  DOCKER_COMPOSE="docker compose"
+elif command -v docker-compose >/dev/null 2>&1; then
+  DOCKER_COMPOSE="docker-compose"
 fi
 
-# 2. Overwrite guard
-if [ -f .env ]; then
-  printf '.env already exists. Overwrite? [y/N] '
-  read -r answer
-  case "$answer" in [yY]) ;; *) exit 0;; esac
+if ! command -v docker >/dev/null 2>&1; then
+  die "Docker is required. Install from https://docs.docker.com/engine/install/" 1
+fi
+if [ -z "$DOCKER_COMPOSE" ]; then
+  die "docker-compose (or docker compose plugin) is required. Install from https://docs.docker.com/engine/install/" 1
+fi
+if ! command -v openssl >/dev/null 2>&1; then
+  die "openssl is required. Install via your package manager (e.g. apt install openssl)" 1
 fi
 
-# 3. Prompt for domain
-printf 'Domain name (e.g. hush.example.com) [localhost]: '
-read -r domain
-if [ -z "$domain" ]; then domain=localhost; fi
-if [ "$domain" = "localhost" ]; then
-  LIVEKIT_URL="ws://localhost:7880"
-  LIVEKIT_API_KEY=devkey
-  LIVEKIT_API_SECRET=devsecret
-else
-  LIVEKIT_URL="ws://${domain}:7880"
-  LIVEKIT_API_KEY="$(openssl rand -hex 16)"
-  LIVEKIT_API_SECRET="$(openssl rand -hex 32)"
+log "Dependencies OK."
+
+# ---------------------------------------------------------------------------
+# Step 2: Overwrite guard
+# ---------------------------------------------------------------------------
+if [ -f .env ] && [ "$force" -eq 0 ]; then
+  printf '%s Existing .env found. Overwrite? [y/N] ' "$LOG_PREFIX"
+  read -r _answer
+  case "$_answer" in
+    [yY]) ;;
+    *) log "Aborted. Existing .env preserved."; exit 0 ;;
+  esac
 fi
+
+# ---------------------------------------------------------------------------
+# Step 3: Interactive prompts (skipped when --domain and --email provided)
+# ---------------------------------------------------------------------------
+if [ -z "$domain" ]; then
+  printf '%s Enter your domain (e.g. chat.example.com): ' "$LOG_PREFIX"
+  read -r domain
+  [ -z "$domain" ] && die "Domain is required." 1
+fi
+
+if [ -z "$email" ]; then
+  printf '%s Enter your email (for TLS certificates): ' "$LOG_PREFIX"
+  read -r email
+  [ -z "$email" ] && die "Email is required." 1
+fi
+
+log "Domain: $domain"
+log "Email:  $email"
+
+# ---------------------------------------------------------------------------
+# Step 4: Secret generation
+# ---------------------------------------------------------------------------
+log "Generating secrets..."
 
 JWT_SECRET="$(openssl rand -hex 32)"
 POSTGRES_PASSWORD="$(openssl rand -hex 16)"
+ADMIN_API_KEY="$(openssl rand -hex 16)"
+LIVEKIT_API_KEY="$(openssl rand -hex 16)"
+LIVEKIT_API_SECRET="$(openssl rand -hex 32)"
+# Ed25519 seed — MUST persist across restarts; used for transparency log signing
+TRANSPARENCY_LOG_PRIVATE_KEY="$(openssl rand -hex 32)"
 
-# 4. Write .env from .env.example with substitutions
-cp .env.example .env
-_env_tmp=".env.tmp"
-sed "s|^LIVEKIT_API_KEY=.*|LIVEKIT_API_KEY=$LIVEKIT_API_KEY|" .env > "$_env_tmp" && mv "$_env_tmp" .env
-sed "s|^LIVEKIT_API_SECRET=.*|LIVEKIT_API_SECRET=$LIVEKIT_API_SECRET|" .env > "$_env_tmp" && mv "$_env_tmp" .env
-sed "s|^LIVEKIT_URL=.*|LIVEKIT_URL=$LIVEKIT_URL|" .env > "$_env_tmp" && mv "$_env_tmp" .env
-sed "s|^JWT_SECRET=.*|JWT_SECRET=$JWT_SECRET|" .env > "$_env_tmp" && mv "$_env_tmp" .env
-sed "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$POSTGRES_PASSWORD|" .env > "$_env_tmp" && mv "$_env_tmp" .env
-rm -f "$_env_tmp"
+# ---------------------------------------------------------------------------
+# Step 5: Write .env
+# ---------------------------------------------------------------------------
+log "Writing .env..."
 
-# 4b. Sync livekit.yaml keys to match .env
-LIVEKIT_YAML="$PROJECT_ROOT/livekit/livekit.yaml"
-if [ "$domain" != "localhost" ] && [ -f "$LIVEKIT_YAML" ]; then
-  sed "s|^  devkey: devsecret|  $LIVEKIT_API_KEY: $LIVEKIT_API_SECRET|" "$LIVEKIT_YAML" > "${LIVEKIT_YAML}.tmp" && mv "${LIVEKIT_YAML}.tmp" "$LIVEKIT_YAML"
-  sed "s|^  api_key: devkey|  api_key: $LIVEKIT_API_KEY|" "$LIVEKIT_YAML" > "${LIVEKIT_YAML}.tmp" && mv "${LIVEKIT_YAML}.tmp" "$LIVEKIT_YAML"
-  echo "  Updated livekit/livekit.yaml with generated credentials"
+cat > .env <<ENVEOF
+# Hush production environment — generated by scripts/setup.sh
+# DO NOT commit this file to version control.
+
+# --- Domain ---------------------------------------------------------------
+DOMAIN=$domain
+
+# --- PostgreSQL -----------------------------------------------------------
+POSTGRES_USER=hush
+POSTGRES_DB=hush
+# Generated password — do not change after first startup (breaks DB access)
+POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+
+# --- Authentication -------------------------------------------------------
+# JWT signing secret — changing this invalidates all active sessions
+JWT_SECRET=$JWT_SECRET
+
+# --- Admin API ------------------------------------------------------------
+# Bearer token for admin endpoints — keep private
+ADMIN_API_KEY=$ADMIN_API_KEY
+
+# --- LiveKit (self-hosted) ------------------------------------------------
+LIVEKIT_API_KEY=$LIVEKIT_API_KEY
+LIVEKIT_API_SECRET=$LIVEKIT_API_SECRET
+
+# --- Transparency log -----------------------------------------------------
+# Ed25519 seed (hex) — MUST NOT change after first message is logged
+TRANSPARENCY_LOG_PRIVATE_KEY=$TRANSPARENCY_LOG_PRIVATE_KEY
+
+# --- Optional / advanced --------------------------------------------------
+# NODE_IP: public IP of this server for LiveKit ICE candidates.
+# Leave blank to auto-detect (works for most single-server deployments).
+NODE_IP=
+ENVEOF
+
+# ---------------------------------------------------------------------------
+# Step 6: Generate Caddy config from template
+# ---------------------------------------------------------------------------
+log "Writing Caddy config..."
+
+if [ ! -f "$CADDY_TMPL" ]; then
+  die "Caddy template not found: $CADDY_TMPL" 1
 fi
 
-# 5. Summary
-echo ""
-echo "=== Hush setup complete ==="
-echo ""
-echo "Generated .env with:"
-echo "  LIVEKIT_API_KEY     = $LIVEKIT_API_KEY"
-echo "  LIVEKIT_API_SECRET  = (hidden)"
-echo "  JWT_SECRET          = (hidden)"
-echo "  POSTGRES_PASSWORD   = (hidden)"
-echo ""
-echo "Next steps:"
-echo "  1. docker-compose up -d"
-echo "  2. Open http://$domain (or http://localhost:5173 for dev)"
-echo ""
-echo "For production (gethush.live / custom domain):"
-echo "  - Update LIVEKIT_API_KEY/SECRET in .env and livekit.yaml to match"
-echo "  - Use: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d"
-echo ""
+sed "s/__DOMAIN__/$domain/g; s/__EMAIL__/$email/g" "$CADDY_TMPL" > "$CADDY_OUT"
+log "Caddy config written to $CADDY_OUT"
+
+# ---------------------------------------------------------------------------
+# Step 7: Generate LiveKit config
+# ---------------------------------------------------------------------------
+log "Writing LiveKit config..."
+
+if [ ! -f "$LIVEKIT_TMPL" ]; then
+  # Create a minimal template if it doesn't exist yet
+  mkdir -p "$(dirname "$LIVEKIT_TMPL")"
+  cat > "$LIVEKIT_TMPL" <<LKEOF
+# LiveKit Server Configuration (template — populated at container startup)
+port: 7880
+
+rtc:
+  port_range_start: 50020
+  port_range_end: 50100
+  tcp_port: 7881
+  use_external_ip: false
+  node_ip: __NODE_IP__
+
+keys:
+  __LIVEKIT_API_KEY__: __LIVEKIT_API_SECRET__
+
+room:
+  auto_create: true
+  empty_timeout: 0
+  enabled_codecs:
+    - mime: audio/opus
+    - mime: video/h264
+    - mime: video/vp8
+    - mime: video/vp9
+
+webhook:
+  urls:
+    - http://hush-api:8080/api/livekit/webhook
+  api_key: __LIVEKIT_API_KEY__
+
+logging:
+  level: info
+LKEOF
+  log "Created livekit/livekit.yaml template."
+fi
+
+# The livekit.yaml is a template — key substitution happens at container startup
+# via the docker-compose.prod.yml entrypoint (sed on __LIVEKIT_API_KEY__ etc.)
+# Nothing to modify here; the .env values are picked up by the compose env block.
+log "LiveKit config OK (using $LIVEKIT_TMPL template; keys injected at container startup)."
+
+# ---------------------------------------------------------------------------
+# Step 8: Pull Docker images
+# ---------------------------------------------------------------------------
+log "Pulling Docker images (this may take a few minutes on first run)..."
+$DOCKER_COMPOSE -f "$COMPOSE_FILE" pull
+
+# ---------------------------------------------------------------------------
+# Step 9: Start stack
+# ---------------------------------------------------------------------------
+log "Starting Hush stack..."
+$DOCKER_COMPOSE -f "$COMPOSE_FILE" up -d
+
+# ---------------------------------------------------------------------------
+# Step 10: Health check with retry
+# ---------------------------------------------------------------------------
+wait_for_health() {
+  _attempt=1
+  _max=3
+  _delay=5
+
+  log "Waiting for API to be ready..."
+
+  while [ "$_attempt" -le "$_max" ]; do
+    log "Health check attempt $_attempt of $_max (waiting ${_delay}s)..."
+    sleep "$_delay"
+
+    if curl -sf "$HEALTH_URL" >/dev/null 2>&1; then
+      log "API is healthy."
+
+      # Verify handshake endpoint returns valid JSON
+      _handshake="$(curl -sf "$HANDSHAKE_URL" 2>/dev/null || true)"
+      if [ -z "$_handshake" ]; then
+        err "Handshake endpoint returned empty response."
+      else
+        log "Handshake OK."
+      fi
+      return 0
+    fi
+
+    _attempt=$((_attempt + 1))
+    _delay=$((_delay * 2))
+  done
+
+  err "API did not become healthy after $_max attempts."
+  err "Check logs with: $DOCKER_COMPOSE -f $COMPOSE_FILE logs hush-api"
+  return 1
+}
+
+if ! wait_for_health; then
+  die "Startup health check failed. See logs above." 2
+fi
+
+# ---------------------------------------------------------------------------
+# Step 11: Success message
+# ---------------------------------------------------------------------------
+printf '\n'
+log "================================================================"
+log " Hush is live at https://$domain"
+log "================================================================"
+printf '\n'
+log "Admin API key:  $ADMIN_API_KEY"
+log "(Secrets are saved in .env — keep that file private.)"
+printf '\n'
+log "To update Hush in the future, run: ./scripts/update.sh"
