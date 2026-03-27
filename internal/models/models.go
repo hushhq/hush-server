@@ -73,6 +73,15 @@ type AuthResponse struct {
 	User  User   `json:"user"`
 }
 
+// GuestAuthResponse is returned by POST /api/auth/guest.
+// The guest session is ephemeral — no user record is persisted. The client
+// uses ExpiresAt to schedule the 5-minute warning and expiry redirect.
+type GuestAuthResponse struct {
+	Token     string    `json:"token"`
+	GuestID   string    `json:"guestId"`
+	ExpiresAt time.Time `json:"expiresAt"`
+}
+
 // OneTimePreKeyRow is one entry in a batch of one-time pre-keys for upload.
 type OneTimePreKeyRow struct {
 	KeyID     int    `json:"keyId"`

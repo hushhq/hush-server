@@ -51,12 +51,13 @@ func Handler(hub *Hub, jwtSecret string, store db.Store, corsOrigin string) http
 			client.Run()
 			return
 		}
-		userID, sessionID, err := auth.ValidateJWT(token, jwtSecret)
+		userID, sessionID, isGuest, err := auth.ValidateJWT(token, jwtSecret)
 		if err != nil {
 			http.Error(w, "invalid token", http.StatusUnauthorized)
 			return
 		}
-		if store != nil {
+		// Guest sessions are ephemeral — no DB session record exists.
+		if store != nil && !isGuest {
 			tokenHash := auth.TokenHash(token)
 			sess, err := store.GetSessionByTokenHash(r.Context(), tokenHash)
 			if err != nil || sess == nil || sess.ID != sessionID || sess.UserID != userID {
@@ -90,11 +91,12 @@ func authFromFirstMessage(conn *websocket.Conn, jwtSecret string, store db.Store
 	if msg.Type != "auth" || msg.Token == "" {
 		return "", errors.New("invalid auth message: expected type 'auth' with non-empty token")
 	}
-	uid, sessionID, err := auth.ValidateJWT(msg.Token, jwtSecret)
+	uid, sessionID, isGuest, err := auth.ValidateJWT(msg.Token, jwtSecret)
 	if err != nil {
 		return "", err
 	}
-	if store != nil {
+	// Guest sessions are ephemeral — no DB session record exists.
+	if store != nil && !isGuest {
 		tokenHash := auth.TokenHash(msg.Token)
 		sess, err := store.GetSessionByTokenHash(r.Context(), tokenHash)
 		if err != nil {

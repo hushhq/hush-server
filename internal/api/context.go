@@ -7,8 +7,9 @@ type contextKey string
 const (
 	contextKeyUserID    contextKey = "userID"
 	contextKeySessionID contextKey = "sessionID"
-	contextKeyGuildRole contextKey = "guildRole"  // kept for handlers not yet migrated to levels
+	contextKeyGuildRole contextKey = "guildRole"   // kept for handlers not yet migrated to levels
 	contextKeyGuildLevel contextKey = "guildLevel" // integer permission level (0-3)
+	contextKeyIsGuest   contextKey = "isGuest"     // true for ephemeral guest sessions
 )
 
 func withUserID(ctx context.Context, userID string) context.Context {
@@ -44,5 +45,14 @@ func withGuildLevel(ctx context.Context, level int) context.Context {
 
 func guildLevelFromContext(ctx context.Context) int {
 	v, _ := ctx.Value(contextKeyGuildLevel).(int)
+	return v
+}
+
+func withIsGuest(ctx context.Context, isGuest bool) context.Context {
+	return context.WithValue(ctx, contextKeyIsGuest, isGuest)
+}
+
+func isGuestFromContext(ctx context.Context) bool {
+	v, _ := ctx.Value(contextKeyIsGuest).(bool)
 	return v
 }

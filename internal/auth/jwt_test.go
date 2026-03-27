@@ -23,18 +23,35 @@ func TestValidateJWT_ValidToken_ReturnsUserIDAndSessionID(t *testing.T) {
 	token, err := SignJWT(wantUser, wantSession, secret, time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
-	gotUser, gotSession, err := ValidateJWT(token, secret)
+	gotUser, gotSession, isGuest, err := ValidateJWT(token, secret)
 
 	require.NoError(t, err)
 	assert.Equal(t, wantUser, gotUser)
 	assert.Equal(t, wantSession, gotSession)
+	assert.False(t, isGuest)
+}
+
+func TestValidateJWT_GuestToken_ReturnsIsGuestTrue(t *testing.T) {
+	secret := "test-secret"
+	guestID := "guest-abc"
+	sessID := "sess-guest-1"
+
+	token, err := SignGuestJWT(guestID, sessID, secret, time.Now().Add(time.Hour))
+	require.NoError(t, err)
+
+	gotUser, gotSession, isGuest, err := ValidateJWT(token, secret)
+
+	require.NoError(t, err)
+	assert.Equal(t, guestID, gotUser)
+	assert.Equal(t, sessID, gotSession)
+	assert.True(t, isGuest)
 }
 
 func TestValidateJWT_ExpiredToken_ReturnsError(t *testing.T) {
 	token, err := SignJWT("user-1", "sess-1", "secret", time.Now().Add(-time.Hour))
 	require.NoError(t, err)
 
-	_, _, err = ValidateJWT(token, "secret")
+	_, _, _, err = ValidateJWT(token, "secret")
 
 	assert.Error(t, err)
 }
@@ -43,13 +60,13 @@ func TestValidateJWT_WrongSecret_ReturnsError(t *testing.T) {
 	token, err := SignJWT("user-1", "sess-1", "sign-secret", time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
-	_, _, err = ValidateJWT(token, "wrong-secret")
+	_, _, _, err = ValidateJWT(token, "wrong-secret")
 
 	assert.Error(t, err)
 }
 
 func TestValidateJWT_MalformedToken_ReturnsError(t *testing.T) {
-	_, _, err := ValidateJWT("not.a.jwt.at.all", "secret")
+	_, _, _, err := ValidateJWT("not.a.jwt.at.all", "secret")
 
 	assert.Error(t, err)
 }

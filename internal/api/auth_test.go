@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	internalauth "hush.app/server/internal/auth"
 	"hush.app/server/internal/models"
 
 	"github.com/google/uuid"
@@ -583,5 +584,62 @@ func TestVerify_InstanceBanned_Returns403(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, rr.Code)
 	resp := decodeErrorResponse(t, rr)
 	assert.Contains(t, resp["error"], "banned")
+}
+
+// ---------- Guest Auth ----------
+
+func TestGuestAuth_IssuesShortLivedToken(t *testing.T) {
+	store := &mockStore{}
+	router := newTestRouter(store)
+
+	rr := postJSON(router, "/guest", nil)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	var resp models.GuestAuthResponse
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+
+	assert.NotEmpty(t, resp.Token, "token must be non-empty")
+	assert.NotEmpty(t, resp.GuestID, "guestId must be non-empty")
+	assert.True(t, resp.ExpiresAt.After(time.Now()), "expiresAt must be in the future")
+
+	// Token must validate and carry is_guest=true.
+	_, _, isGuest, err := internalauth.ValidateJWT(resp.Token, testJWTSecret)
+	require.NoError(t, err)
+	assert.True(t, isGuest, "token must have is_guest=true")
+}
+
+func TestGuestAuth_GuestIDPrefixedWithGuest(t *testing.T) {
+	store := &mockStore{}
+	router := newTestRouter(store)
+
+	rr := postJSON(router, "/guest", nil)
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	var resp models.GuestAuthResponse
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+
+	assert.True(t, strings.HasPrefix(resp.GuestID, "guest_"), "guestId must start with 'guest_'")
+}
+
+func TestGuestAuth_ExpiryWithinExpectedRange(t *testing.T) {
+	store := &mockStore{}
+	router := newTestRouter(store)
+
+	before := time.Now()
+	rr := postJSON(router, "/guest", nil)
+	after := time.Now()
+
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	var resp models.GuestAuthResponse
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+
+	// Default GUEST_SESSION_HOURS=1, test config uses 1h JWT expiry.
+	// ExpiresAt should be approximately now + 1 hour (within a 5-second window).
+	minExpiry := before.Add(time.Hour - 5*time.Second)
+	maxExpiry := after.Add(time.Hour + 5*time.Second)
+	assert.True(t, resp.ExpiresAt.After(minExpiry), "expiresAt too early")
+	assert.True(t, resp.ExpiresAt.Before(maxExpiry), "expiresAt too late")
 }
 

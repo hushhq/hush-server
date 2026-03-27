@@ -2,13 +2,17 @@ package api
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
+	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,12 +26,13 @@ import (
 )
 
 const (
-	maxUsernameLen         = 128
-	maxDisplayLen          = 128
-	nonceTTL               = 60 * time.Second
-	noncePurgeInterval     = 5 * time.Minute
-	noncePurgeContextSecs  = 30
-	ed25519PublicKeyLen     = 32
+	maxUsernameLen          = 128
+	maxDisplayLen           = 128
+	nonceTTL                = 60 * time.Second
+	noncePurgeInterval      = 5 * time.Minute
+	noncePurgeContextSecs   = 30
+	ed25519PublicKeyLen      = 32
+	defaultGuestSessionHours = 1
 )
 
 var usernameRE = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
@@ -39,11 +44,28 @@ var usernameRE = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
 //
 // transparencySvc may be nil when the transparency log is not configured for
 // this instance. All transparency operations nil-guard before use.
+//
+// Guest session duration is read from GUEST_SESSION_HOURS (default 1 hour).
 func AuthRoutes(store db.Store, jwtSecret string, jwtExpiry time.Duration, transparencySvc *transparency.TransparencyService) chi.Router {
+	guestHours := defaultGuestSessionHours
+	if h := os.Getenv("GUEST_SESSION_HOURS"); h != "" {
+		if v, err := strconv.Atoi(h); err == nil && v > 0 {
+			guestHours = v
+		}
+	}
+	guestSessionDuration := time.Duration(guestHours) * time.Hour
+
 	r := chi.NewRouter()
-	h := &authHandler{store: store, jwtSecret: jwtSecret, jwtExpiry: jwtExpiry, transparencySvc: transparencySvc}
+	h := &authHandler{
+		store:                store,
+		jwtSecret:            jwtSecret,
+		jwtExpiry:            jwtExpiry,
+		guestSessionDuration: guestSessionDuration,
+		transparencySvc:      transparencySvc,
+	}
 
 	r.Post("/register", h.register)
+	r.Post("/guest", h.guestAuth)
 	r.Get("/check-username/{username}", h.checkUsername)
 	r.Post("/challenge", h.challenge)
 	r.Post("/verify", h.verify)
@@ -62,10 +84,11 @@ func AuthRoutes(store db.Store, jwtSecret string, jwtExpiry time.Duration, trans
 }
 
 type authHandler struct {
-	store           db.Store
-	jwtSecret       string
-	jwtExpiry       time.Duration
-	transparencySvc *transparency.TransparencyService
+	store                db.Store
+	jwtSecret            string
+	jwtExpiry            time.Duration
+	guestSessionDuration time.Duration
+	transparencySvc      *transparency.TransparencyService
 }
 
 // purgeNoncesLoop runs PurgeExpiredNonces every noncePurgeInterval.
@@ -219,6 +242,45 @@ func (h *authHandler) register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.sendAuthResponse(w, r, user)
+}
+
+// guestAuth handles POST /api/auth/guest.
+// Issues a short-lived JWT for an ephemeral guest session. No user record is
+// created or persisted. The JWT carries is_guest=true so the middleware skips
+// DB session validation. Guests may view channels and send messages in open
+// channels; write operations that require a persisted identity (guild creation,
+// device management) are blocked by checking IsGuest on the request context.
+//
+// Returns: { token, guestId, expiresAt }
+func (h *authHandler) guestAuth(w http.ResponseWriter, r *http.Request) {
+	// Generate an ephemeral Ed25519 keypair for the guest identity display name.
+	// The public key is returned to the client as an opaque identifier — it is
+	// NOT stored in the database and cannot be used for account recovery.
+	pubKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		slog.Error("guest auth: generate ephemeral keypair", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not create guest session"})
+		return
+	}
+
+	// Derive a stable guest ID from the first 8 bytes of the public key so the
+	// client has a usable identifier for the lifetime of the session.
+	guestID := "guest_" + base64.RawURLEncoding.EncodeToString(pubKey[:8])
+	sessionID := uuid.New().String()
+	expiresAt := time.Now().Add(h.guestSessionDuration)
+
+	tokenString, err := auth.SignGuestJWT(guestID, sessionID, h.jwtSecret, expiresAt)
+	if err != nil {
+		slog.Error("guest auth: sign jwt", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not create guest session"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, models.GuestAuthResponse{
+		Token:     tokenString,
+		GuestID:   guestID,
+		ExpiresAt: expiresAt,
+	})
 }
 
 // challenge handles POST /api/auth/challenge.

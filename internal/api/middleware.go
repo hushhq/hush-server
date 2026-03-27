@@ -48,23 +48,27 @@ func RequireAuth(jwtSecret string, store db.Store) func(http.Handler) http.Handl
 				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing or invalid authorization"})
 				return
 			}
-			userID, sessionID, err := auth.ValidateJWT(token, jwtSecret)
+			userID, sessionID, isGuest, err := auth.ValidateJWT(token, jwtSecret)
 			if err != nil {
 				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid or expired token"})
 				return
 			}
-			tokenHash := auth.TokenHash(token)
-			sess, err := store.GetSessionByTokenHash(r.Context(), tokenHash)
-			if err != nil || sess == nil || sess.ID != sessionID {
-				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "session not found or expired"})
-				return
-			}
-			if sess.UserID != userID {
-				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "session mismatch"})
-				return
+			// Guest sessions are validated by JWT signature only — no DB record exists.
+			if !isGuest {
+				tokenHash := auth.TokenHash(token)
+				sess, err := store.GetSessionByTokenHash(r.Context(), tokenHash)
+				if err != nil || sess == nil || sess.ID != sessionID {
+					writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "session not found or expired"})
+					return
+				}
+				if sess.UserID != userID {
+					writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "session mismatch"})
+					return
+				}
 			}
 			r = r.WithContext(withUserID(r.Context(), userID))
 			r = r.WithContext(withSessionID(r.Context(), sessionID))
+			r = r.WithContext(withIsGuest(r.Context(), isGuest))
 			next.ServeHTTP(w, r)
 		})
 	}
