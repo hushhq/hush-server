@@ -239,7 +239,10 @@ func (h *MessageHandler) handleMessageHistory(c *Client, raw []byte) {
 		Before    string `json:"before"`
 		Limit     int    `json:"limit"`
 	}
-	_ = json.Unmarshal(raw, &payload)
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		sendError(c, "bad_request", "invalid message_history payload")
+		return
+	}
 	if payload.ChannelID == "" {
 		sendError(c, "bad_request", "channel_id required")
 		return
