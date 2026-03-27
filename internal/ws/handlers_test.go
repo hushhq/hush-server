@@ -2,6 +2,7 @@ package ws
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"testing"
 	"time"
@@ -668,6 +669,84 @@ func TestMessageHandler_HandleMLSLeaveProposal_BroadcastsAddRequest(t *testing.T
 	assert.Equal(t, "ch1", out.ChannelID)
 	assert.Equal(t, "remove", out.Action)
 	assert.Equal(t, "user1", out.RequesterID)
+}
+
+func TestMessageSizeLimit_RejectsOver8KiB(t *testing.T) {
+	hub := NewHub()
+	store := &messageStoreMock{
+		isChannelMemberFn: func(context.Context, string, string) (bool, error) { return true, nil },
+	}
+	h := NewMessageHandler(store, hub)
+	c := NewClient(nil, hub, "user1", h)
+	hub.Register(c)
+	defer func() { hub.Unregister(c); close(c.send) }()
+
+	// Build a ciphertext exactly 1 byte over the 8 KiB limit (8193 bytes).
+	oversized := make([]byte, 8*1024+1)
+	for i := range oversized {
+		oversized[i] = 0xAB
+	}
+	raw, _ := json.Marshal(map[string]string{
+		"channel_id": "ch1",
+		"ciphertext": base64.StdEncoding.EncodeToString(oversized),
+	})
+	h.Handle(c, "message.send", raw)
+
+	msg := drainUntilType(t, c, "error", time.Second)
+	var out struct {
+		Type string `json:"type"`
+		Code string `json:"code"`
+	}
+	require.NoError(t, json.Unmarshal(msg, &out))
+	assert.Equal(t, "error", out.Type)
+	assert.Equal(t, "bad_request", out.Code)
+}
+
+func TestMessageSizeLimit_AcceptsAtLimit(t *testing.T) {
+	hub := NewHub()
+	store := &messageStoreMock{
+		isChannelMemberFn: func(context.Context, string, string) (bool, error) { return true, nil },
+		insertMessageFn: func(ctx context.Context, channelID, senderID string, recipientID *string, ciphertext []byte) (*models.Message, error) {
+			return &models.Message{
+				ID:         "msg-ok",
+				ChannelID:  channelID,
+				SenderID:   senderID,
+				Ciphertext: ciphertext,
+				Timestamp:  time.Now(),
+			}, nil
+		},
+	}
+	h := NewMessageHandler(store, hub)
+	sender := NewClient(nil, hub, "user1", h)
+	hub.Register(sender)
+	recv := NewClient(nil, hub, "user2", nil)
+	hub.Register(recv)
+	hub.Subscribe(sender, "ch1")
+	hub.Subscribe(recv, "ch1")
+	defer func() {
+		hub.Unregister(sender)
+		hub.Unregister(recv)
+		close(sender.send)
+		close(recv.send)
+	}()
+
+	// Build a ciphertext exactly at the 8 KiB limit (8192 bytes).
+	atLimit := make([]byte, 8*1024)
+	for i := range atLimit {
+		atLimit[i] = 0xCD
+	}
+	raw, _ := json.Marshal(map[string]string{
+		"channel_id": "ch1",
+		"ciphertext": base64.StdEncoding.EncodeToString(atLimit),
+	})
+	h.Handle(sender, "message.send", raw)
+
+	msg := drainUntilType(t, recv, "message.new", time.Second)
+	var out struct {
+		Type string `json:"type"`
+	}
+	require.NoError(t, json.Unmarshal(msg, &out))
+	assert.Equal(t, "message.new", out.Type)
 }
 
 func TestMessageHandler_HandleTyping_BroadcastsToChannel(t *testing.T) {

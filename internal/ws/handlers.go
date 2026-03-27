@@ -15,7 +15,9 @@ const (
 	messageHistoryLimitMax  = 50
 	handlerTimeout          = 10 * time.Second
 	maxFanoutRecipients     = 200
-	maxCiphertextBytes      = 64 * 1024 // 64 KiB per ciphertext blob
+	// 8 KiB total ciphertext budget (MLS framing + encrypted payload).
+	// Effective plaintext: ~4000 bytes after MLS overhead and GCM tag.
+	maxCiphertextBytes = 8 * 1024
 )
 
 // MessageHandler handles application WebSocket message types (message.send, message.history, typing.*).
