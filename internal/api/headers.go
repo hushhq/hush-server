@@ -37,7 +37,7 @@ func buildCSP(wsOrigin string) string {
 	}
 
 	return fmt.Sprintf(
-		"default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src %s; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com",
+		"default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob: data:; connect-src %s; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; worker-src 'self' blob: data:",
 		strings.Join(connectSrc, " "),
 	)
 }
