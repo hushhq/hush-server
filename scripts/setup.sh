@@ -89,11 +89,33 @@ elif command -v docker-compose >/dev/null 2>&1; then
   DOCKER_COMPOSE="docker-compose"
 fi
 
-if ! command -v docker >/dev/null 2>&1; then
-  die "Docker is required. Install from https://docs.docker.com/engine/install/" 1
-fi
-if [ -z "$DOCKER_COMPOSE" ]; then
-  die "docker-compose (or docker compose plugin) is required. Install from https://docs.docker.com/engine/install/" 1
+if ! command -v docker >/dev/null 2>&1 || [ -z "$DOCKER_COMPOSE" ]; then
+  log "Docker is required but not installed."
+  printf '%s Install Docker now? [y/N] ' "$LOG_PREFIX"
+  read -r _install_docker
+  case "$_install_docker" in
+    [yY])
+      log "Installing Docker via get.docker.com..."
+      curl -fsSL https://get.docker.com | sh || die "Docker installation failed." 1
+      # Ensure current user can run docker without sudo (takes effect on next login).
+      if [ "$(id -u)" -ne 0 ] && command -v usermod >/dev/null 2>&1; then
+        usermod -aG docker "$(whoami)" 2>/dev/null || true
+      fi
+      # Re-detect docker compose after install.
+      if docker compose version >/dev/null 2>&1; then
+        DOCKER_COMPOSE="docker compose"
+      elif command -v docker-compose >/dev/null 2>&1; then
+        DOCKER_COMPOSE="docker-compose"
+      fi
+      if ! command -v docker >/dev/null 2>&1 || [ -z "$DOCKER_COMPOSE" ]; then
+        die "Docker installed but docker compose plugin not found. See https://docs.docker.com/compose/install/" 1
+      fi
+      log "Docker installed successfully."
+      ;;
+    *)
+      die "Docker is required to run Hush. Install from https://docs.docker.com/engine/install/" 1
+      ;;
+  esac
 fi
 if ! command -v openssl >/dev/null 2>&1; then
   die "openssl is required. Install via your package manager (e.g. apt install openssl)" 1
