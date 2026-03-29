@@ -6,7 +6,7 @@
 # warning on first visit — this is expected. E2EE is unaffected; the self-signed
 # cert only protects the transport layer between browser and server.
 
-:443 {
+https://__IP__ {
   tls internal
 
   # LiveKit WebSocket signaling — no security headers to avoid breaking upgrade handshake
