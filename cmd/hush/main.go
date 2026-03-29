@@ -192,10 +192,10 @@ func main() {
 	// Security headers before CORS so they are always present regardless of origin check outcome.
 	r.Use(api.SecurityHeaders(cfg.Production, wsOrigin))
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{cfg.CORSOrigin},
+		AllowedOrigins:   []string{"*"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
-		AllowCredentials: true,
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Admin-Key"},
+		AllowCredentials: false,
 	}))
 	// General per-IP rate limit: 100 requests per minute with a burst of 100. SEC-04.
 	r.Use(api.IPRateLimiter(rate.Limit(100.0/60.0), 100))
