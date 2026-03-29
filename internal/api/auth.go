@@ -22,6 +22,7 @@ import (
 	"hush.app/server/internal/transparency"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/google/uuid"
 )
 
@@ -31,6 +32,7 @@ const (
 	nonceTTL                 = 60 * time.Second
 	noncePurgeInterval       = 5 * time.Minute
 	noncePurgeContextSecs    = 30
+	usernameCheckTimeout     = 5 * time.Second
 	ed25519PublicKeyLen      = 32
 	defaultGuestSessionHours = 1
 )
@@ -450,10 +452,18 @@ func (h *authHandler) checkUsername(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	_, err := h.store.GetUserByUsername(r.Context(), username)
-	if err != nil {
-		// pgx.ErrNoRows means username is available.
+
+	ctx, cancel := context.WithTimeout(r.Context(), usernameCheckTimeout)
+	defer cancel()
+
+	_, err := h.store.GetUserByUsername(ctx, username)
+	if errors.Is(err, pgx.ErrNoRows) {
 		writeJSON(w, http.StatusOK, map[string]bool{"available": true})
+		return
+	}
+	if err != nil {
+		slog.Error("check username", "username", username, "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "username check failed"})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"available": false})

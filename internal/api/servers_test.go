@@ -527,6 +527,80 @@ func TestCreateServer_Template(t *testing.T) {
 	assert.Contains(t, systemMessages, "server_created")
 }
 
+func TestCreateServer_FallbackTemplateSeedsDefaultChannels(t *testing.T) {
+	userID := uuid.New().String()
+	serverID := uuid.New().String()
+
+	var mu sync.Mutex
+	var createdChannels []channelCreation
+
+	store := &mockStore{
+		getDefaultServerTemplateFn: func(_ context.Context) (*models.ServerTemplate, error) {
+			return nil, nil
+		},
+		createServerFn: func(_ context.Context, metadata []byte) (*models.Server, error) {
+			return &models.Server{ID: serverID, EncryptedMetadata: metadata}, nil
+		},
+		addServerMemberFn: func(_ context.Context, _, _ string, _ int) error { return nil },
+		getChannelByTypeAndPositionFn: func(_ context.Context, _, _ string, _ int) (*models.Channel, error) {
+			return nil, nil
+		},
+		createChannelFn: func(_ context.Context, srvID string, metadata []byte, chType string, voiceMode *string, parentID *string, position int) (*models.Channel, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			createdChannels = append(createdChannels, channelCreation{
+				ServerID:          srvID,
+				EncryptedMetadata: metadata,
+				Type:              chType,
+				VoiceMode:         voiceMode,
+				ParentID:          parentID,
+				Position:          position,
+			})
+			sid := srvID
+			return &models.Channel{
+				ID:                uuid.New().String(),
+				ServerID:          &sid,
+				EncryptedMetadata: metadata,
+				Type:              chType,
+				VoiceMode:         voiceMode,
+				Position:          position,
+			}, nil
+		},
+		insertSystemMessageFn: func(_ context.Context, _, eventType, _ string, _ *string, _ string, _ map[string]interface{}) (*models.SystemMessage, error) {
+			return &models.SystemMessage{ID: uuid.New().String(), EventType: eventType}, nil
+		},
+	}
+
+	token := makeAuth(store, userID)
+	router := serversRouter(store)
+
+	rr := postServerJSON(router, "/", models.CreateServerRequest{EncryptedMetadata: []byte(`{}`)}, token)
+	require.Equal(t, http.StatusCreated, rr.Code)
+
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := len(createdChannels)
+		mu.Unlock()
+		if n >= 3 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Len(t, createdChannels, 3, "expected fallback template to create default channels")
+	assert.Equal(t, "system", createdChannels[0].Type)
+	assert.Equal(t, -1, createdChannels[0].Position)
+	assert.Equal(t, "text", createdChannels[1].Type)
+	assert.Equal(t, 0, createdChannels[1].Position)
+	assert.Equal(t, "voice", createdChannels[2].Type)
+	assert.Equal(t, 1, createdChannels[2].Position)
+	require.NotNil(t, createdChannels[2].VoiceMode)
+	assert.Equal(t, "quality", *createdChannels[2].VoiceMode)
+}
+
 // TestCreateServer_PartialFail verifies that when one CreateChannel call fails,
 // server creation still succeeds (201) and template_partial_failure system message is emitted.
 func TestCreateServer_PartialFail(t *testing.T) {

@@ -11,10 +11,14 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// fallbackTemplate returns only the #system channel — used when no server template exists.
+// fallbackTemplate returns the built-in default channel set used when no
+// server template exists in the database.
 func fallbackTemplate() []models.TemplateChannel {
+	quality := "quality"
 	return []models.TemplateChannel{
 		{Name: "system", Type: "system", Position: -1},
+		{Name: "general", Type: "text", Position: 0},
+		{Name: "General", Type: "voice", VoiceMode: &quality, Position: 1},
 	}
 }
 
@@ -91,7 +95,7 @@ func (h *serversHandler) createServer(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden,
 			map[string]string{"error": "This instance requires a subscription to create servers."})
 		return
-	// "open": fall through — any authenticated user can create.
+		// "open": fall through — any authenticated user can create.
 	}
 	var req models.CreateServerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -132,6 +136,7 @@ func (h *serversHandler) createServer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if len(template) == 0 {
+		slog.Warn("createServer: no default server template found; using built-in fallback")
 		template = fallbackTemplate()
 	}
 	// Ensure system channel is always present in the template.

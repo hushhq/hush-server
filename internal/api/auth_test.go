@@ -19,6 +19,7 @@ import (
 	"hush.app/server/internal/models"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -47,6 +48,13 @@ func postJSON(handler http.Handler, path string, body interface{}) *httptest.Res
 func getWithAuth(handler http.Handler, path, token string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodGet, path, nil)
 	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	return rr
+}
+
+func get(handler http.Handler, path string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodGet, path, nil)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 	return rr
@@ -136,6 +144,53 @@ func TestValidateUsername_InvalidChars_ReturnsError(t *testing.T) {
 		assert.Error(t, err, "expected error for %q", name)
 		assert.Contains(t, err.Error(), "username may only contain")
 	}
+}
+
+// ---------- Check Username ----------
+
+func TestCheckUsername_NoRows_ReturnsAvailableTrue(t *testing.T) {
+	store := &mockStore{
+		getUserByUsernameFn: func(_ context.Context, username string) (*models.User, error) {
+			assert.Equal(t, "alice", username)
+			return nil, pgx.ErrNoRows
+		},
+	}
+	router := newTestRouter(store)
+
+	rr := get(router, "/check-username/alice")
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.JSONEq(t, `{"available":true}`, rr.Body.String())
+}
+
+func TestCheckUsername_UserExists_ReturnsAvailableFalse(t *testing.T) {
+	store := &mockStore{
+		getUserByUsernameFn: func(_ context.Context, username string) (*models.User, error) {
+			assert.Equal(t, "alice", username)
+			return newTestUser(username), nil
+		},
+	}
+	router := newTestRouter(store)
+
+	rr := get(router, "/check-username/alice")
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.JSONEq(t, `{"available":false}`, rr.Body.String())
+}
+
+func TestCheckUsername_DatabaseError_Returns500(t *testing.T) {
+	store := &mockStore{
+		getUserByUsernameFn: func(_ context.Context, _ string) (*models.User, error) {
+			return nil, errors.New("database offline")
+		},
+	}
+	router := newTestRouter(store)
+
+	rr := get(router, "/check-username/alice")
+
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+	resp := decodeErrorResponse(t, rr)
+	assert.Equal(t, "username check failed", resp["error"])
 }
 
 // ---------- Register ----------
