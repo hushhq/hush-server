@@ -6,6 +6,13 @@
 # warning on first visit — this is expected. E2EE is unaffected; the self-signed
 # cert only protects the transport layer between browser and server.
 
+{
+  # Clients connecting to an IP address don't send SNI (RFC 6066 — SNI is
+  # hostname-only). Without this fallback, Caddy can't match the request to a
+  # site block and the TLS handshake fails with an internal error.
+  default_sni __IP__
+}
+
 https://__IP__ {
   tls internal
 
