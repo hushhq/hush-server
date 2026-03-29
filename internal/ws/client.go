@@ -119,6 +119,16 @@ func (c *Client) handleMessage(raw []byte) {
 		if msg.ServerID != "" {
 			c.hub.UnsubscribeFromServer(c, msg.ServerID)
 		}
+	case "ping":
+		select {
+		case c.send <- []byte(`{"type":"pong"}`):
+		default:
+		}
+	case "voice.mute_state":
+		// Broadcast mute/deafen state to the guild so other participants see overlays.
+		if msg.ServerID != "" {
+			c.hub.BroadcastToServer(msg.ServerID, raw)
+		}
 	case "message.send", "message.history", "typing.start", "typing.stop":
 		if c.handler != nil {
 			c.handler.Handle(c, msg.Type, raw)
