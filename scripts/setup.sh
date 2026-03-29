@@ -296,9 +296,18 @@ log "LiveKit config OK (using $LIVEKIT_TMPL template; keys injected at container
 # new credentials take effect cleanly.
 if $DOCKER_COMPOSE -f "$COMPOSE_FILE" ps -q 2>/dev/null | grep -q .; then
   log "Stopping existing Hush stack..."
-  $DOCKER_COMPOSE -f "$COMPOSE_FILE" down -v 2>/dev/null || true
+  # Use down without -v to preserve data volumes. Only remove volumes if
+  # no postgres data exists yet (fresh/failed first setup).
+  if docker volume inspect hush-app_postgres_data >/dev/null 2>&1 && \
+     $DOCKER_COMPOSE -f "$COMPOSE_FILE" exec -T postgres pg_isready -U "${POSTGRES_USER:-hush}" >/dev/null 2>&1; then
+    log "Existing database detected — preserving data volumes."
+    $DOCKER_COMPOSE -f "$COMPOSE_FILE" down 2>/dev/null || true
+  else
+    log "No healthy database found — removing stale volumes."
+    $DOCKER_COMPOSE -f "$COMPOSE_FILE" down -v 2>/dev/null || true
+  fi
 elif [ "$force" -eq 1 ]; then
-  # Even if no containers are running, stale volumes may exist from a prior run
+  # No containers running. Remove stale volumes from a prior failed setup.
   $DOCKER_COMPOSE -f "$COMPOSE_FILE" down -v 2>/dev/null || true
 fi
 
