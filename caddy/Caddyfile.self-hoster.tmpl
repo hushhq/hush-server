@@ -32,6 +32,13 @@ __DOMAIN__ {
     }
   }
 
+  # Admin dashboard SPA
+  handle_path /admin* {
+    root * /srv/admin
+    try_files {path} /index.html
+    file_server
+  }
+
   # Client SPA — serve built files, fall back to index.html for client-side routing
   handle /* {
     header X-Content-Type-Options "nosniff"
