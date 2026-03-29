@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 
 	"hush.app/server/internal/models"
 
@@ -37,12 +38,16 @@ func (p *Pool) GetUserByUsername(ctx context.Context, username string) (*models.
 }
 
 // GetUserByPublicKey returns the user whose root_public_key matches the given
-// Ed25519 public key, or pgx.ErrNoRows if not found.
+// Ed25519 public key, or (nil, nil) if not found.
 func (p *Pool) GetUserByPublicKey(ctx context.Context, publicKey []byte) (*models.User, error) {
 	row := p.QueryRow(ctx, `
 		SELECT id, username, root_public_key, display_name, role, created_at
 		FROM users WHERE root_public_key = $1`, publicKey)
-	return scanUser(row)
+	u, err := scanUser(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return u, err
 }
 
 // scanUser reads a user row that includes root_public_key.
