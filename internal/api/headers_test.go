@@ -24,6 +24,8 @@ func TestSecurityHeaders_CSPPresent(t *testing.T) {
 	assert.Contains(t, csp, "wss://example.com", "CSP connect-src must include the WS origin")
 	assert.Contains(t, csp, "connect-src 'self' https: http: wss: ws:", "CSP connect-src must allow cross-instance HTTP(S) and WS(S) requests")
 	assert.Contains(t, csp, "default-src 'self'", "CSP must include default-src 'self'")
+	assert.Contains(t, csp, "font-src 'self' https://fonts.gstatic.com", "CSP must allow Google Fonts")
+	assert.Contains(t, csp, "https://fonts.googleapis.com", "CSP style-src must allow Google Fonts stylesheets")
 }
 
 func TestSecurityHeaders_CSPDeduplicatesWildcardWebSocketOrigin(t *testing.T) {
