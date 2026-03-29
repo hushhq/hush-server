@@ -30,16 +30,17 @@ type mockStore struct {
 	getUserByIDFn             func(ctx context.Context, id string) (*models.User, error)
 
 	// BIP39 auth nonces
-	insertAuthNonceFn   func(ctx context.Context, nonce string, publicKey []byte, expiresAt time.Time) error
-	consumeAuthNonceFn  func(ctx context.Context, nonce string) ([]byte, error)
+	insertAuthNonceFn    func(ctx context.Context, nonce string, publicKey []byte, expiresAt time.Time) error
+	consumeAuthNonceFn   func(ctx context.Context, nonce string) ([]byte, error)
+	deleteAuthNonceFn    func(ctx context.Context, nonce string) error
 	purgeExpiredNoncesFn func(ctx context.Context) (int64, error)
 
 	// Device keys
-	insertDeviceKeyFn      func(ctx context.Context, userID, deviceID string, devicePublicKey, certificate []byte) error
-	listDeviceKeysFn       func(ctx context.Context, userID string) ([]models.DeviceKey, error)
-	revokeDeviceKeyFn      func(ctx context.Context, userID, deviceID string) error
-	revokeAllDeviceKeysFn  func(ctx context.Context, userID string) error
-	updateDeviceLastSeenFn func(ctx context.Context, userID, deviceID string) error
+	insertDeviceKeyFn       func(ctx context.Context, userID, deviceID string, devicePublicKey, certificate []byte) error
+	listDeviceKeysFn        func(ctx context.Context, userID string) ([]models.DeviceKey, error)
+	revokeDeviceKeyFn       func(ctx context.Context, userID, deviceID string) error
+	revokeAllDeviceKeysFn   func(ctx context.Context, userID string) error
+	updateDeviceLastSeenFn  func(ctx context.Context, userID, deviceID string) error
 	createSessionFn         func(ctx context.Context, sessionID, userID, tokenHash string, expiresAt time.Time) (*models.Session, error)
 	getSessionByTokenHashFn func(ctx context.Context, tokenHash string) (*models.Session, error)
 	deleteSessionByIDFn     func(ctx context.Context, sessionID string) error
@@ -72,12 +73,12 @@ type mockStore struct {
 	listMembersFn          func(ctx context.Context) ([]models.Member, error)
 
 	// Channels (guild-scoped — serverID param)
-	createChannelFn              func(ctx context.Context, serverID string, encryptedMetadata []byte, channelType string, voiceMode *string, parentID *string, position int) (*models.Channel, error)
-	listChannelsFn               func(ctx context.Context, serverID string) ([]models.Channel, error)
-	getChannelByIDFn             func(ctx context.Context, channelID string) (*models.Channel, error)
+	createChannelFn               func(ctx context.Context, serverID string, encryptedMetadata []byte, channelType string, voiceMode *string, parentID *string, position int) (*models.Channel, error)
+	listChannelsFn                func(ctx context.Context, serverID string) ([]models.Channel, error)
+	getChannelByIDFn              func(ctx context.Context, channelID string) (*models.Channel, error)
 	getChannelByTypeAndPositionFn func(ctx context.Context, serverID, channelType string, position int) (*models.Channel, error)
-	deleteChannelFn              func(ctx context.Context, channelID string) error
-	moveChannelFn                func(ctx context.Context, channelID string, parentID *string, position int) error
+	deleteChannelFn               func(ctx context.Context, channelID string) error
+	moveChannelFn                 func(ctx context.Context, channelID string, parentID *string, position int) error
 
 	// Server templates
 	listServerTemplatesFn      func(ctx context.Context) ([]models.ServerTemplate, error)
@@ -93,12 +94,12 @@ type mockStore struct {
 	claimInviteUseFn  func(ctx context.Context, code string) (bool, error)
 
 	// Server / guild operations
-	createServerFn                      func(ctx context.Context, encryptedMetadata []byte) (*models.Server, error)
-	updateServerEncryptedMetadataFn     func(ctx context.Context, serverID string, encryptedMetadata []byte) error
-	getServerByIDFn                     func(ctx context.Context, serverID string) (*models.Server, error)
-	listServersForUserFn                func(ctx context.Context, userID string) ([]models.Server, error)
-	deleteServerFn                      func(ctx context.Context, serverID string) error
-	listGuildBillingStatsFn             func(ctx context.Context) ([]models.GuildBillingStats, error)
+	createServerFn                  func(ctx context.Context, encryptedMetadata []byte) (*models.Server, error)
+	updateServerEncryptedMetadataFn func(ctx context.Context, serverID string, encryptedMetadata []byte) error
+	getServerByIDFn                 func(ctx context.Context, serverID string) (*models.Server, error)
+	listServersForUserFn            func(ctx context.Context, userID string) ([]models.Server, error)
+	deleteServerFn                  func(ctx context.Context, serverID string) error
+	listGuildBillingStatsFn         func(ctx context.Context) ([]models.GuildBillingStats, error)
 
 	// Server member operations
 	addServerMemberFn         func(ctx context.Context, serverID, userID string, permissionLevel int) error
@@ -149,16 +150,16 @@ type mockStore struct {
 	getSystemMsgRetentionDaysFn func(ctx context.Context) (*int, error)
 
 	// MLS group methods
-	upsertMLSGroupInfoFn        func(ctx context.Context, channelID string, groupType string, groupInfoBytes []byte, epoch int64) error
-	getMLSGroupInfoFn           func(ctx context.Context, channelID string, groupType string) ([]byte, int64, error)
-	deleteMLSGroupInfoFn        func(ctx context.Context, channelID string, groupType string) error
-	appendMLSCommitFn           func(ctx context.Context, channelID string, epoch int64, commitBytes []byte, senderID string) error
-	getMLSCommitsSinceEpochFn   func(ctx context.Context, channelID string, sinceEpoch int64, limit int) ([]db.MLSCommitRow, error)
-	purgeOldMLSCommitsFn        func(ctx context.Context, maxPerChannel int) (int64, error)
-	storePendingWelcomeFn       func(ctx context.Context, channelID, recipientUserID, senderID string, welcomeBytes []byte, epoch int64) error
-	getPendingWelcomesFn        func(ctx context.Context, recipientUserID string) ([]db.PendingWelcomeRow, error)
-	deletePendingWelcomeFn      func(ctx context.Context, welcomeID string) error
-	getVoiceKeyRotationHoursFn  func(ctx context.Context) (int, error)
+	upsertMLSGroupInfoFn       func(ctx context.Context, channelID string, groupType string, groupInfoBytes []byte, epoch int64) error
+	getMLSGroupInfoFn          func(ctx context.Context, channelID string, groupType string) ([]byte, int64, error)
+	deleteMLSGroupInfoFn       func(ctx context.Context, channelID string, groupType string) error
+	appendMLSCommitFn          func(ctx context.Context, channelID string, epoch int64, commitBytes []byte, senderID string) error
+	getMLSCommitsSinceEpochFn  func(ctx context.Context, channelID string, sinceEpoch int64, limit int) ([]db.MLSCommitRow, error)
+	purgeOldMLSCommitsFn       func(ctx context.Context, maxPerChannel int) (int64, error)
+	storePendingWelcomeFn      func(ctx context.Context, channelID, recipientUserID, senderID string, welcomeBytes []byte, epoch int64) error
+	getPendingWelcomesFn       func(ctx context.Context, recipientUserID string) ([]db.PendingWelcomeRow, error)
+	deletePendingWelcomeFn     func(ctx context.Context, welcomeID string) error
+	getVoiceKeyRotationHoursFn func(ctx context.Context) (int, error)
 
 	// MLS guild metadata group methods
 	upsertMLSGuildMetadataGroupInfoFn func(ctx context.Context, serverID string, groupInfoBytes []byte, epoch int64) error
@@ -171,15 +172,15 @@ type mockStore struct {
 	updateGuildChannelCountsFn   func(ctx context.Context, serverID string) error
 
 	// Transparency log methods
-	insertTransparencyLogEntryFn          func(ctx context.Context, leafIndex uint64, operation string, userPubKey, subjectKey, entryCBOR, leafHash, userSig, logSig []byte) error
-	getTransparencyLogEntriesByPubKeyFn   func(ctx context.Context, pubKey []byte) ([]models.TransparencyLogEntry, error)
-	getLatestTransparencyTreeHeadFn       func(ctx context.Context) (*models.TransparencyTreeHead, error)
-	insertTransparencyTreeHeadFn          func(ctx context.Context, treeSize uint64, rootHash, fringe, headSig []byte) error
+	insertTransparencyLogEntryFn        func(ctx context.Context, leafIndex uint64, operation string, userPubKey, subjectKey, entryCBOR, leafHash, userSig, logSig []byte) error
+	getTransparencyLogEntriesByPubKeyFn func(ctx context.Context, pubKey []byte) ([]models.TransparencyLogEntry, error)
+	getLatestTransparencyTreeHeadFn     func(ctx context.Context) (*models.TransparencyTreeHead, error)
+	insertTransparencyTreeHeadFn        func(ctx context.Context, treeSize uint64, rootHash, fringe, headSig []byte) error
 
 	// DM and discovery methods
-	findDMGuildFn      func(ctx context.Context, userAID, userBID string) (*models.Server, error)
-	createDMGuildFn    func(ctx context.Context, userAID, userBID string) (*models.Server, *models.Channel, error)
-	discoverGuildsFn   func(ctx context.Context, category, search, sort string, page, pageSize int) ([]models.DiscoverGuild, int, error)
+	findDMGuildFn       func(ctx context.Context, userAID, userBID string) (*models.Server, error)
+	createDMGuildFn     func(ctx context.Context, userAID, userBID string) (*models.Server, *models.Channel, error)
+	discoverGuildsFn    func(ctx context.Context, category, search, sort string, page, pageSize int) ([]models.DiscoverGuild, int, error)
 	searchUsersPublicFn func(ctx context.Context, query string, limit int) ([]models.UserSearchPublicResult, error)
 }
 
@@ -227,6 +228,13 @@ func (m *mockStore) ConsumeAuthNonce(ctx context.Context, nonce string) ([]byte,
 		return m.consumeAuthNonceFn(ctx, nonce)
 	}
 	return nil, nil
+}
+
+func (m *mockStore) DeleteAuthNonce(ctx context.Context, nonce string) error {
+	if m.deleteAuthNonceFn != nil {
+		return m.deleteAuthNonceFn(ctx, nonce)
+	}
+	return nil
 }
 
 func (m *mockStore) PurgeExpiredNonces(ctx context.Context) (int64, error) {

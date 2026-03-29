@@ -34,6 +34,12 @@ func (p *Pool) ConsumeAuthNonce(ctx context.Context, nonce string) ([]byte, erro
 	return publicKey, nil
 }
 
+// DeleteAuthNonce removes a nonce regardless of expiry. Missing rows are ignored.
+func (p *Pool) DeleteAuthNonce(ctx context.Context, nonce string) error {
+	_, err := p.Exec(ctx, `DELETE FROM auth_nonces WHERE nonce = $1`, nonce)
+	return err
+}
+
 // PurgeExpiredNonces deletes all auth_nonces whose expires_at is in the past.
 // Returns the number of rows deleted.
 func (p *Pool) PurgeExpiredNonces(ctx context.Context) (int64, error) {

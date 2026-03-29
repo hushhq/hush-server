@@ -26,11 +26,11 @@ import (
 )
 
 const (
-	maxUsernameLen          = 128
-	maxDisplayLen           = 128
-	nonceTTL                = 60 * time.Second
-	noncePurgeInterval      = 5 * time.Minute
-	noncePurgeContextSecs   = 30
+	maxUsernameLen           = 128
+	maxDisplayLen            = 128
+	nonceTTL                 = 60 * time.Second
+	noncePurgeInterval       = 5 * time.Minute
+	noncePurgeContextSecs    = 30
 	ed25519PublicKeyLen      = 32
 	defaultGuestSessionHours = 1
 )
@@ -371,12 +371,18 @@ func (h *authHandler) verify(w http.ResponseWriter, r *http.Request) {
 
 	h.sendAuthResponse(w, r, user)
 
-	// Fire-and-forget: update device last_seen. Device ID is not available without
-	// a separate device lookup; skip for now and log only on unexpected errors.
-	go func() {
+	// Fire-and-forget: update device last_seen. Prefer the caller-supplied
+	// device ID so linked devices with non-root device public keys still track
+	// activity correctly. Fall back to the legacy public-key scan when older
+	// clients omit deviceId.
+	go func(deviceID string) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		// Best-effort: look up a device matching this public key.
+		if deviceID != "" {
+			_ = h.store.UpdateDeviceLastSeen(ctx, user.ID, deviceID)
+			return
+		}
+		// Best-effort legacy fallback: look up a device matching this public key.
 		devices, err := h.store.ListDeviceKeys(ctx, user.ID)
 		if err != nil {
 			return
@@ -387,7 +393,7 @@ func (h *authHandler) verify(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 		}
-	}()
+	}(req.DeviceID)
 }
 
 func (h *authHandler) sendAuthResponse(w http.ResponseWriter, r *http.Request, user *models.User) {

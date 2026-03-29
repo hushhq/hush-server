@@ -7,7 +7,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -41,6 +40,15 @@ func postJSONWithAuth(handler http.Handler, path, token string, body interface{}
 	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(b))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	return rr
+}
+
+func postJSONReq(handler http.Handler, path string, body interface{}) *httptest.ResponseRecorder {
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 	return rr
@@ -292,61 +300,120 @@ func TestRevokeAllDevices_Valid_Returns204(t *testing.T) {
 	assert.True(t, revokedAll)
 }
 
-// ---------- TestLinkRequest / TestLinkVerify ----------
+// ---------- TestLinkRequest / TestLinkResolve / TestLinkVerify ----------
 
-func TestLinkRequest_ReturnsCodeAndExpiry(t *testing.T) {
+func TestLinkRequest_ReturnsHandleCodeAndExpiry(t *testing.T) {
 	store := &mockStore{}
-	userID := uuid.New().String()
-	token := makeAuth(store, userID)
+	insertedNonces := make([]string, 0, 2)
 
-	// InsertAuthNonce is used to persist the link-request nonce.
-	store.insertAuthNonceFn = func(_ context.Context, nonce string, pub []byte, expiresAt time.Time) error {
-		// Nonce should be the 8-char code with "link:" prefix.
-		assert.Contains(t, nonce, "link:")
+	store.insertAuthNonceFn = func(_ context.Context, nonce string, payload []byte, expiresAt time.Time) error {
+		insertedNonces = append(insertedNonces, nonce)
 		assert.WithinDuration(t, time.Now().Add(5*time.Minute), expiresAt, 10*time.Second)
+		assert.NotEmpty(t, payload)
 		return nil
 	}
 
 	body := map[string]string{
-		"devicePublicKey": base64.StdEncoding.EncodeToString(make([]byte, 32)),
+		"devicePublicKey":  base64.StdEncoding.EncodeToString(make([]byte, 32)),
+		"sessionPublicKey": base64.StdEncoding.EncodeToString([]byte{1, 2, 3}),
+		"deviceId":         "new-device-1",
+		"instanceUrl":      "https://app.gethush.live",
 	}
 	handler := newDeviceTestRouter(store)
-	rr := postJSONWithAuth(handler, "/link-request", token, body)
-	require.Equal(t, http.StatusOK, rr.Code)
+	rr := postJSONReq(handler, "/link-request", body)
+	require.Equal(t, http.StatusOK, rr.Code, "body: %s", rr.Body.String())
 
-	var resp map[string]interface{}
+	var resp map[string]string
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
-	code, ok := resp["code"].(string)
-	require.True(t, ok, "response must have a 'code' string field")
-	assert.Len(t, code, 8, "linking code must be 8 characters")
-	_, hasExpiry := resp["expiresAt"]
-	assert.True(t, hasExpiry, "response must include 'expiresAt'")
+	require.NotEmpty(t, resp["requestId"])
+	require.NotEmpty(t, resp["secret"])
+	assert.Len(t, resp["code"], 8)
+	require.NotEmpty(t, resp["expiresAt"])
+	require.Len(t, insertedNonces, 2)
+	assert.Contains(t, insertedNonces[0], linkRequestNoncePrefix)
+	assert.Contains(t, insertedNonces[1], linkCodeNoncePrefix)
 }
 
-func TestLinkVerify_ValidCode_Returns201(t *testing.T) {
+func TestLinkResolve_ValidCode_ReturnsClaimToken(t *testing.T) {
 	store := &mockStore{}
 	userID := uuid.New().String()
 	token := makeAuth(store, userID)
 
-	// Signing device's keypair.
-	signingPub, signingPriv, _ := generateDeviceKeyPair(t)
-	// New device's public key.
-	newDevicePub, _, newDevicePubBase64 := generateDeviceKeyPair(t)
+	payload := storedLinkRequest{
+		RequestID:        "req-1",
+		Secret:           "sec-1",
+		Code:             "ABCD1234",
+		DeviceID:         "new-device-1",
+		DevicePublicKey:  base64.StdEncoding.EncodeToString(make([]byte, 32)),
+		SessionPublicKey: base64.StdEncoding.EncodeToString([]byte{1, 2, 3}),
+		InstanceURL:      "https://app.gethush.live",
+		ExpiresAt:        time.Now().Add(5 * time.Minute).UTC().Format(time.RFC3339),
+	}
+	payloadBytes, err := json.Marshal(payload)
+	require.NoError(t, err)
 
-	// Certificate = Sign(signingPriv, newDevicePub).
-	certificate := ed25519.Sign(signingPriv, newDevicePub)
-
-	code := "ABCD1234"
-	nonce := fmt.Sprintf("link:%s", code)
-
-	// consumeAuthNonce returns the new device's public key encoded in the nonce.
-	store.consumeAuthNonceFn = func(_ context.Context, n string) ([]byte, error) {
-		require.Equal(t, nonce, n)
-		return newDevicePub, nil
+	store.consumeAuthNonceFn = func(_ context.Context, nonce string) ([]byte, error) {
+		require.Equal(t, linkCodeNonce("ABCD1234"), nonce)
+		return payloadBytes, nil
 	}
 
-	// The signing device's public key is looked up via ListDeviceKeys.
+	var deletedNonce string
+	store.deleteAuthNonceFn = func(_ context.Context, nonce string) error {
+		deletedNonce = nonce
+		return nil
+	}
+
+	var claimNonce string
+	store.insertAuthNonceFn = func(_ context.Context, nonce string, body []byte, _ time.Time) error {
+		claimNonce = nonce
+		assert.Equal(t, payloadBytes, body)
+		return nil
+	}
+
+	handler := newDeviceTestRouter(store)
+	rr := postJSONWithAuth(handler, "/link-resolve", token, map[string]string{
+		"code": "ABCD1234",
+	})
+	require.Equal(t, http.StatusOK, rr.Code, "body: %s", rr.Body.String())
+
+	var resp map[string]string
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	require.NotEmpty(t, resp["claimToken"])
+	assert.Equal(t, payload.RequestID, resp["requestId"])
+	assert.Equal(t, payload.DeviceID, resp["deviceId"])
+	assert.Equal(t, linkRequestNonce(payload.RequestID, payload.Secret), deletedNonce)
+	assert.Contains(t, claimNonce, linkClaimNoncePrefix)
+}
+
+func TestLinkVerify_ValidClaim_Returns201(t *testing.T) {
+	store := &mockStore{}
+	userID := uuid.New().String()
+	token := makeAuth(store, userID)
+
+	signingPub, signingPriv, _ := generateDeviceKeyPair(t)
+	newDevicePub, _, newDevicePubBase64 := generateDeviceKeyPair(t)
+	certificate := ed25519.Sign(signingPriv, newDevicePub)
+
+	requestPayload := storedLinkRequest{
+		RequestID:        "req-1",
+		Secret:           "sec-1",
+		Code:             "ABCD1234",
+		DeviceID:         "new-device-via-link",
+		DevicePublicKey:  newDevicePubBase64,
+		SessionPublicKey: base64.StdEncoding.EncodeToString([]byte{1, 2, 3}),
+		InstanceURL:      "https://app.gethush.live",
+		ExpiresAt:        time.Now().Add(5 * time.Minute).UTC().Format(time.RFC3339),
+	}
+	requestBytes, err := json.Marshal(requestPayload)
+	require.NoError(t, err)
+
+	store.consumeAuthNonceFn = func(_ context.Context, nonce string) ([]byte, error) {
+		require.Equal(t, linkClaimNonce("claim-1"), nonce)
+		return requestBytes, nil
+	}
+
 	store.listDeviceKeysFn = func(_ context.Context, uid string) ([]models.DeviceKey, error) {
+		require.Equal(t, userID, uid)
 		return []models.DeviceKey{
 			{DeviceID: "existing-device", DevicePublicKey: signingPub},
 		}, nil
@@ -354,21 +421,61 @@ func TestLinkVerify_ValidCode_Returns201(t *testing.T) {
 
 	var insertedDeviceID string
 	store.insertDeviceKeyFn = func(_ context.Context, uid, did string, pub, cert []byte) error {
+		require.Equal(t, userID, uid)
 		insertedDeviceID = did
+		assert.Equal(t, newDevicePub, pub)
+		assert.Equal(t, certificate, cert)
+		return nil
+	}
+
+	var resultNonce string
+	store.insertAuthNonceFn = func(_ context.Context, nonce string, payload []byte, _ time.Time) error {
+		resultNonce = nonce
+		assert.NotEmpty(t, payload)
 		return nil
 	}
 
 	handler := newDeviceTestRouter(store)
-	body := map[string]string{
-		"code":            code,
+	rr := postJSONWithAuth(handler, "/link-verify", token, map[string]string{
+		"claimToken":      "claim-1",
 		"certificate":     base64.StdEncoding.EncodeToString(certificate),
-		"newDeviceId":     "new-device-via-code",
 		"signingDeviceId": "existing-device",
-		"devicePublicKey": newDevicePubBase64,
-	}
-	rr := postJSONWithAuth(handler, "/link-verify", token, body)
+		"relayCiphertext": "ciphertext",
+		"relayIv":         "iv",
+		"relayPublicKey":  "relay-pub",
+	})
 	require.Equal(t, http.StatusCreated, rr.Code, "body: %s", rr.Body.String())
-	assert.Equal(t, "new-device-via-code", insertedDeviceID)
+	assert.Equal(t, requestPayload.DeviceID, insertedDeviceID)
+	assert.Equal(t, linkResultNonce(requestPayload.RequestID, requestPayload.Secret), resultNonce)
+}
+
+func TestLinkResult_WhenReady_ReturnsRelayPayload(t *testing.T) {
+	store := &mockStore{}
+	result := storedLinkResult{
+		RelayCiphertext: "ciphertext",
+		RelayIV:         "iv",
+		RelayPublicKey:  "relay-pub",
+		DeviceID:        "new-device-1",
+		InstanceURL:     "https://app.gethush.live",
+	}
+	resultBytes, err := json.Marshal(result)
+	require.NoError(t, err)
+
+	store.consumeAuthNonceFn = func(_ context.Context, nonce string) ([]byte, error) {
+		require.Equal(t, linkResultNonce("req-1", "sec-1"), nonce)
+		return resultBytes, nil
+	}
+
+	handler := newDeviceTestRouter(store)
+	rr := postJSONReq(handler, "/link-result", map[string]string{
+		"requestId": "req-1",
+		"secret":    "sec-1",
+	})
+	require.Equal(t, http.StatusOK, rr.Code, "body: %s", rr.Body.String())
+
+	var resp storedLinkResult
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.Equal(t, result, resp)
 }
 
 func ptr(s string) *string { return &s }

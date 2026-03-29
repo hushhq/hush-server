@@ -45,6 +45,7 @@ func (m *messageStoreMock) InsertAuthNonce(context.Context, string, []byte, time
 func (m *messageStoreMock) ConsumeAuthNonce(context.Context, string) ([]byte, error) {
 	return nil, nil
 }
+func (m *messageStoreMock) DeleteAuthNonce(context.Context, string) error     { return nil }
 func (m *messageStoreMock) PurgeExpiredNonces(context.Context) (int64, error) { return 0, nil }
 
 // Device key stubs.
@@ -54,8 +55,8 @@ func (m *messageStoreMock) InsertDeviceKey(context.Context, string, string, []by
 func (m *messageStoreMock) ListDeviceKeys(context.Context, string) ([]models.DeviceKey, error) {
 	return nil, nil
 }
-func (m *messageStoreMock) RevokeDeviceKey(context.Context, string, string) error  { return nil }
-func (m *messageStoreMock) RevokeAllDeviceKeys(context.Context, string) error      { return nil }
+func (m *messageStoreMock) RevokeDeviceKey(context.Context, string, string) error      { return nil }
+func (m *messageStoreMock) RevokeAllDeviceKeys(context.Context, string) error          { return nil }
 func (m *messageStoreMock) UpdateDeviceLastSeen(context.Context, string, string) error { return nil }
 func (m *messageStoreMock) CreateSession(context.Context, string, string, string, time.Time) (*models.Session, error) {
 	return nil, nil
@@ -294,7 +295,7 @@ func (m *messageStoreMock) StorePendingWelcome(context.Context, string, string, 
 func (m *messageStoreMock) GetPendingWelcomes(context.Context, string) ([]db.PendingWelcomeRow, error) {
 	return nil, nil
 }
-func (m *messageStoreMock) DeletePendingWelcome(context.Context, string) error { return nil }
+func (m *messageStoreMock) DeletePendingWelcome(context.Context, string) error    { return nil }
 func (m *messageStoreMock) GetVoiceKeyRotationHours(context.Context) (int, error) { return 2, nil }
 
 // Guild metadata GroupInfo stubs (0O-03: encrypted guild name/icon blob).
@@ -307,9 +308,9 @@ func (m *messageStoreMock) GetMLSGuildMetadataGroupInfo(context.Context, string)
 func (m *messageStoreMock) DeleteMLSGuildMetadataGroupInfo(context.Context, string) error { return nil }
 
 // Guild counter stubs (0O-03: activity tracking).
-func (m *messageStoreMock) IncrementGuildMessageCount(context.Context, string) error      { return nil }
-func (m *messageStoreMock) IncrementGuildMemberCount(context.Context, string, int) error  { return nil }
-func (m *messageStoreMock) UpdateGuildChannelCounts(context.Context, string) error        { return nil }
+func (m *messageStoreMock) IncrementGuildMessageCount(context.Context, string) error     { return nil }
+func (m *messageStoreMock) IncrementGuildMemberCount(context.Context, string, int) error { return nil }
+func (m *messageStoreMock) UpdateGuildChannelCounts(context.Context, string) error       { return nil }
 
 // Transparency log stubs (T.1).
 func (m *messageStoreMock) InsertTransparencyLogEntry(context.Context, uint64, string, []byte, []byte, []byte, []byte, []byte, []byte) error {
@@ -346,7 +347,9 @@ func drainUntilType(t *testing.T, c *Client, wantType string, timeout time.Durat
 	for {
 		select {
 		case msg := <-c.send:
-			var out struct{ Type string `json:"type"` }
+			var out struct {
+				Type string `json:"type"`
+			}
 			if err := json.Unmarshal(msg, &out); err != nil {
 				continue
 			}
@@ -466,7 +469,9 @@ func TestMessageHandler_HandleMessageHistory_ReturnsMessages(t *testing.T) {
 	}
 	store := &messageStoreMock{
 		isChannelMemberFn: func(ctx context.Context, channelID, userID string) (bool, error) { return true, nil },
-		getMessagesFn:     func(ctx context.Context, channelID, recipientID string, before time.Time, limit int) ([]models.Message, error) { return msgs, nil },
+		getMessagesFn: func(ctx context.Context, channelID, recipientID string, before time.Time, limit int) ([]models.Message, error) {
+			return msgs, nil
+		},
 	}
 	h := NewMessageHandler(store, hub)
 	c := NewClient(nil, hub, "user1", h)
@@ -659,10 +664,10 @@ func TestMessageHandler_HandleMLSLeaveProposal_BroadcastsAddRequest(t *testing.T
 	// receiver should get mls.add_request broadcast
 	msg := drainUntilType(t, recv, "mls.add_request", time.Second)
 	var out struct {
-		Type         string `json:"type"`
-		ChannelID    string `json:"channel_id"`
-		Action       string `json:"action"`
-		RequesterID  string `json:"requester_id"`
+		Type        string `json:"type"`
+		ChannelID   string `json:"channel_id"`
+		Action      string `json:"action"`
+		RequesterID string `json:"requester_id"`
 	}
 	require.NoError(t, json.Unmarshal(msg, &out))
 	assert.Equal(t, "mls.add_request", out.Type)

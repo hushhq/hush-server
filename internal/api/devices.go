@@ -15,30 +15,57 @@ import (
 	"hush.app/server/internal/transparency"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 )
 
 const (
-	linkCodeLen       = 8
-	linkCodeExpiry    = 5 * time.Minute
-	linkNoncePrefix   = "link:"
-	ed25519CertLen    = 64
+	linkCodeLen            = 8
+	linkCodeExpiry         = 5 * time.Minute
+	linkRequestNoncePrefix = "link:req:"
+	linkCodeNoncePrefix    = "link:code:"
+	linkClaimNoncePrefix   = "link:claim:"
+	linkResultNoncePrefix  = "link:result:"
+	ed25519CertLen         = 64
 )
 
 var linkCodeCharset = []byte("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
 
-// DeviceRoutes returns the chi.Router for device management endpoints.
-// All routes require the caller to be authenticated (RequireAuth middleware
-// is applied inside the router group). The routes are intended to be mounted
-// at /api/auth/devices (and /api/auth/link-*).
+type storedLinkRequest struct {
+	RequestID        string `json:"requestId"`
+	Secret           string `json:"secret"`
+	Code             string `json:"code"`
+	DeviceID         string `json:"deviceId"`
+	DevicePublicKey  string `json:"devicePublicKey"`
+	SessionPublicKey string `json:"sessionPublicKey"`
+	Label            string `json:"label,omitempty"`
+	InstanceURL      string `json:"instanceUrl,omitempty"`
+	ExpiresAt        string `json:"expiresAt"`
+}
+
+type storedLinkResult struct {
+	RelayCiphertext string `json:"relayCiphertext"`
+	RelayIV         string `json:"relayIv"`
+	RelayPublicKey  string `json:"relayPublicKey"`
+	DeviceID        string `json:"deviceId"`
+	InstanceURL     string `json:"instanceUrl,omitempty"`
+}
+
+// DeviceRoutes returns the chi.Router for device management and device-linking
+// endpoints mounted under /api/auth.
 //
 // Route map:
 //
-//	GET    /devices           — list authenticated user's devices
-//	POST   /devices           — certify a new device (QR flow)
-//	DELETE /devices/{deviceId} — revoke a single device
-//	DELETE /devices?all=true  — revoke all devices
-//	POST   /link-request      — register a new device's public key; returns 8-char code
-//	POST   /link-verify       — verify code + certificate; inserts certified device
+//	Public:
+//	  POST /link-request      — new device creates a 5-minute link request
+//	  POST /link-result       — new device consumes the encrypted relay payload
+//
+//	Authenticated:
+//	  GET    /devices            — list authenticated user's devices
+//	  POST   /devices            — certify a new device directly
+//	  DELETE /devices/{deviceId} — revoke a single device
+//	  DELETE /devices?all=true   — revoke all devices
+//	  POST   /link-resolve       — existing device claims a QR/code request
+//	  POST   /link-verify        — existing device certifies + uploads relay payload
 //
 // transparencySvc may be nil when the transparency log is not configured for
 // this instance. Device certify and revoke operations append synchronously
@@ -46,10 +73,13 @@ var linkCodeCharset = []byte("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
 func DeviceRoutes(store db.Store, jwtSecret string, transparencySvc *transparency.TransparencyService) func(r chi.Router) {
 	h := &deviceHandler{store: store, transparencySvc: transparencySvc}
 	return func(r chi.Router) {
+		// New-device side: no auth session exists yet.
+		r.Post("/link-request", h.linkRequest)
+		r.Post("/link-result", h.linkResult)
+
 		r.Group(func(r chi.Router) {
 			r.Use(RequireAuth(jwtSecret, store))
 
-			// Device key management.
 			r.Route("/devices", func(r chi.Router) {
 				r.Get("/", h.listDevices)
 				r.Post("/", h.certifyDevice)
@@ -57,8 +87,7 @@ func DeviceRoutes(store db.Store, jwtSecret string, transparencySvc *transparenc
 				r.Delete("/{deviceId}", h.revokeDevice)
 			})
 
-			// Text-code linking flow.
-			r.Post("/link-request", h.linkRequest)
+			r.Post("/link-resolve", h.linkResolve)
 			r.Post("/link-verify", h.linkVerify)
 		})
 	}
@@ -138,7 +167,7 @@ func (h *deviceHandler) certifyDevice(w http.ResponseWriter, r *http.Request) {
 		Certificate     string `json:"certificate"`
 		DeviceID        string `json:"deviceId"`
 		Label           string `json:"label"`
-		SigningDeviceID  string `json:"signingDeviceId"`
+		SigningDeviceID string `json:"signingDeviceId"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
@@ -161,7 +190,6 @@ func (h *deviceHandler) certifyDevice(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "deviceId is required"})
 		return
 	}
-
 	if req.SigningDeviceID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "signingDeviceId is required"})
 		return
@@ -188,9 +216,12 @@ func (h *deviceHandler) certifyDevice(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not register device"})
 		return
 	}
+	if req.Label != "" {
+		if err := h.store.UpsertDevice(r.Context(), userID, req.DeviceID, req.Label); err != nil {
+			slog.Warn("upsert certified device label", "err", err, "device_id", req.DeviceID)
+		}
+	}
 
-	// Append transparency log entry synchronously. The user's root key is the
-	// signing device's public key; the subject key is the newly certified device.
 	if h.transparencySvc != nil {
 		entry := &transparency.LogEntry{
 			OperationType: transparency.OpDeviceAdd,
@@ -222,7 +253,6 @@ func (h *deviceHandler) revokeDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Look up the device's public key before revocation so we can log the subject.
 	revokedPub, _ := h.findDevicePublicKey(r.Context(), userID, deviceID)
 
 	if err := h.store.RevokeDeviceKey(r.Context(), userID, deviceID); err != nil {
@@ -231,9 +261,6 @@ func (h *deviceHandler) revokeDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Append transparency log entry synchronously.
-	// UserPublicKey is the user's root key (obtained from auth context if available).
-	// We use revokedPub as SubjectKey so verifiers can identify which device was revoked.
 	if h.transparencySvc != nil && revokedPub != nil {
 		entry := &transparency.LogEntry{
 			OperationType: transparency.OpDeviceRevoke,
@@ -273,26 +300,27 @@ func (h *deviceHandler) revokeAllDevices(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// ---------- Link request (text-code flow) ----------
+// ---------- Link request (new-device flow) ----------
 
 // linkRequest handles POST /api/auth/link-request.
 //
-// The new device POSTs its own public key. The server:
-//  1. Generates an 8-character alphanumeric code.
-//  2. Stores the code as an auth_nonce (prefix "link:") with the new device's
-//     public key as the associated payload and a 5-minute expiry.
-//  3. Returns { code, expiresAt } to the new device.
+// The new device POSTs:
+//   - a fresh Ed25519 device public key (for account association)
+//   - a fresh ECDH session public key (for blind-relay encryption)
+//   - its stable deviceId
 //
-// The existing device then enters this code and calls /link-verify.
+// The server creates:
+//   - an opaque QR handle (requestId + secret)
+//   - an 8-character fallback code for desktop-to-desktop pairing
+//
+// Both identifiers point to the same stored request and expire after 5 minutes.
 func (h *deviceHandler) linkRequest(w http.ResponseWriter, r *http.Request) {
-	userID := userIDFromContext(r.Context())
-	if userID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
-		return
-	}
-
 	var req struct {
-		DevicePublicKey string `json:"devicePublicKey"`
+		DevicePublicKey  string `json:"devicePublicKey"`
+		SessionPublicKey string `json:"sessionPublicKey"`
+		DeviceID         string `json:"deviceId"`
+		Label            string `json:"label"`
+		InstanceURL      string `json:"instanceUrl"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
@@ -304,42 +332,157 @@ func (h *deviceHandler) linkRequest(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "devicePublicKey must be 32 bytes (Ed25519)"})
 		return
 	}
+	sessionPubBytes, err := base64.StdEncoding.DecodeString(req.SessionPublicKey)
+	if err != nil || len(sessionPubBytes) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "sessionPublicKey is required"})
+		return
+	}
+	if strings.TrimSpace(req.DeviceID) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "deviceId is required"})
+		return
+	}
 
+	requestID := uuid.NewString()
+	secret := uuid.NewString()
 	code := generateLinkCode()
-	nonce := linkNoncePrefix + code
-	expiresAt := time.Now().Add(linkCodeExpiry)
-
-	if err := h.store.InsertAuthNonce(r.Context(), nonce, newDevicePubBytes, expiresAt); err != nil {
-		slog.Error("insert link request nonce", "err", err)
+	expiresAt := time.Now().Add(linkCodeExpiry).UTC()
+	payload := storedLinkRequest{
+		RequestID:        requestID,
+		Secret:           secret,
+		Code:             code,
+		DeviceID:         strings.TrimSpace(req.DeviceID),
+		DevicePublicKey:  req.DevicePublicKey,
+		SessionPublicKey: req.SessionPublicKey,
+		Label:            strings.TrimSpace(req.Label),
+		InstanceURL:      strings.TrimSpace(req.InstanceURL),
+		ExpiresAt:        expiresAt.Format(time.RFC3339),
+	}
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not create link request"})
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"code":      code,
-		"expiresAt": expiresAt.UTC().Format(time.RFC3339),
+	requestNonce := linkRequestNonce(payload.RequestID, payload.Secret)
+	codeNonce := linkCodeNonce(payload.Code)
+	if err := h.store.InsertAuthNonce(r.Context(), requestNonce, payloadBytes, expiresAt); err != nil {
+		slog.Error("insert link request nonce", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not create link request"})
+		return
+	}
+	if err := h.store.InsertAuthNonce(r.Context(), codeNonce, payloadBytes, expiresAt); err != nil {
+		_ = h.store.DeleteAuthNonce(r.Context(), requestNonce)
+		slog.Error("insert link request code nonce", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not create link request"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"requestId": payload.RequestID,
+		"secret":    payload.Secret,
+		"code":      payload.Code,
+		"expiresAt": payload.ExpiresAt,
 	})
 }
 
-// ---------- Link verify (text-code flow) ----------
+// ---------- Link resolve (existing-device claim step) ----------
+
+// linkResolve handles POST /api/auth/link-resolve.
+//
+// The existing authenticated device claims a pairing request either by:
+//   - requestId + secret (QR route), or
+//   - code (desktop fallback)
+//
+// The request is consumed immediately so the first scan wins. The server then
+// creates a short-lived claim token that the same device must present to
+// /link-verify after generating the certificate and blind-relay payload.
+func (h *deviceHandler) linkResolve(w http.ResponseWriter, r *http.Request) {
+	userID := userIDFromContext(r.Context())
+	if userID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+
+	var req struct {
+		RequestID string `json:"requestId"`
+		Secret    string `json:"secret"`
+		Code      string `json:"code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+
+	var (
+		payloadBytes []byte
+		err          error
+	)
+	usingCode := strings.TrimSpace(req.Code) != ""
+	switch {
+	case usingCode:
+		payloadBytes, err = h.store.ConsumeAuthNonce(r.Context(), linkCodeNonce(req.Code))
+	case strings.TrimSpace(req.RequestID) != "" && strings.TrimSpace(req.Secret) != "":
+		payloadBytes, err = h.store.ConsumeAuthNonce(r.Context(), linkRequestNonce(req.RequestID, req.Secret))
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "requestId + secret or code is required"})
+		return
+	}
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "link request expired or already claimed"})
+		return
+	}
+
+	payload, err := decodeStoredLinkRequest(payloadBytes)
+	if err != nil {
+		slog.Error("decode stored link request", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "link request is corrupted"})
+		return
+	}
+
+	companionNonce := linkRequestNonce(payload.RequestID, payload.Secret)
+	if !usingCode {
+		companionNonce = linkCodeNonce(payload.Code)
+	}
+	if err := h.store.DeleteAuthNonce(r.Context(), companionNonce); err != nil {
+		slog.Warn("delete companion link nonce", "err", err, "nonce", companionNonce)
+	}
+
+	claimToken := uuid.NewString()
+	if err := h.store.InsertAuthNonce(
+		r.Context(),
+		linkClaimNonce(claimToken),
+		payloadBytes,
+		time.Now().Add(linkCodeExpiry),
+	); err != nil {
+		slog.Error("insert link claim nonce", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not claim link request"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"claimToken":       claimToken,
+		"requestId":        payload.RequestID,
+		"deviceId":         payload.DeviceID,
+		"devicePublicKey":  payload.DevicePublicKey,
+		"sessionPublicKey": payload.SessionPublicKey,
+		"label":            payload.Label,
+		"instanceUrl":      payload.InstanceURL,
+		"expiresAt":        payload.ExpiresAt,
+	})
+}
+
+// ---------- Link verify (existing-device approval step) ----------
 
 // linkVerify handles POST /api/auth/link-verify.
 //
 // The existing device POSTs:
+//   - claimToken from /link-resolve
+//   - certificate = Sign(existingDevicePriv, newDevicePub)
+//   - signingDeviceId = authorising device ID
+//   - blind-relay envelope (relayPublicKey, relayIv, relayCiphertext)
 //
-//	{
-//	  "code":            "<8-char code from /link-request>",
-//	  "certificate":     "<base64 64-byte signature of newDevicePub>",
-//	  "newDeviceId":     "<device ID for the new device>",
-//	  "signingDeviceId": "<device ID of the authorising device>",
-//	  "devicePublicKey": "<base64 newDevicePub (for cross-check)>"
-//	}
-//
-// The server:
-//  1. Consumes the nonce (code lookup + delete, atomic).
-//  2. Looks up the signing device's public key from device_keys.
-//  3. Verifies: ed25519.Verify(signingDevicePub, newDevicePub, certificate).
-//  4. Inserts the new device key with the certificate.
+// The server consumes the claim, verifies the certificate, inserts the device
+// association, and stores the opaque relay payload for the new device to fetch.
 func (h *deviceHandler) linkVerify(w http.ResponseWriter, r *http.Request) {
 	userID := userIDFromContext(r.Context())
 	if userID == "" {
@@ -348,40 +491,45 @@ func (h *deviceHandler) linkVerify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Code            string `json:"code"`
+		ClaimToken      string `json:"claimToken"`
 		Certificate     string `json:"certificate"`
-		NewDeviceID     string `json:"newDeviceId"`
-		SigningDeviceID  string `json:"signingDeviceId"`
-		DevicePublicKey string `json:"devicePublicKey"`
+		SigningDeviceID string `json:"signingDeviceId"`
+		RelayCiphertext string `json:"relayCiphertext"`
+		RelayIV         string `json:"relayIv"`
+		RelayPublicKey  string `json:"relayPublicKey"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
 	}
 
-	if req.Code == "" || req.NewDeviceID == "" || req.SigningDeviceID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "code, newDeviceId, and signingDeviceId are required"})
+	if req.ClaimToken == "" || req.Certificate == "" || req.SigningDeviceID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "claimToken, certificate, and signingDeviceId are required"})
+		return
+	}
+	if req.RelayCiphertext == "" || req.RelayIV == "" || req.RelayPublicKey == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "relayCiphertext, relayIv, and relayPublicKey are required"})
 		return
 	}
 
-	nonce := linkNoncePrefix + strings.ToUpper(req.Code)
-	storedPub, err := h.store.ConsumeAuthNonce(r.Context(), nonce)
+	requestBytes, err := h.store.ConsumeAuthNonce(r.Context(), linkClaimNonce(req.ClaimToken))
 	if err != nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "code expired or invalid"})
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "link request expired or already used"})
 		return
 	}
 
-	// Prefer the stored public key from the nonce; fall back to the request body
-	// for the QR flow where the public key arrives in-band.
-	newDevicePubBytes := storedPub
-	if len(newDevicePubBytes) != ed25519PublicKeyLen && req.DevicePublicKey != "" {
-		newDevicePubBytes, err = base64.StdEncoding.DecodeString(req.DevicePublicKey)
-		if err != nil || len(newDevicePubBytes) != ed25519PublicKeyLen {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid devicePublicKey"})
-			return
-		}
+	requestPayload, err := decodeStoredLinkRequest(requestBytes)
+	if err != nil {
+		slog.Error("decode link verify request payload", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "link request is corrupted"})
+		return
 	}
 
+	newDevicePubBytes, err := base64.StdEncoding.DecodeString(requestPayload.DevicePublicKey)
+	if err != nil || len(newDevicePubBytes) != ed25519PublicKeyLen {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid devicePublicKey"})
+		return
+	}
 	certBytes, err := base64.StdEncoding.DecodeString(req.Certificate)
 	if err != nil || len(certBytes) != ed25519CertLen {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "certificate must be 64 bytes (Ed25519 signature)"})
@@ -398,19 +546,96 @@ func (h *deviceHandler) linkVerify(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "signing device not found"})
 		return
 	}
-
 	if !ed25519.Verify(signingPub, newDevicePubBytes, certBytes) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid certificate"})
 		return
 	}
 
-	if err := h.store.InsertDeviceKey(r.Context(), userID, req.NewDeviceID, newDevicePubBytes, certBytes); err != nil {
+	if err := h.store.InsertDeviceKey(r.Context(), userID, requestPayload.DeviceID, newDevicePubBytes, certBytes); err != nil {
 		slog.Error("insert device key via link-verify", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not register device"})
 		return
 	}
+	if requestPayload.Label != "" {
+		if err := h.store.UpsertDevice(r.Context(), userID, requestPayload.DeviceID, requestPayload.Label); err != nil {
+			slog.Warn("upsert linked device label", "err", err, "device_id", requestPayload.DeviceID)
+		}
+	}
+
+	resultPayload := storedLinkResult{
+		RelayCiphertext: req.RelayCiphertext,
+		RelayIV:         req.RelayIV,
+		RelayPublicKey:  req.RelayPublicKey,
+		DeviceID:        requestPayload.DeviceID,
+		InstanceURL:     requestPayload.InstanceURL,
+	}
+	resultBytes, err := json.Marshal(resultPayload)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not finalize link"})
+		return
+	}
+	if err := h.store.InsertAuthNonce(
+		r.Context(),
+		linkResultNonce(requestPayload.RequestID, requestPayload.Secret),
+		resultBytes,
+		time.Now().Add(linkCodeExpiry),
+	); err != nil {
+		slog.Error("insert link result nonce", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not finalize link"})
+		return
+	}
+
+	if h.transparencySvc != nil {
+		entry := &transparency.LogEntry{
+			OperationType: transparency.OpDeviceAdd,
+			UserPublicKey: signingPub,
+			SubjectKey:    newDevicePubBytes,
+			Timestamp:     time.Now().Unix(),
+		}
+		if logErr := h.transparencySvc.AppendAndNotify(r.Context(), entry, userID); logErr != nil {
+			slog.Error("transparency: append device_add entry via link-verify", "err", logErr, "user_id", userID)
+		}
+	}
 
 	w.WriteHeader(http.StatusCreated)
+}
+
+// ---------- Link result (new-device fetch step) ----------
+
+// linkResult handles POST /api/auth/link-result.
+//
+// The new device polls with { requestId, secret } until the existing device
+// approves the pairing. Once available, the encrypted relay payload is consumed
+// and returned. Missing results are reported as "pending"; the new device uses
+// its own local 5-minute timer to decide when the request has expired.
+func (h *deviceHandler) linkResult(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		RequestID string `json:"requestId"`
+		Secret    string `json:"secret"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+	if strings.TrimSpace(req.RequestID) == "" || strings.TrimSpace(req.Secret) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "requestId and secret are required"})
+		return
+	}
+
+	resultBytes, err := h.store.ConsumeAuthNonce(r.Context(), linkResultNonce(req.RequestID, req.Secret))
+	if err != nil {
+		writeJSON(w, http.StatusAccepted, map[string]string{"status": "pending"})
+		return
+	}
+
+	var result storedLinkResult
+	if err := json.Unmarshal(resultBytes, &result); err != nil {
+		slog.Error("decode link result payload", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "link result is corrupted"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
 }
 
 // ---------- Helpers ----------
@@ -428,6 +653,30 @@ func (h *deviceHandler) findDevicePublicKey(ctx context.Context, userID, deviceI
 		}
 	}
 	return nil, nil
+}
+
+func decodeStoredLinkRequest(payload []byte) (*storedLinkRequest, error) {
+	var request storedLinkRequest
+	if err := json.Unmarshal(payload, &request); err != nil {
+		return nil, err
+	}
+	return &request, nil
+}
+
+func linkRequestNonce(requestID, secret string) string {
+	return linkRequestNoncePrefix + requestID + ":" + secret
+}
+
+func linkCodeNonce(code string) string {
+	return linkCodeNoncePrefix + strings.ToUpper(strings.TrimSpace(code))
+}
+
+func linkClaimNonce(claimToken string) string {
+	return linkClaimNoncePrefix + claimToken
+}
+
+func linkResultNonce(requestID, secret string) string {
+	return linkResultNoncePrefix + requestID + ":" + secret
 }
 
 // generateLinkCode returns an 8-character alphanumeric code from [A-Z0-9].

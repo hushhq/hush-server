@@ -28,6 +28,9 @@ type Store interface {
 	// ConsumeAuthNonce atomically deletes the nonce (if present and unexpired)
 	// and returns the associated public key. Returns sql.ErrNoRows if absent or expired.
 	ConsumeAuthNonce(ctx context.Context, nonce string) (publicKey []byte, err error)
+	// DeleteAuthNonce removes a stored nonce regardless of expiry.
+	// Used to invalidate companion link records after the first scan/resolve.
+	DeleteAuthNonce(ctx context.Context, nonce string) error
 	// PurgeExpiredNonces deletes all auth_nonces where expires_at < now() and
 	// returns the number of rows deleted.
 	PurgeExpiredNonces(ctx context.Context) (int64, error)

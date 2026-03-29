@@ -27,9 +27,9 @@ type Session struct {
 type RegisterRequest struct {
 	Username    string `json:"username"`
 	DisplayName string `json:"displayName"`
-	PublicKey   string `json:"publicKey"`   // base64-encoded Ed25519 public key
-	DeviceID    string `json:"deviceId"`    // optional; generated server-side if empty
-	InviteCode  string `json:"inviteCode"`  // required when registrationMode == "invite_only"
+	PublicKey   string `json:"publicKey"`  // base64-encoded Ed25519 public key
+	DeviceID    string `json:"deviceId"`   // optional; generated server-side if empty
+	InviteCode  string `json:"inviteCode"` // required when registrationMode == "invite_only"
 }
 
 // ChallengeRequest is the body for POST /api/auth/challenge.
@@ -44,6 +44,7 @@ type VerifyRequest struct {
 	PublicKey string `json:"publicKey"` // base64-encoded Ed25519 public key
 	Nonce     string `json:"nonce"`     // hex nonce from /challenge response
 	Signature string `json:"signature"` // base64-encoded Ed25519 signature over nonce bytes
+	DeviceID  string `json:"deviceId"`  // stable per-device identifier (UUID)
 }
 
 // AuthNonce is a stored challenge nonce pending signature verification.
@@ -90,12 +91,12 @@ type OneTimePreKeyRow struct {
 
 // PreKeyUploadRequest is the body for POST /api/keys/upload.
 type PreKeyUploadRequest struct {
-	DeviceID               string             `json:"deviceId"`
-	IdentityKey             []byte             `json:"identityKey"`
-	SignedPreKey            []byte             `json:"signedPreKey"`
-	SignedPreKeySignature   []byte             `json:"signedPreKeySignature"`
-	RegistrationID          int                `json:"registrationId"`
-	OneTimePreKeys          []OneTimePreKeyRow `json:"oneTimePreKeys"`
+	DeviceID              string             `json:"deviceId"`
+	IdentityKey           []byte             `json:"identityKey"`
+	SignedPreKey          []byte             `json:"signedPreKey"`
+	SignedPreKeySignature []byte             `json:"signedPreKeySignature"`
+	RegistrationID        int                `json:"registrationId"`
+	OneTimePreKeys        []OneTimePreKeyRow `json:"oneTimePreKeys"`
 }
 
 // PreKeyBundle is returned by GET /api/keys/:userId and GET /api/keys/:userId/:deviceId.
@@ -160,9 +161,9 @@ type Server struct {
 	AdminLabelEncrypted []byte     `json:"adminLabelEncrypted,omitempty"`
 	CreatedAt           time.Time  `json:"createdAt"`
 	// DM and discovery fields (migration 000021).
-	IsDm             bool    `json:"isDm"`
-	Category         *string `json:"category,omitempty"`
-	PublicName       *string `json:"publicName,omitempty"`
+	IsDm              bool    `json:"isDm"`
+	Category          *string `json:"category,omitempty"`
+	PublicName        *string `json:"publicName,omitempty"`
 	PublicDescription *string `json:"publicDescription,omitempty"`
 }
 
@@ -342,9 +343,9 @@ type UnmuteRequest struct {
 // ChangePermissionLevelRequest is the body for PUT /api/servers/:id/members/:userId/level.
 // Replaces the old ChangeRoleRequest — role string is now an opaque integer.
 type ChangePermissionLevelRequest struct {
-	UserID           string `json:"userId"`
-	PermissionLevel  int    `json:"permissionLevel"`
-	Reason           string `json:"reason"`
+	UserID          string `json:"userId"`
+	PermissionLevel int    `json:"permissionLevel"`
+	Reason          string `json:"reason"`
 }
 
 // CreateChannelRequest is the body for POST /api/channels.
@@ -432,16 +433,16 @@ type InstanceUnbanRequest struct {
 // TransparencyLogEntry mirrors one row from the transparency_log_entries table.
 // It is returned by GetTransparencyLogEntriesByPubKey for proof generation.
 type TransparencyLogEntry struct {
-	ID          int64     `json:"id"`
-	LeafIndex   uint64    `json:"leafIndex"`
-	Operation   string    `json:"operation"`
-	UserPubKey  []byte    `json:"-"`
-	SubjectKey  []byte    `json:"subjectKey,omitempty"`
-	EntryCBOR   []byte    `json:"-"`
-	LeafHash    []byte    `json:"leafHash"`
-	UserSig     []byte    `json:"-"`
-	LogSig      []byte    `json:"logSig"`
-	LoggedAt    time.Time `json:"loggedAt"`
+	ID         int64     `json:"id"`
+	LeafIndex  uint64    `json:"leafIndex"`
+	Operation  string    `json:"operation"`
+	UserPubKey []byte    `json:"-"`
+	SubjectKey []byte    `json:"subjectKey,omitempty"`
+	EntryCBOR  []byte    `json:"-"`
+	LeafHash   []byte    `json:"leafHash"`
+	UserSig    []byte    `json:"-"`
+	LogSig     []byte    `json:"logSig"`
+	LoggedAt   time.Time `json:"loggedAt"`
 }
 
 // TransparencyTreeHead mirrors one row from the transparency_tree_heads table.
@@ -459,7 +460,7 @@ type TransparencyTreeHead struct {
 type MerkleInclusionProof struct {
 	LeafIndex    uint64   `json:"leafIndex"`
 	TreeSize     uint64   `json:"treeSize"`
-	AuditPath    [][]byte `json:"auditPath"`    // sibling hashes from leaf to root
+	AuditPath    [][]byte `json:"auditPath"` // sibling hashes from leaf to root
 	RootHash     []byte   `json:"rootHash"`
 	LogSignature []byte   `json:"logSignature"` // log's countersignature over this proof
 }
@@ -472,13 +473,13 @@ type CreateDMRequest struct {
 // DiscoverGuild is one card in the GET /api/guilds/discover response.
 // Only fields that discoverable guild admins have opted to expose are included.
 type DiscoverGuild struct {
-	ID               string    `json:"id"`
-	PublicName       string    `json:"publicName"`
-	PublicDescription string   `json:"publicDescription"`
-	Category         string    `json:"category"`
-	AccessPolicy     string    `json:"accessPolicy"`
-	MemberCount      int       `json:"memberCount"`
-	CreatedAt        time.Time `json:"createdAt"`
+	ID                string    `json:"id"`
+	PublicName        string    `json:"publicName"`
+	PublicDescription string    `json:"publicDescription"`
+	Category          string    `json:"category"`
+	AccessPolicy      string    `json:"accessPolicy"`
+	MemberCount       int       `json:"memberCount"`
+	CreatedAt         time.Time `json:"createdAt"`
 }
 
 // UserSearchPublicResult is a user record safe for public search endpoints.
