@@ -95,10 +95,14 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Step 3: Pull new images
+# Step 3: Pull latest code and rebuild images
 # ---------------------------------------------------------------------------
-log "Pulling new Docker images..."
-$DOCKER_COMPOSE -f "$COMPOSE_FILE" pull
+log "Pulling latest code..."
+git pull --ff-only || log "WARNING: git pull failed — building from current local code."
+
+log "Rebuilding Hush images..."
+$DOCKER_COMPOSE -f "$COMPOSE_FILE" build
+$DOCKER_COMPOSE -f "$COMPOSE_FILE" pull --ignore-buildable
 
 # ---------------------------------------------------------------------------
 # Step 4: Restart services

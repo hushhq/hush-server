@@ -39,7 +39,10 @@ services:
       - hush-network
 
   hush-api:
-    image: ghcr.io/gethush/hush-api:latest
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    image: hush-api:local
     container_name: hush-api
     env_file: .env
     environment:
@@ -97,7 +100,10 @@ services:
       - hush-network
 
   caddy:
-    image: ghcr.io/gethush/hush-caddy:latest
+    build:
+      context: .
+      dockerfile: client/Dockerfile
+    image: hush-caddy:local
     container_name: hush-caddy
     ports:
       - "80:80"

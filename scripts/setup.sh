@@ -289,10 +289,11 @@ fi
 log "LiveKit config OK (using $LIVEKIT_TMPL template; keys injected at container startup)."
 
 # ---------------------------------------------------------------------------
-# Step 8: Pull Docker images
+# Step 8: Build and pull Docker images
 # ---------------------------------------------------------------------------
-log "Pulling Docker images (this may take a few minutes on first run)..."
-$DOCKER_COMPOSE -f "$COMPOSE_FILE" pull
+log "Building Hush images and pulling dependencies (this may take several minutes on first run)..."
+$DOCKER_COMPOSE -f "$COMPOSE_FILE" build
+$DOCKER_COMPOSE -f "$COMPOSE_FILE" pull --ignore-buildable
 
 # ---------------------------------------------------------------------------
 # Step 9: Start stack
