@@ -636,6 +636,38 @@ func TestVerify_UnknownKey_Returns401(t *testing.T) {
 	assert.Equal(t, "Authentication failed", resp["error"])
 }
 
+func TestVerify_UnknownPublicKey_Returns404(t *testing.T) {
+	pubBase64, priv := generateEd25519KeyPair(t)
+	nonceStore := newInMemoryNonceStore()
+
+	// getUserByPublicKeyFn returns (nil, nil): key not found, no DB error.
+	store := &mockStore{
+		insertAuthNonceFn:  nonceStore.insertFn,
+		consumeAuthNonceFn: nonceStore.consumeFn,
+		getUserByPublicKeyFn: func(_ context.Context, _ []byte) (*models.User, error) {
+			return nil, nil
+		},
+	}
+	router := newTestRouter(store)
+
+	rr := postJSON(router, "/challenge", models.ChallengeRequest{PublicKey: pubBase64})
+	require.Equal(t, http.StatusOK, rr.Code)
+	var challengeResp map[string]string
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&challengeResp))
+	nonce := challengeResp["nonce"]
+
+	sig := signNonce(nonce, priv)
+	rr = postJSON(router, "/verify", models.VerifyRequest{
+		PublicKey: pubBase64,
+		Nonce:     nonce,
+		Signature: sig,
+	})
+
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+	resp := decodeErrorResponse(t, rr)
+	assert.Equal(t, "unknown public key", resp["error"])
+}
+
 func TestVerify_InstanceBanned_Returns403(t *testing.T) {
 	pubBase64, priv := generateEd25519KeyPair(t)
 	user := newTestUser("alice")

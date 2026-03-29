@@ -360,8 +360,12 @@ func (h *authHandler) verify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user, err := h.store.GetUserByPublicKey(r.Context(), publicKeyBytes)
-	if err != nil || user == nil {
+	if err != nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Authentication failed"})
+		return
+	}
+	if user == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown public key"})
 		return
 	}
 
