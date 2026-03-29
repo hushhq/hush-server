@@ -289,7 +289,21 @@ fi
 log "LiveKit config OK (using $LIVEKIT_TMPL template; keys injected at container startup)."
 
 # ---------------------------------------------------------------------------
-# Step 8: Build and pull Docker images
+# Step 8: Stop existing stack and clean stale volumes
+# ---------------------------------------------------------------------------
+# If a previous setup failed mid-init, Postgres may have a volume with the
+# wrong password baked in. Stop everything and remove data volumes so the
+# new credentials take effect cleanly.
+if $DOCKER_COMPOSE -f "$COMPOSE_FILE" ps -q 2>/dev/null | grep -q .; then
+  log "Stopping existing Hush stack..."
+  $DOCKER_COMPOSE -f "$COMPOSE_FILE" down -v 2>/dev/null || true
+elif [ "$force" -eq 1 ]; then
+  # Even if no containers are running, stale volumes may exist from a prior run
+  $DOCKER_COMPOSE -f "$COMPOSE_FILE" down -v 2>/dev/null || true
+fi
+
+# ---------------------------------------------------------------------------
+# Step 9: Build and pull Docker images
 # ---------------------------------------------------------------------------
 log "Building Hush images and pulling dependencies (this may take several minutes on first run)..."
 $DOCKER_COMPOSE -f "$COMPOSE_FILE" build
