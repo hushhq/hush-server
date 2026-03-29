@@ -11,6 +11,9 @@ import (
 // Store defines the database operations used by the API and WebSocket layers.
 // *Pool satisfies this interface. Use for dependency injection in tests.
 type Store interface {
+	// Ping checks database connectivity.
+	Ping(ctx context.Context) error
+
 	// User/session methods
 
 	// CreateUserWithPublicKey inserts a user with a BIP39 Ed25519 root public key

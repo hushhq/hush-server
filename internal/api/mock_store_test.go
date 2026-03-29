@@ -23,6 +23,8 @@ var _ db.Store = (*mockStore)(nil)
 // mockStore implements db.Store with function fields for per-test customization.
 // Unset fields return sensible zero values so tests only set what they care about.
 type mockStore struct {
+	pingFn func(ctx context.Context) error
+
 	// User/session — BIP39 public-key identity
 	createUserWithPublicKeyFn func(ctx context.Context, username, displayName string, publicKey []byte) (*models.User, error)
 	getUserByPublicKeyFn      func(ctx context.Context, publicKey []byte) (*models.User, error)
@@ -182,6 +184,13 @@ type mockStore struct {
 	createDMGuildFn     func(ctx context.Context, userAID, userBID string) (*models.Server, *models.Channel, error)
 	discoverGuildsFn    func(ctx context.Context, category, search, sort string, page, pageSize int) ([]models.DiscoverGuild, int, error)
 	searchUsersPublicFn func(ctx context.Context, query string, limit int) ([]models.UserSearchPublicResult, error)
+}
+
+func (m *mockStore) Ping(ctx context.Context) error {
+	if m.pingFn != nil {
+		return m.pingFn(ctx)
+	}
+	return nil
 }
 
 // ---------- User/session — BIP39 public-key identity ----------

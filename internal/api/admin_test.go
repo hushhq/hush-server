@@ -75,9 +75,13 @@ func TestAdminAPIKey_Valid_Returns200(t *testing.T) {
 	rr := doAdmin(router, req)
 	assert.Equal(t, http.StatusOK, rr.Code)
 
-	var resp map[string]string
+	var resp map[string]interface{}
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
 	assert.Equal(t, "ok", resp["status"])
+	assert.Equal(t, "ok", resp["dbStatus"])
+	assert.Contains(t, resp, "version")
+	assert.Contains(t, resp, "uptimeSeconds")
+	assert.Contains(t, resp, "startedAt")
 }
 
 // ---------- GET /guilds ----------

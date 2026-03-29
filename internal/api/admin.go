@@ -10,6 +10,7 @@ import (
 
 	"hush.app/server/internal/db"
 	"hush.app/server/internal/models"
+	"hush.app/server/internal/version"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -35,7 +36,7 @@ func RequireAdminAPIKey(adminAPIKey string) func(http.Handler) http.Handler {
 // The admin API is the only place from which instance-level privileged operations
 // are performed in the opacity model.
 func AdminAPIRoutes(store db.Store, adminAPIKey string, hub GlobalBroadcaster, cache *InstanceCache) chi.Router {
-	h := &adminHandler{store: store, hub: hub, cache: cache}
+	h := &adminHandler{store: store, hub: hub, cache: cache, startedAt: time.Now()}
 	r := chi.NewRouter()
 	r.Use(RequireAdminAPIKey(adminAPIKey))
 	r.Get("/guilds", h.listGuilds)
@@ -54,9 +55,10 @@ func AdminAPIRoutes(store db.Store, adminAPIKey string, hub GlobalBroadcaster, c
 }
 
 type adminHandler struct {
-	store db.Store
-	hub   GlobalBroadcaster
-	cache *InstanceCache
+	store     db.Store
+	hub       GlobalBroadcaster
+	cache     *InstanceCache
+	startedAt time.Time
 }
 
 // listGuilds handles GET /api/admin/guilds.
@@ -91,7 +93,17 @@ func (h *adminHandler) listUsers(w http.ResponseWriter, r *http.Request) {
 
 // health handles GET /api/admin/health.
 func (h *adminHandler) health(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	dbStatus := "ok"
+	if err := h.store.Ping(r.Context()); err != nil {
+		dbStatus = "unreachable"
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":    "ok",
+		"dbStatus":  dbStatus,
+		"version":   version.ServerVersion,
+		"uptimeSeconds": time.Since(h.startedAt).Seconds(),
+		"startedAt": h.startedAt.Format(time.RFC3339),
+	})
 }
 
 // adminConfigResponse is the response for GET /api/admin/config.
