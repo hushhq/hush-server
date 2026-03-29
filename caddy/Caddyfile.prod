@@ -26,6 +26,7 @@
 
   # Client SPA
   handle /* {
+    header Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' https: http: wss: ws:; img-src 'self' data:; style-src 'self' 'unsafe-inline'"
     header X-Content-Type-Options "nosniff"
     header X-Frame-Options "DENY"
     header Cross-Origin-Opener-Policy "same-origin"

@@ -22,7 +22,15 @@ func TestSecurityHeaders_CSPPresent(t *testing.T) {
 	csp := rr.Header().Get("Content-Security-Policy")
 	require.NotEmpty(t, csp, "Content-Security-Policy must be set")
 	assert.Contains(t, csp, "wss://example.com", "CSP connect-src must include the WS origin")
+	assert.Contains(t, csp, "connect-src 'self' https: http: wss: ws:", "CSP connect-src must allow cross-instance HTTP(S) and WS(S) requests")
 	assert.Contains(t, csp, "default-src 'self'", "CSP must include default-src 'self'")
+}
+
+func TestSecurityHeaders_CSPDeduplicatesWildcardWebSocketOrigin(t *testing.T) {
+	rr := applySecurityHeaders(false, "wss:")
+	csp := rr.Header().Get("Content-Security-Policy")
+	require.NotEmpty(t, csp, "Content-Security-Policy must be set")
+	assert.NotContains(t, csp, "wss: wss:", "CSP connect-src must not duplicate the wildcard websocket origin")
 }
 
 func TestSecurityHeaders_NoSniff(t *testing.T) {

@@ -30,9 +30,15 @@ func SecurityHeaders(productionMode bool, wsOrigin string) func(http.Handler) ht
 // buildCSP constructs the Content-Security-Policy header value.
 // wsOrigin is included verbatim in the connect-src directive.
 func buildCSP(wsOrigin string) string {
+	connectSrc := []string{"'self'", "https:", "http:", "wss:", "ws:"}
+	trimmedOrigin := strings.TrimSpace(wsOrigin)
+	if trimmedOrigin != "" && !containsString(connectSrc, trimmedOrigin) {
+		connectSrc = append(connectSrc, trimmedOrigin)
+	}
+
 	return fmt.Sprintf(
-		"default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' %s; img-src 'self' data:; style-src 'self' 'unsafe-inline'",
-		wsOrigin,
+		"default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src %s; img-src 'self' data:; style-src 'self' 'unsafe-inline'",
+		strings.Join(connectSrc, " "),
 	)
 }
 
@@ -52,4 +58,13 @@ func WSOriginFromCORSOrigin(corsOrigin string) string {
 	default:
 		return corsOrigin
 	}
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
