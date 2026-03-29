@@ -41,10 +41,20 @@ func (a *poolTransparencyStore) InsertLogEntry(
 	ctx context.Context, leafIndex uint64, entry *transparency.LogEntry,
 	cborBytes, leafHash, logSig []byte,
 ) error {
+	// Coalesce nil slices to empty — the DB columns are NOT NULL but MVP mode
+	// does not yet populate user signatures or public keys for all operations.
+	userPub := entry.UserPublicKey
+	if userPub == nil {
+		userPub = []byte{}
+	}
+	userSig := entry.UserSignature
+	if userSig == nil {
+		userSig = []byte{}
+	}
 	return a.pool.InsertTransparencyLogEntry(
 		ctx, leafIndex, string(entry.OperationType),
-		entry.UserPublicKey, entry.SubjectKey,
-		cborBytes, leafHash, entry.UserSignature, logSig,
+		userPub, entry.SubjectKey,
+		cborBytes, leafHash, userSig, logSig,
 	)
 }
 
