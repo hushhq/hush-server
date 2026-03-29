@@ -41,12 +41,19 @@ func Load() Config {
 	prod := os.Getenv("PRODUCTION")
 	production := prod == "1" || prod == "true" || prod == "yes"
 
+	corsOrigin := os.Getenv("CORS_ORIGIN")
+	if corsOrigin == "" {
+		if domain := os.Getenv("DOMAIN"); domain != "" {
+			corsOrigin = "https://" + domain
+		}
+	}
+
 	return Config{
 		Port:                     port,
 		DatabaseURL:              os.Getenv("DATABASE_URL"),
 		JWTSecret:                os.Getenv("JWT_SECRET"),
 		JWTExpiry:                time.Duration(jwtExpiryHours) * time.Hour,
-		CORSOrigin:               os.Getenv("CORS_ORIGIN"),
+		CORSOrigin:               corsOrigin,
 		Production:               production,
 		AdminAPIKey:              os.Getenv("ADMIN_API_KEY"),
 		LiveKitAPIKey:            os.Getenv("LIVEKIT_API_KEY"),
