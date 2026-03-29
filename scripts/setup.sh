@@ -162,15 +162,38 @@ fi
 # ---------------------------------------------------------------------------
 # Step 4: Secret generation
 # ---------------------------------------------------------------------------
+# When --force re-runs on a live instance, reuse secrets from the existing
+# .env so the running Postgres volume stays compatible. Only generate fresh
+# secrets for values that are missing.
+# ---------------------------------------------------------------------------
+
+_existing_env() {
+  # Read a KEY=value from the existing .env, if present.
+  if [ -f .env ]; then
+    grep "^$1=" .env 2>/dev/null | head -1 | cut -d= -f2-
+  fi
+}
+
 log "Generating secrets..."
 
-JWT_SECRET="$(openssl rand -hex 32)"
-POSTGRES_PASSWORD="$(openssl rand -hex 16)"
-ADMIN_API_KEY="$(openssl rand -hex 16)"
-LIVEKIT_API_KEY="$(openssl rand -hex 16)"
-LIVEKIT_API_SECRET="$(openssl rand -hex 32)"
+JWT_SECRET="$(_existing_env JWT_SECRET)"
+[ -z "$JWT_SECRET" ] && JWT_SECRET="$(openssl rand -hex 32)"
+
+POSTGRES_PASSWORD="$(_existing_env POSTGRES_PASSWORD)"
+[ -z "$POSTGRES_PASSWORD" ] && POSTGRES_PASSWORD="$(openssl rand -hex 16)"
+
+ADMIN_API_KEY="$(_existing_env ADMIN_API_KEY)"
+[ -z "$ADMIN_API_KEY" ] && ADMIN_API_KEY="$(openssl rand -hex 16)"
+
+LIVEKIT_API_KEY="$(_existing_env LIVEKIT_API_KEY)"
+[ -z "$LIVEKIT_API_KEY" ] && LIVEKIT_API_KEY="$(openssl rand -hex 16)"
+
+LIVEKIT_API_SECRET="$(_existing_env LIVEKIT_API_SECRET)"
+[ -z "$LIVEKIT_API_SECRET" ] && LIVEKIT_API_SECRET="$(openssl rand -hex 32)"
+
 # Ed25519 seed — MUST persist across restarts; used for transparency log signing
-TRANSPARENCY_LOG_PRIVATE_KEY="$(openssl rand -hex 32)"
+TRANSPARENCY_LOG_PRIVATE_KEY="$(_existing_env TRANSPARENCY_LOG_PRIVATE_KEY)"
+[ -z "$TRANSPARENCY_LOG_PRIVATE_KEY" ] && TRANSPARENCY_LOG_PRIVATE_KEY="$(openssl rand -hex 32)"
 
 # ---------------------------------------------------------------------------
 # Step 5: Write .env
