@@ -15,6 +15,10 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// banDisconnectGrace is the delay between sending the instance_banned WS notification
+// and forcefully disconnecting the user. Gives the client time to receive the message.
+const banDisconnectGrace = 500 * time.Millisecond
+
 // RequireAdminAPIKey is middleware that enforces X-Admin-Key header authentication.
 // It returns 401 when the header is missing or does not match adminAPIKey.
 // This middleware is applied to all /api/admin routes.
@@ -411,7 +415,9 @@ func (h *adminHandler) instanceBan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 1. Delete sessions to prevent race condition.
-	_ = h.store.DeleteSessionsByUserID(r.Context(), req.UserID)
+	if err := h.store.DeleteSessionsByUserID(r.Context(), req.UserID); err != nil {
+		slog.Warn("admin instanceBan: delete sessions (best-effort)", "user_id", req.UserID, "err", err)
+	}
 
 	// 2. Notify user via WS then disconnect.
 	if h.hub != nil {
@@ -421,7 +427,7 @@ func (h *adminHandler) instanceBan(w http.ResponseWriter, r *http.Request) {
 		})
 		h.hub.BroadcastToUser(req.UserID, banMsg)
 		targetUserID := req.UserID
-		time.AfterFunc(500*time.Millisecond, func() {
+		time.AfterFunc(banDisconnectGrace, func() {
 			h.hub.DisconnectUser(targetUserID)
 		})
 	}
@@ -437,7 +443,9 @@ func (h *adminHandler) instanceBan(w http.ResponseWriter, r *http.Request) {
 	// 4. Remove from all guilds and broadcast member_left (silent).
 	guilds, _ := h.store.ListServersForUser(r.Context(), req.UserID)
 	for _, guild := range guilds {
-		_ = h.store.RemoveServerMember(r.Context(), guild.ID, req.UserID)
+		if err := h.store.RemoveServerMember(r.Context(), guild.ID, req.UserID); err != nil {
+			slog.Error("admin instanceBan: remove guild member", "guild_id", guild.ID, "user_id", req.UserID, "err", err)
+		}
 		if h.hub != nil {
 			msg, _ := json.Marshal(map[string]interface{}{
 				"type":    "member_left",
@@ -466,8 +474,12 @@ func (h *adminHandler) instanceUnban(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "userId is required"})
 		return
 	}
-	reason := r.URL.Query().Get("reason")
-	if strings.TrimSpace(reason) == "" {
+	var unbanReq struct {
+		Reason string `json:"reason"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&unbanReq)
+	reason := strings.TrimSpace(unbanReq.Reason)
+	if reason == "" {
 		reason = "admin api unban"
 	}
 	ban, err := h.store.GetActiveInstanceBan(r.Context(), targetUserID)

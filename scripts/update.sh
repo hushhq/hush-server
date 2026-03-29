@@ -80,9 +80,17 @@ BACKUP_FILE="$BACKUP_DIR/hush-$(date +%Y%m%d-%H%M%S).sql"
 
 log "Backing up database to $BACKUP_FILE..."
 
+# Source .env for configurable DB credentials (defaults match setup.sh)
+PG_USER="${POSTGRES_USER:-hush}"
+PG_DB="${POSTGRES_DB:-hush}"
+if [ -f .env ]; then
+  PG_USER="$(grep -m1 '^POSTGRES_USER=' .env | cut -d= -f2 || echo "$PG_USER")"
+  PG_DB="$(grep -m1 '^POSTGRES_DB=' .env | cut -d= -f2 || echo "$PG_DB")"
+fi
+
 if $DOCKER_COMPOSE -f "$COMPOSE_FILE" ps postgres 2>/dev/null | grep -q "Up\|running"; then
   $DOCKER_COMPOSE -f "$COMPOSE_FILE" exec -T postgres \
-    pg_dump -U hush hush > "$BACKUP_FILE" 2>/dev/null || {
+    pg_dump -U "$PG_USER" "$PG_DB" > "$BACKUP_FILE" 2>/dev/null || {
     err "Database backup failed. Aborting update to protect your data."
     err "If postgres is not running, start it first: $DOCKER_COMPOSE -f $COMPOSE_FILE up -d postgres"
     exit 1
