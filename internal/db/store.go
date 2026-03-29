@@ -38,7 +38,7 @@ type Store interface {
 	// Device key methods
 	// InsertDeviceKey stores a certified device public key for a user.
 	// certificate may be nil for the first (root) device.
-	InsertDeviceKey(ctx context.Context, userID, deviceID string, devicePublicKey, certificate []byte) error
+	InsertDeviceKey(ctx context.Context, userID, deviceID, label string, devicePublicKey, certificate []byte) error
 	// ListDeviceKeys returns all device keys belonging to a user.
 	ListDeviceKeys(ctx context.Context, userID string) ([]models.DeviceKey, error)
 	// RevokeDeviceKey deletes a specific device key. No-op if not found.

@@ -29,6 +29,7 @@ type RegisterRequest struct {
 	DisplayName string `json:"displayName"`
 	PublicKey   string `json:"publicKey"`  // base64-encoded Ed25519 public key
 	DeviceID    string `json:"deviceId"`   // optional; generated server-side if empty
+	Label       string `json:"label"`      // optional human-readable device name
 	InviteCode  string `json:"inviteCode"` // required when registrationMode == "invite_only"
 }
 

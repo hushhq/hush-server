@@ -162,6 +162,40 @@ func TestRegister_Success(t *testing.T) {
 	assert.Equal(t, "alice", resp.User.Username)
 }
 
+func TestRegister_PersistsDeviceLabel(t *testing.T) {
+	pubBase64, _ := generateEd25519KeyPair(t)
+	pubBytes, err := base64.StdEncoding.DecodeString(pubBase64)
+	require.NoError(t, err)
+	user := newTestUser("alice")
+	var insertedLabel string
+
+	store := &mockStore{
+		createUserWithPublicKeyFn: func(_ context.Context, username, displayName string, _ []byte) (*models.User, error) {
+			return user, nil
+		},
+		insertDeviceKeyFn: func(_ context.Context, userID, deviceID, label string, devicePublicKey, certificate []byte) error {
+			assert.Equal(t, user.ID, userID)
+			assert.Equal(t, "device-1", deviceID)
+			assert.Equal(t, "Chrome on macOS", label)
+			assert.Equal(t, pubBytes, devicePublicKey)
+			assert.Nil(t, certificate)
+			insertedLabel = label
+			return nil
+		},
+	}
+	router := newTestRouter(store)
+
+	rr := postJSON(router, "/register", models.RegisterRequest{
+		Username:  "alice",
+		PublicKey: pubBase64,
+		DeviceID:  "device-1",
+		Label:     "Chrome on macOS",
+	})
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Equal(t, "Chrome on macOS", insertedLabel)
+}
+
 func TestRegister_EmptyUsername_Returns400(t *testing.T) {
 	pubBase64, _ := generateEd25519KeyPair(t)
 	store := &mockStore{}
@@ -642,4 +676,3 @@ func TestGuestAuth_ExpiryWithinExpectedRange(t *testing.T) {
 	assert.True(t, resp.ExpiresAt.After(minExpiry), "expiresAt too early")
 	assert.True(t, resp.ExpiresAt.Before(maxExpiry), "expiresAt too late")
 }
-

@@ -119,6 +119,7 @@ func (h *authHandler) register(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Username = strings.TrimSpace(req.Username)
 	req.DisplayName = strings.TrimSpace(req.DisplayName)
+	req.Label = strings.TrimSpace(req.Label)
 	if req.DisplayName == "" {
 		req.DisplayName = req.Username
 	}
@@ -185,7 +186,7 @@ func (h *authHandler) register(w http.ResponseWriter, r *http.Request) {
 		if deviceID == "" {
 			deviceID = uuid.New().String()
 		}
-		if err := h.store.InsertDeviceKey(r.Context(), existingUser.ID, deviceID, publicKeyBytes, nil); err != nil {
+		if err := h.store.InsertDeviceKey(r.Context(), existingUser.ID, deviceID, req.Label, publicKeyBytes, nil); err != nil {
 			slog.Error("insert device key on account recovery", "err", err)
 		}
 		h.sendAuthResponse(w, r, existingUser)
@@ -220,7 +221,7 @@ func (h *authHandler) register(w http.ResponseWriter, r *http.Request) {
 	if deviceID == "" {
 		deviceID = uuid.New().String()
 	}
-	if err := h.store.InsertDeviceKey(r.Context(), user.ID, deviceID, publicKeyBytes, nil); err != nil {
+	if err := h.store.InsertDeviceKey(r.Context(), user.ID, deviceID, req.Label, publicKeyBytes, nil); err != nil {
 		slog.Error("insert device key on register", "err", err)
 		// Non-fatal: device key is supplementary metadata; proceed with auth.
 	}

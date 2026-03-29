@@ -36,7 +36,7 @@ type mockStore struct {
 	purgeExpiredNoncesFn func(ctx context.Context) (int64, error)
 
 	// Device keys
-	insertDeviceKeyFn       func(ctx context.Context, userID, deviceID string, devicePublicKey, certificate []byte) error
+	insertDeviceKeyFn       func(ctx context.Context, userID, deviceID, label string, devicePublicKey, certificate []byte) error
 	listDeviceKeysFn        func(ctx context.Context, userID string) ([]models.DeviceKey, error)
 	revokeDeviceKeyFn       func(ctx context.Context, userID, deviceID string) error
 	revokeAllDeviceKeysFn   func(ctx context.Context, userID string) error
@@ -246,9 +246,9 @@ func (m *mockStore) PurgeExpiredNonces(ctx context.Context) (int64, error) {
 
 // ---------- Device keys ----------
 
-func (m *mockStore) InsertDeviceKey(ctx context.Context, userID, deviceID string, devicePublicKey, certificate []byte) error {
+func (m *mockStore) InsertDeviceKey(ctx context.Context, userID, deviceID, label string, devicePublicKey, certificate []byte) error {
 	if m.insertDeviceKeyFn != nil {
-		return m.insertDeviceKeyFn(ctx, userID, deviceID, devicePublicKey, certificate)
+		return m.insertDeviceKeyFn(ctx, userID, deviceID, label, devicePublicKey, certificate)
 	}
 	return nil
 }

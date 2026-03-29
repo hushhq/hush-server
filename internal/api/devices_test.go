@@ -138,10 +138,12 @@ func TestCertifyDevice_Valid_Returns201(t *testing.T) {
 	}
 
 	var insertedUserID, insertedDeviceID string
+	var insertedLabel string
 	var insertedPubKey, insertedCert []byte
-	store.insertDeviceKeyFn = func(_ context.Context, uid, did string, pub, cert []byte) error {
+	store.insertDeviceKeyFn = func(_ context.Context, uid, did, label string, pub, cert []byte) error {
 		insertedUserID = uid
 		insertedDeviceID = did
+		insertedLabel = label
 		insertedPubKey = pub
 		insertedCert = cert
 		return nil
@@ -162,6 +164,7 @@ func TestCertifyDevice_Valid_Returns201(t *testing.T) {
 
 	assert.Equal(t, userID, insertedUserID)
 	assert.Equal(t, "new-device-abc", insertedDeviceID)
+	assert.Equal(t, "Laptop", insertedLabel)
 	assert.Equal(t, newDevicePub, insertedPubKey)
 	assert.Equal(t, certificate, insertedCert)
 }
@@ -401,6 +404,7 @@ func TestLinkVerify_ValidClaim_Returns201(t *testing.T) {
 		DeviceID:         "new-device-via-link",
 		DevicePublicKey:  newDevicePubBase64,
 		SessionPublicKey: base64.StdEncoding.EncodeToString([]byte{1, 2, 3}),
+		Label:            "Safari on iPhone",
 		InstanceURL:      "https://app.gethush.live",
 		ExpiresAt:        time.Now().Add(5 * time.Minute).UTC().Format(time.RFC3339),
 	}
@@ -420,9 +424,11 @@ func TestLinkVerify_ValidClaim_Returns201(t *testing.T) {
 	}
 
 	var insertedDeviceID string
-	store.insertDeviceKeyFn = func(_ context.Context, uid, did string, pub, cert []byte) error {
+	var insertedLabel string
+	store.insertDeviceKeyFn = func(_ context.Context, uid, did, label string, pub, cert []byte) error {
 		require.Equal(t, userID, uid)
 		insertedDeviceID = did
+		insertedLabel = label
 		assert.Equal(t, newDevicePub, pub)
 		assert.Equal(t, certificate, cert)
 		return nil
@@ -446,6 +452,7 @@ func TestLinkVerify_ValidClaim_Returns201(t *testing.T) {
 	})
 	require.Equal(t, http.StatusCreated, rr.Code, "body: %s", rr.Body.String())
 	assert.Equal(t, requestPayload.DeviceID, insertedDeviceID)
+	assert.Equal(t, requestPayload.Label, insertedLabel)
 	assert.Equal(t, linkResultNonce(requestPayload.RequestID, requestPayload.Secret), resultNonce)
 }
 

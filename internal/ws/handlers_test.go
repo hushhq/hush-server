@@ -49,7 +49,7 @@ func (m *messageStoreMock) DeleteAuthNonce(context.Context, string) error     { 
 func (m *messageStoreMock) PurgeExpiredNonces(context.Context) (int64, error) { return 0, nil }
 
 // Device key stubs.
-func (m *messageStoreMock) InsertDeviceKey(context.Context, string, string, []byte, []byte) error {
+func (m *messageStoreMock) InsertDeviceKey(context.Context, string, string, string, []byte, []byte) error {
 	return nil
 }
 func (m *messageStoreMock) ListDeviceKeys(context.Context, string) ([]models.DeviceKey, error) {

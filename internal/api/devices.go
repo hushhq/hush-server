@@ -211,7 +211,8 @@ func (h *deviceHandler) certifyDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.store.InsertDeviceKey(r.Context(), userID, req.DeviceID, newDevicePubBytes, certBytes); err != nil {
+	req.Label = strings.TrimSpace(req.Label)
+	if err := h.store.InsertDeviceKey(r.Context(), userID, req.DeviceID, req.Label, newDevicePubBytes, certBytes); err != nil {
 		slog.Error("insert device key", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not register device"})
 		return
@@ -551,7 +552,8 @@ func (h *deviceHandler) linkVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.store.InsertDeviceKey(r.Context(), userID, requestPayload.DeviceID, newDevicePubBytes, certBytes); err != nil {
+	requestPayload.Label = strings.TrimSpace(requestPayload.Label)
+	if err := h.store.InsertDeviceKey(r.Context(), userID, requestPayload.DeviceID, requestPayload.Label, newDevicePubBytes, certBytes); err != nil {
 		slog.Error("insert device key via link-verify", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not register device"})
 		return

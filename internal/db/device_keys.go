@@ -10,15 +10,16 @@ import (
 // certificate may be nil for the first (root) device registered at sign-up.
 // On conflict (user_id, device_id) the existing row is overwritten so that
 // device re-registration (e.g. after a factory reset) is handled gracefully.
-func (p *Pool) InsertDeviceKey(ctx context.Context, userID, deviceID string, devicePublicKey, certificate []byte) error {
+func (p *Pool) InsertDeviceKey(ctx context.Context, userID, deviceID, label string, devicePublicKey, certificate []byte) error {
 	_, err := p.Exec(ctx, `
-		INSERT INTO device_keys (user_id, device_id, device_public_key, certificate)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO device_keys (user_id, device_id, device_public_key, certificate, label)
+		VALUES ($1, $2, $3, $4, NULLIF($5, ''))
 		ON CONFLICT (user_id, device_id) DO UPDATE
 		    SET device_public_key = EXCLUDED.device_public_key,
 		        certificate       = EXCLUDED.certificate,
-		        certified_at      = now()`,
-		userID, deviceID, devicePublicKey, certificate,
+		        certified_at      = now(),
+		        label             = COALESCE(NULLIF(EXCLUDED.label, ''), device_keys.label)`,
+		userID, deviceID, devicePublicKey, certificate, label,
 	)
 	return err
 }
