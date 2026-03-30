@@ -25,6 +25,16 @@ type Store interface {
 	GetUserByUsername(ctx context.Context, username string) (*models.User, error)
 	GetUserByID(ctx context.Context, id string) (*models.User, error)
 
+	// Federated identity methods
+
+	// GetOrCreateFederatedIdentity upserts a foreign-instance user by Ed25519 public key.
+	// On conflict it refreshes username, display_name, and cached_at. Always returns a full row.
+	GetOrCreateFederatedIdentity(ctx context.Context, publicKey []byte, homeInstance, username, displayName string) (*models.FederatedIdentity, error)
+	// GetFederatedIdentityByPublicKey returns the cached foreign user, or (nil, nil) when absent.
+	GetFederatedIdentityByPublicKey(ctx context.Context, publicKey []byte) (*models.FederatedIdentity, error)
+	// UpdateFederatedIdentityProfile refreshes username, display_name, and cached_at by ID.
+	UpdateFederatedIdentityProfile(ctx context.Context, id string, username, displayName string) error
+
 	// BIP39 auth nonce methods
 	// InsertAuthNonce stores a challenge nonce associated with a public key.
 	InsertAuthNonce(ctx context.Context, nonce string, publicKey []byte, expiresAt time.Time) error
