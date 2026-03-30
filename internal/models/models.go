@@ -55,6 +55,17 @@ type AuthNonce struct {
 	ExpiresAt     time.Time `json:"-"`
 }
 
+// FederatedIdentity represents a user from a foreign Hush instance,
+// identified by their Ed25519 public key and home instance URL.
+type FederatedIdentity struct {
+	ID           string    `json:"id"`
+	PublicKey    []byte    `json:"-"`
+	HomeInstance string    `json:"homeInstance"`
+	Username     string    `json:"username"`
+	DisplayName  string    `json:"displayName"`
+	CachedAt     time.Time `json:"cachedAt"`
+}
+
 // DeviceKey records a certified public key for a user's device.
 // The first device (registered with root key) has a nil Certificate.
 // Subsequent devices must carry a Certificate = Sign(root_priv, device_pub).
@@ -113,13 +124,15 @@ type PreKeyBundle struct {
 
 // Message is a stored encrypted message. Ciphertext is opaque to the server.
 // RecipientID is nil for broadcast/single-ciphertext; set for fan-out per recipient.
+// Exactly one of SenderID or FederatedSenderID must be non-nil.
 type Message struct {
-	ID          string    `json:"id"`
-	ChannelID   string    `json:"channelId"`
-	SenderID    string    `json:"senderId"`
-	RecipientID *string   `json:"recipientId,omitempty"`
-	Ciphertext  []byte    `json:"ciphertext"` // base64-encoded in JSON
-	Timestamp   time.Time `json:"timestamp"`
+	ID                string    `json:"id"`
+	ChannelID         string    `json:"channelId"`
+	SenderID          *string   `json:"senderId,omitempty"`
+	FederatedSenderID *string   `json:"federatedSenderId,omitempty"`
+	RecipientID       *string   `json:"recipientId,omitempty"`
+	Ciphertext        []byte    `json:"ciphertext"` // base64-encoded in JSON
+	Timestamp         time.Time `json:"timestamp"`
 }
 
 // SystemMessage is an event log entry in a guild's #system channel.
@@ -168,15 +181,20 @@ type Server struct {
 	PublicDescription *string `json:"publicDescription,omitempty"`
 }
 
-// ServerMember records a user's membership and integer permission level within a guild.
+// ServerMember records a user's (or federated identity's) membership and integer
+// permission level within a guild. Exactly one of UserID or FederatedIdentityID must
+// be non-nil.
 type ServerMember struct {
-	ServerID        string    `json:"serverId"`
-	UserID          string    `json:"userId"`
-	PermissionLevel int       `json:"permissionLevel"`
-	JoinedAt        time.Time `json:"joinedAt"`
+	ID                  string    `json:"id"`
+	ServerID            string    `json:"serverId"`
+	UserID              *string   `json:"userId,omitempty"`
+	FederatedIdentityID *string   `json:"federatedIdentityId,omitempty"`
+	PermissionLevel     int       `json:"permissionLevel"`
+	JoinedAt            time.Time `json:"joinedAt"`
 }
 
 // ServerMemberWithUser combines user fields with guild membership info for member-list responses.
+// HomeInstance is nil for local users and set to the home instance URL for federated users.
 type ServerMemberWithUser struct {
 	ID              string    `json:"id"`
 	Username        string    `json:"username"`
@@ -184,6 +202,7 @@ type ServerMemberWithUser struct {
 	CreatedAt       time.Time `json:"createdAt"`
 	PermissionLevel int       `json:"permissionLevel"`
 	JoinedAt        time.Time `json:"joinedAt"`
+	HomeInstance    *string   `json:"homeInstance,omitempty"` // nil = local, set = federated
 }
 
 // GuildBillingStats exposes guild infrastructure metrics to the instance operator.
