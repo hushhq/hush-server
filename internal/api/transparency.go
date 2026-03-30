@@ -85,6 +85,7 @@ func (h *transparencyHandler) verify(w http.ResponseWriter, r *http.Request) {
 		entries[i].EntryCBORB64 = base64.StdEncoding.EncodeToString(entries[i].EntryCBOR)
 		entries[i].LeafHashHex = hex.EncodeToString(entries[i].LeafHash)
 		entries[i].LogSigB64 = base64.StdEncoding.EncodeToString(entries[i].LogSig)
+		entries[i].UserPubKeyHex = hex.EncodeToString(entries[i].UserPubKey)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{

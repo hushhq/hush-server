@@ -484,9 +484,10 @@ type TransparencyLogEntry struct {
 	// Wire-format fields populated by the API handler (never stored).
 	// EntryCBORB64 is standard base64 (RFC 4648) for client WebCrypto use.
 	// LeafHashHex and LogSigB64 are hex and base64 respectively for display/verify.
-	EntryCBORB64 string `json:"entryCbor,omitempty"`
-	LeafHashHex  string `json:"leafHash,omitempty"`
-	LogSigB64    string `json:"logSig,omitempty"`
+	EntryCBORB64  string `json:"entryCbor,omitempty"`
+	LeafHashHex   string `json:"leafHash,omitempty"`
+	LogSigB64     string `json:"logSig,omitempty"`
+	UserPubKeyHex string `json:"userPubKey,omitempty"`
 }
 
 // TransparencyTreeHead mirrors one row from the transparency_tree_heads table.
