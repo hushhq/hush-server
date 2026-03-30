@@ -132,14 +132,10 @@ func (t *MerkleTree) Proof(leafIndex uint64) ([][32]byte, error) {
 	for level := 0; level < len(levels)-1; level++ {
 		row := levels[level]
 		if idx%2 == 0 {
-			// Current node is left child — sibling is right child.
 			if idx+1 < uint64(len(row)) {
 				auditPath = append(auditPath, row[idx+1])
-			} else {
-				// Odd tree: promote this node directly (no sibling).
-				// Duplicate the current node to allow the verifier to handle it.
-				auditPath = append(auditPath, row[idx])
 			}
+			// No sibling (promoted): skip this level entirely.
 		} else {
 			// Current node is right child — sibling is left child.
 			auditPath = append(auditPath, row[idx-1])
@@ -156,23 +152,33 @@ func VerifyProof(leafData []byte, leafIndex, treeSize uint64, auditPath [][32]by
 		return false
 	}
 
-	// Recompute expected depth
-	depth := treeDepth(treeSize)
-	if len(auditPath) != depth {
-		return false
-	}
-
 	current := LeafHash(leafData)
 	idx := leafIndex
-	for _, sibling := range auditPath {
+	pathIdx := 0
+	n := treeSize
+
+	for n > 1 {
 		if idx%2 == 0 {
-			current = NodeHash(current, sibling)
+			if idx+1 < n {
+				if pathIdx >= len(auditPath) {
+					return false
+				}
+				current = NodeHash(current, auditPath[pathIdx])
+				pathIdx++
+			}
+			// Else: promoted — no sibling, no hash, no path element consumed.
 		} else {
-			current = NodeHash(sibling, current)
+			if pathIdx >= len(auditPath) {
+				return false
+			}
+			current = NodeHash(auditPath[pathIdx], current)
+			pathIdx++
 		}
 		idx /= 2
+		n = (n + 1) / 2
 	}
-	return current == expectedRoot
+
+	return pathIdx == len(auditPath) && current == expectedRoot
 }
 
 // buildTree computes all levels of the Merkle tree from leaf hashes.

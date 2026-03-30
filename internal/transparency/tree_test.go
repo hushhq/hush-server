@@ -148,6 +148,40 @@ func TestFringeStorage(t *testing.T) {
 	require.Equal(t, tree.Root(), tree2.Root())
 }
 
+// TestInclusionProofOddTrees verifies proofs for trees whose size is not a
+// power of two. The promoted (unpaired) leaf at each level must still verify.
+func TestInclusionProofOddTrees(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		size  int
+		index uint64
+	}{
+		{"3-leaf tree, promoted leaf 2", 3, 2},
+		{"3-leaf tree, leaf 0", 3, 0},
+		{"3-leaf tree, leaf 1", 3, 1},
+		{"5-leaf tree, promoted leaf 4", 5, 4},
+		{"5-leaf tree, leaf 2", 5, 2},
+		{"7-leaf tree, promoted leaf 6", 7, 6},
+		{"7-leaf tree, leaf 3", 7, 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tree := transparency.NewMerkleTree()
+			leaves := make([][]byte, tc.size)
+			for i := range leaves {
+				leaves[i] = []byte{byte(i), byte(i + 10)}
+				tree.Append(leaves[i])
+			}
+
+			auditPath, err := tree.Proof(tc.index)
+			require.NoError(t, err)
+
+			root := tree.Root()
+			ok := transparency.VerifyProof(leaves[tc.index], tc.index, tree.Size(), auditPath, root)
+			require.True(t, ok, "proof for leaf %d in %d-leaf tree must verify", tc.index, tc.size)
+		})
+	}
+}
+
 // TestOutOfBoundsProof verifies Proof returns an error for invalid indices.
 func TestOutOfBoundsProof(t *testing.T) {
 	tree := transparency.NewMerkleTree()
