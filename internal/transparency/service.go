@@ -80,6 +80,15 @@ func (s *TransparencyService) RecoverFromDB(ctx context.Context) error {
 	}
 	fringe := fringeFromBytes(head.Fringe)
 	s.tree = FromFringe(fringe, head.TreeSize)
+
+	// Rehydrate leaf hashes so Proof() can rebuild the full tree.
+	// Without this, proofs for entries appended before this process started
+	// would use zero-valued hashes and always fail verification.
+	leafHashes, err := s.store.GetAllLeafHashes(ctx)
+	if err != nil {
+		return fmt.Errorf("transparency: load leaf hashes: %w", err)
+	}
+	s.tree.SetLeaves(leafHashes)
 	return nil
 }
 

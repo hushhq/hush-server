@@ -57,6 +57,16 @@ func (s *testNoOpStore) GetLatestTreeHead(_ context.Context) (*models.Transparen
 	return &h, nil
 }
 
+func (s *testNoOpStore) GetAllLeafHashes(_ context.Context) ([][32]byte, error) {
+	var hashes [][32]byte
+	for _, e := range s.entries {
+		var h [32]byte
+		copy(h[:], e.LeafHash)
+		hashes = append(hashes, h)
+	}
+	return hashes, nil
+}
+
 func (s *testNoOpStore) InsertTreeHead(_ context.Context, treeSize uint64, rootHash, fringe, headSig []byte) error {
 	s.treeHeads = append(s.treeHeads, models.TransparencyTreeHead{
 		TreeSize: treeSize,

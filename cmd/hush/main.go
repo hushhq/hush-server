@@ -66,6 +66,10 @@ func (a *poolTransparencyStore) GetLatestTreeHead(ctx context.Context) (*models.
 	return a.pool.GetLatestTransparencyTreeHead(ctx)
 }
 
+func (a *poolTransparencyStore) GetAllLeafHashes(ctx context.Context) ([][32]byte, error) {
+	return a.pool.GetAllLeafHashes(ctx)
+}
+
 func (a *poolTransparencyStore) InsertTreeHead(ctx context.Context, treeSize uint64, rootHash, fringe, headSig []byte) error {
 	return a.pool.InsertTransparencyTreeHead(ctx, treeSize, rootHash, fringe, headSig)
 }

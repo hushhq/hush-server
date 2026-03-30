@@ -57,6 +57,16 @@ func (m *memStore) GetLatestTreeHead(_ context.Context) (*models.TransparencyTre
 	return &m.treeHeads[len(m.treeHeads)-1], nil
 }
 
+func (m *memStore) GetAllLeafHashes(_ context.Context) ([][32]byte, error) {
+	var hashes [][32]byte
+	for _, e := range m.entries {
+		var h [32]byte
+		copy(h[:], e.LeafHash)
+		hashes = append(hashes, h)
+	}
+	return hashes, nil
+}
+
 func (m *memStore) InsertTreeHead(_ context.Context, treeSize uint64, rootHash, fringe, headSig []byte) error {
 	m.treeHeads = append(m.treeHeads, models.TransparencyTreeHead{
 		TreeSize:  treeSize,

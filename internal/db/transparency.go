@@ -71,6 +71,30 @@ func (p *Pool) GetTransparencyLogEntriesByPubKey(
 	return entries, nil
 }
 
+// GetAllLeafHashes returns every leaf_hash in leaf_index order.
+// Used at startup to rehydrate the in-memory Merkle tree so Proof() works
+// for entries appended before the current process started.
+func (p *Pool) GetAllLeafHashes(ctx context.Context) ([][32]byte, error) {
+	const q = `SELECT leaf_hash FROM transparency_log_entries ORDER BY leaf_index ASC`
+	rows, err := p.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("db: get all leaf hashes: %w", err)
+	}
+	defer rows.Close()
+
+	var hashes [][32]byte
+	for rows.Next() {
+		var h []byte
+		if err := rows.Scan(&h); err != nil {
+			return nil, fmt.Errorf("db: scan leaf hash: %w", err)
+		}
+		var hash [32]byte
+		copy(hash[:], h)
+		hashes = append(hashes, hash)
+	}
+	return hashes, rows.Err()
+}
+
 // GetLatestTransparencyTreeHead returns the tree head with the highest tree_size.
 // Returns nil (no error) when the table is empty.
 func (p *Pool) GetLatestTransparencyTreeHead(

@@ -20,6 +20,11 @@ type TransparencyStore interface {
 	// entries exist.
 	GetLogEntriesByPubKey(ctx context.Context, pubKey []byte) ([]models.TransparencyLogEntry, error)
 
+	// GetAllLeafHashes returns every leaf_hash in leaf_index order.
+	// Used at startup to rehydrate the Merkle tree's leaves slice so
+	// Proof() can rebuild the full tree for any leaf index.
+	GetAllLeafHashes(ctx context.Context) ([][32]byte, error)
+
 	// GetLatestTreeHead returns the most recently persisted tree head, used to
 	// restore the Merkle tree fringe after a server restart. Returns nil (no
 	// error) when the log is empty.

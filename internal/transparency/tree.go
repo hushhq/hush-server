@@ -56,6 +56,14 @@ func FromFringe(fringe [][32]byte, size uint64) *MerkleTree {
 	return t
 }
 
+// SetLeaves populates the stored leaf hashes for a fringe-recovered tree.
+// Must be called before Proof() when the tree was loaded via FromFringe.
+// The hashes must be in leaf-index order and len(hashes) must equal Size().
+func (t *MerkleTree) SetLeaves(hashes [][32]byte) {
+	t.leaves = make([][32]byte, len(hashes))
+	copy(t.leaves, hashes)
+}
+
 // Append adds a new leaf (raw data bytes) and returns its 0-based index.
 // Each call is O(log N).
 func (t *MerkleTree) Append(leafData []byte) uint64 {
