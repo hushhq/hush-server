@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/base64"
 	"encoding/hex"
 	"net/http"
 
@@ -75,6 +76,15 @@ func (h *transparencyHandler) verify(w http.ResponseWriter, r *http.Request) {
 	proofs := proof.Proofs
 	if proofs == nil {
 		proofs = make([]models.MerkleInclusionProof, 0)
+	}
+
+	// Populate wire-format fields on each entry. EntryCBOR is tagged json:"-" on the
+	// struct so the raw bytes are never marshaled implicitly. The client's verify()
+	// reads entry.entryCbor (standard base64) to compute the Merkle leaf hash.
+	for i := range entries {
+		entries[i].EntryCBORB64 = base64.StdEncoding.EncodeToString(entries[i].EntryCBOR)
+		entries[i].LeafHashHex = hex.EncodeToString(entries[i].LeafHash)
+		entries[i].LogSigB64 = base64.StdEncoding.EncodeToString(entries[i].LogSig)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{

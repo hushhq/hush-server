@@ -3,6 +3,7 @@ package transparency
 import (
 	"context"
 	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -182,11 +183,15 @@ func (s *TransparencyService) GetProof(ctx context.Context, pubKey []byte) (*Pro
 			continue
 		}
 
-		// Convert [][32]byte to [][]byte for the API response.
+		// Convert [][32]byte to wire-format hex strings for the client.
+		// The client's verifyInclusion() passes each sibling through hexToBytes(),
+		// so all audit path hashes must be lowercase hex, not base64.
+		pathHex := make([]string, len(auditPath))
 		pathBytes := make([][]byte, len(auditPath))
 		for i, h := range auditPath {
 			hCopy := h
 			pathBytes[i] = hCopy[:]
+			pathHex[i] = hex.EncodeToString(hCopy[:])
 		}
 
 		// Countersign the proof: rehydrate the entry and countersign.
@@ -197,11 +202,14 @@ func (s *TransparencyService) GetProof(ctx context.Context, pubKey []byte) (*Pro
 		}
 
 		proofs = append(proofs, models.MerkleInclusionProof{
-			LeafIndex:    e.LeafIndex,
-			TreeSize:     treeSize,
-			AuditPath:    pathBytes,
-			RootHash:     root[:],
-			LogSignature: logSig,
+			LeafIndex:       e.LeafIndex,
+			TreeSize:        treeSize,
+			AuditPath:       pathBytes,
+			RootHash:        root[:],
+			LogSig:          logSig,
+			AuditPathHex:    pathHex,
+			RootHashHex:     hex.EncodeToString(root[:]),
+			LogSignatureB64: base64.StdEncoding.EncodeToString(logSig),
 		})
 	}
 

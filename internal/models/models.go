@@ -463,17 +463,30 @@ type InstanceUnbanRequest struct {
 
 // TransparencyLogEntry mirrors one row from the transparency_log_entries table.
 // It is returned by GetTransparencyLogEntriesByPubKey for proof generation.
+//
+// Binary fields (EntryCBOR, LeafHash, LogSig) are excluded from JSON via json:"-".
+// Their wire representations are the base64-encoded string fields (EntryCBORB64,
+// LeafHashHex, LogSigB64) which are populated by the API handler before writing
+// the response. This makes the encoding contract explicit and avoids surprises from
+// Go's implicit base64 marshaling of []byte.
 type TransparencyLogEntry struct {
 	ID         int64     `json:"id"`
 	LeafIndex  uint64    `json:"leafIndex"`
 	Operation  string    `json:"operation"`
 	UserPubKey []byte    `json:"-"`
-	SubjectKey []byte    `json:"subjectKey,omitempty"`
+	SubjectKey []byte    `json:"-"`
 	EntryCBOR  []byte    `json:"-"`
-	LeafHash   []byte    `json:"leafHash"`
+	LeafHash   []byte    `json:"-"`
 	UserSig    []byte    `json:"-"`
-	LogSig     []byte    `json:"logSig"`
+	LogSig     []byte    `json:"-"`
 	LoggedAt   time.Time `json:"loggedAt"`
+
+	// Wire-format fields populated by the API handler (never stored).
+	// EntryCBORB64 is standard base64 (RFC 4648) for client WebCrypto use.
+	// LeafHashHex and LogSigB64 are hex and base64 respectively for display/verify.
+	EntryCBORB64 string `json:"entryCbor,omitempty"`
+	LeafHashHex  string `json:"leafHash,omitempty"`
+	LogSigB64    string `json:"logSig,omitempty"`
 }
 
 // TransparencyTreeHead mirrors one row from the transparency_tree_heads table.
@@ -488,12 +501,28 @@ type TransparencyTreeHead struct {
 
 // MerkleInclusionProof is returned by the transparency verify API endpoint.
 // Clients use WebCrypto SHA-256 to recompute the root from the audit path.
+//
+// Binary fields are excluded from JSON (json:"-"); their wire representations
+// use explicit encoding:
+//   - AuditPathHex: each 32-byte sibling hash as a lowercase hex string.
+//   - RootHashHex:  32-byte root as a lowercase hex string.
+//   - LogSignatureB64: 64-byte Ed25519 signature as standard base64.
+//
+// Hex is used for AuditPath and RootHash because the client's verifyInclusion()
+// function passes sibling hashes to hexToBytes() and compares the recomputed root
+// with bytesToHex(). Base64 is used for LogSignature because base64ToBytes() is
+// called on it. These encodings must match the client's transparencyVerifier.js.
 type MerkleInclusionProof struct {
-	LeafIndex    uint64   `json:"leafIndex"`
-	TreeSize     uint64   `json:"treeSize"`
-	AuditPath    [][]byte `json:"auditPath"` // sibling hashes from leaf to root
-	RootHash     []byte   `json:"rootHash"`
-	LogSignature []byte   `json:"logSignature"` // log's countersignature over this proof
+	LeafIndex uint64   `json:"leafIndex"`
+	TreeSize  uint64   `json:"treeSize"`
+	AuditPath [][]byte `json:"-"` // raw binary; use AuditPathHex for JSON
+	RootHash  []byte   `json:"-"` // raw binary; use RootHashHex for JSON
+	LogSig    []byte   `json:"-"` // raw binary; use LogSignatureB64 for JSON
+
+	// Wire-format fields populated by the API handler (never stored).
+	AuditPathHex    []string `json:"auditPath,omitempty"`    // hex-encoded sibling hashes
+	RootHashHex     string   `json:"rootHash,omitempty"`     // hex-encoded root
+	LogSignatureB64 string   `json:"logSignature,omitempty"` // base64-encoded log signature
 }
 
 // CreateDMRequest is the body for POST /api/guilds/dm.
