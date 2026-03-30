@@ -163,7 +163,8 @@ type claimInviteResponse struct {
 
 func (h *inviteHandler) claimInvite(w http.ResponseWriter, r *http.Request) {
 	userID := userIDFromContext(r.Context())
-	if userID == "" {
+	fedID := federatedIdentityIDFromContext(r.Context())
+	if userID == "" && fedID == "" {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
 		return
 	}
@@ -188,22 +189,24 @@ func (h *inviteHandler) claimInvite(w http.ResponseWriter, r *http.Request) {
 	}
 	serverID := *inv.ServerID
 
-	// Guild-scoped ban check — does not prevent the user from using other guilds (IROLE-04).
-	ban, err := h.store.GetActiveBan(r.Context(), serverID, userID)
-	if err != nil {
-		slog.Error("claimInvite: check ban", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to check ban status"})
-		return
-	}
-	if ban != nil {
-		resp := map[string]interface{}{
-			"error": "You are banned from this guild.",
+	// Guild-scoped ban check — only applicable to local users; federated ban is deferred.
+	if fedID == "" {
+		ban, err := h.store.GetActiveBan(r.Context(), serverID, userID)
+		if err != nil {
+			slog.Error("claimInvite: check ban", "err", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to check ban status"})
+			return
 		}
-		if ban.ExpiresAt != nil {
-			resp["ban_expires_at"] = ban.ExpiresAt.Format(time.RFC3339)
+		if ban != nil {
+			resp := map[string]interface{}{
+				"error": "You are banned from this guild.",
+			}
+			if ban.ExpiresAt != nil {
+				resp["ban_expires_at"] = ban.ExpiresAt.Format(time.RFC3339)
+			}
+			writeJSON(w, http.StatusForbidden, resp)
+			return
 		}
-		writeJSON(w, http.StatusForbidden, resp)
-		return
 	}
 
 	claimed, err := h.store.ClaimInviteUse(r.Context(), req.Code)
@@ -217,22 +220,39 @@ func (h *inviteHandler) claimInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Add the user to the guild as a member (permission level 0).
-	if err := h.store.AddServerMember(r.Context(), serverID, userID, models.PermissionLevelMember); err != nil {
-		slog.Error("claimInvite: add server member", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to join guild"})
-		return
+	// Add membership — federated and local users use separate tables.
+	if fedID != "" {
+		if err := h.store.AddFederatedServerMember(r.Context(), serverID, fedID, models.PermissionLevelMember); err != nil {
+			slog.Error("claimInvite: add federated server member", "err", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to join guild"})
+			return
+		}
+	} else {
+		if err := h.store.AddServerMember(r.Context(), serverID, userID, models.PermissionLevelMember); err != nil {
+			slog.Error("claimInvite: add server member", "err", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to join guild"})
+			return
+		}
 	}
 
 	// Broadcast member_joined so other connected users see the new member.
 	if h.hub != nil {
 		member := map[string]interface{}{
-			"id":               userID,
-			"permissionLevel":  models.PermissionLevelMember,
+			"permissionLevel": models.PermissionLevelMember,
 		}
-		if u, err := h.store.GetUserByID(r.Context(), userID); err == nil && u != nil {
-			member["username"] = u.Username
-			member["displayName"] = u.DisplayName
+		if fedID != "" {
+			member["id"] = fedID
+			if fi, err := h.store.GetFederatedIdentityByID(r.Context(), fedID); err == nil && fi != nil {
+				member["username"] = fi.Username
+				member["displayName"] = fi.DisplayName
+				member["homeInstance"] = fi.HomeInstance
+			}
+		} else {
+			member["id"] = userID
+			if u, err := h.store.GetUserByID(r.Context(), userID); err == nil && u != nil {
+				member["username"] = u.Username
+				member["displayName"] = u.DisplayName
+			}
 		}
 		msg, _ := json.Marshal(map[string]interface{}{
 			"type":      "member_joined",
@@ -242,8 +262,12 @@ func (h *inviteHandler) claimInvite(w http.ResponseWriter, r *http.Request) {
 		h.hub.BroadcastToServer(serverID, msg)
 	}
 
-	// Emit system message: the joining user is the actor, no target.
-	EmitSystemMessage(r.Context(), h.store, h.hub, serverID, "member_joined", userID, nil, "", nil)
+	// Emit system message: the joining actor is the federated ID or local user ID.
+	actorID := userID
+	if fedID != "" {
+		actorID = fedID
+	}
+	EmitSystemMessage(r.Context(), h.store, h.hub, serverID, "member_joined", actorID, nil, "", nil)
 
 	writeJSON(w, http.StatusOK, claimInviteResponse{
 		ServerID: serverID,

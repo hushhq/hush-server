@@ -32,6 +32,8 @@ type Store interface {
 	GetOrCreateFederatedIdentity(ctx context.Context, publicKey []byte, homeInstance, username, displayName string) (*models.FederatedIdentity, error)
 	// GetFederatedIdentityByPublicKey returns the cached foreign user, or (nil, nil) when absent.
 	GetFederatedIdentityByPublicKey(ctx context.Context, publicKey []byte) (*models.FederatedIdentity, error)
+	// GetFederatedIdentityByID returns the cached foreign user by primary-key ID, or (nil, nil) when absent.
+	GetFederatedIdentityByID(ctx context.Context, id string) (*models.FederatedIdentity, error)
 	// UpdateFederatedIdentityProfile refreshes username, display_name, and cached_at by ID.
 	UpdateFederatedIdentityProfile(ctx context.Context, id string, username, displayName string) error
 

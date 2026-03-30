@@ -647,6 +647,10 @@ func (m *mockStore) GetFederatedIdentityByPublicKey(ctx context.Context, publicK
 	return nil, nil
 }
 
+func (m *mockStore) GetFederatedIdentityByID(ctx context.Context, id string) (*models.FederatedIdentity, error) {
+	return nil, nil
+}
+
 func (m *mockStore) UpdateFederatedIdentityProfile(ctx context.Context, id string, username, displayName string) error {
 	return nil
 }

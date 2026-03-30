@@ -48,6 +48,20 @@ func (p *Pool) GetFederatedIdentityByPublicKey(
 	return fi, err
 }
 
+// GetFederatedIdentityByID returns the federated identity by primary-key ID,
+// or (nil, nil) when no such row exists.
+func (p *Pool) GetFederatedIdentityByID(ctx context.Context, id string) (*models.FederatedIdentity, error) {
+	row := p.QueryRow(ctx, `
+		SELECT id, public_key, home_instance, username, display_name, cached_at
+		FROM federated_identities
+		WHERE id = $1`, id)
+	fi, err := scanFederatedIdentity(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return fi, err
+}
+
 // UpdateFederatedIdentityProfile refreshes the username, display_name, and
 // cached_at for an existing federated identity row.
 func (p *Pool) UpdateFederatedIdentityProfile(
