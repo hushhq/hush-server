@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -628,6 +629,30 @@ func (m *mockStore) GetServerMemberLevel(ctx context.Context, serverID, userID s
 		return m.getServerMemberLevelFn(ctx, serverID, userID)
 	}
 	return 0, nil
+}
+
+func (m *mockStore) GetServerMemberLevelByFederatedID(ctx context.Context, serverID, federatedIdentityID string) (int, error) {
+	return 0, errors.New("not a guild member")
+}
+
+func (m *mockStore) AddFederatedServerMember(ctx context.Context, serverID, federatedIdentityID string, permissionLevel int) error {
+	return nil
+}
+
+func (m *mockStore) GetOrCreateFederatedIdentity(ctx context.Context, publicKey []byte, homeInstance, username, displayName string) (*models.FederatedIdentity, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (m *mockStore) GetFederatedIdentityByPublicKey(ctx context.Context, publicKey []byte) (*models.FederatedIdentity, error) {
+	return nil, nil
+}
+
+func (m *mockStore) UpdateFederatedIdentityProfile(ctx context.Context, id string, username, displayName string) error {
+	return nil
+}
+
+func (m *mockStore) RemoveFederatedServerMember(ctx context.Context, serverID, federatedIdentityID string) error {
+	return nil
 }
 
 func (m *mockStore) UpdateServerMemberLevel(ctx context.Context, serverID, userID string, permissionLevel int) error {

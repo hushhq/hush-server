@@ -21,6 +21,21 @@ func RequireGuildMember(store db.Store) func(http.Handler) http.Handler {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing server ID"})
 				return
 			}
+			// Check federated membership first.
+			fedID := federatedIdentityIDFromContext(r.Context())
+			if fedID != "" {
+				level, err := store.GetServerMemberLevelByFederatedID(r.Context(), serverID, fedID)
+				if err != nil {
+					writeJSON(w, http.StatusForbidden, map[string]string{"error": "not a guild member"})
+					return
+				}
+				ctx := withGuildLevel(r.Context(), level)
+				ctx = withGuildRole(ctx, permissionLevelToRole(level))
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
+
+			// Local user membership (existing logic).
 			userID := userIDFromContext(r.Context())
 			level, err := store.GetServerMemberLevel(r.Context(), serverID, userID)
 			if err != nil {
@@ -48,11 +63,23 @@ func RequireAuth(jwtSecret string, store db.Store) func(http.Handler) http.Handl
 				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing or invalid authorization"})
 				return
 			}
-			userID, sessionID, isGuest, _, _, err := auth.ValidateJWT(token, jwtSecret)
+			userID, sessionID, isGuest, isFederated, federatedIdentityID, err := auth.ValidateJWT(token, jwtSecret)
 			if err != nil {
 				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid or expired token"})
 				return
 			}
+
+			// Federated sessions are stateless — no DB session record exists.
+			if isFederated {
+				r = r.WithContext(withUserID(r.Context(), federatedIdentityID))
+				r = r.WithContext(withSessionID(r.Context(), sessionID))
+				r = r.WithContext(withIsGuest(r.Context(), false))
+				r = r.WithContext(withIsFederated(r.Context(), true))
+				r = r.WithContext(withFederatedIdentityID(r.Context(), federatedIdentityID))
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			// Guest sessions are validated by JWT signature only — no DB record exists.
 			if !isGuest {
 				tokenHash := auth.TokenHash(token)
