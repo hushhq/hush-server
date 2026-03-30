@@ -48,12 +48,21 @@ func (p *Pool) UpdateServerMemberLevel(ctx context.Context, serverID, userID str
 	return err
 }
 
-// ListServerMembers returns all guild members with their user profiles, ordered by join time.
+// ListServerMembers returns all guild members (local and federated) with their profiles,
+// ordered by join time. HomeInstance is nil for local users.
 func (p *Pool) ListServerMembers(ctx context.Context, serverID string) ([]models.ServerMemberWithUser, error) {
 	rows, err := p.Query(ctx, `
-		SELECT u.id, u.username, u.display_name, u.created_at, sm.permission_level, sm.joined_at
+		SELECT
+			COALESCE(u.id, fi.id) AS member_id,
+			COALESCE(u.username, fi.username) AS username,
+			COALESCE(u.display_name, fi.display_name) AS display_name,
+			COALESCE(u.created_at, fi.cached_at) AS created_at,
+			sm.permission_level,
+			sm.joined_at,
+			fi.home_instance
 		FROM server_members sm
-		JOIN users u ON u.id = sm.user_id
+		LEFT JOIN users u ON u.id = sm.user_id
+		LEFT JOIN federated_identities fi ON fi.id = sm.federated_identity_id
 		WHERE sm.server_id = $1
 		ORDER BY sm.joined_at`, serverID)
 	if err != nil {
@@ -63,10 +72,42 @@ func (p *Pool) ListServerMembers(ctx context.Context, serverID string) ([]models
 	var out []models.ServerMemberWithUser
 	for rows.Next() {
 		var m models.ServerMemberWithUser
-		if err := rows.Scan(&m.ID, &m.Username, &m.DisplayName, &m.CreatedAt, &m.PermissionLevel, &m.JoinedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.Username, &m.DisplayName, &m.CreatedAt, &m.PermissionLevel, &m.JoinedAt, &m.HomeInstance); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+// AddFederatedServerMember inserts a guild membership record for a federated (foreign-instance) user.
+func (p *Pool) AddFederatedServerMember(ctx context.Context, serverID, federatedIdentityID string, permissionLevel int) error {
+	_, err := p.Exec(ctx, `
+		INSERT INTO server_members (server_id, federated_identity_id, permission_level)
+		VALUES ($1, $2, $3)`,
+		serverID, federatedIdentityID, permissionLevel,
+	)
+	return err
+}
+
+// GetServerMemberLevelByFederatedID returns the permission_level for a federated guild member.
+// Returns an error if the federated user is not a member.
+func (p *Pool) GetServerMemberLevelByFederatedID(ctx context.Context, serverID, federatedIdentityID string) (int, error) {
+	var level int
+	err := p.QueryRow(ctx, `
+		SELECT permission_level FROM server_members
+		WHERE server_id = $1 AND federated_identity_id = $2`,
+		serverID, federatedIdentityID,
+	).Scan(&level)
+	return level, err
+}
+
+// RemoveFederatedServerMember removes a federated user from the guild.
+func (p *Pool) RemoveFederatedServerMember(ctx context.Context, serverID, federatedIdentityID string) error {
+	_, err := p.Exec(ctx, `
+		DELETE FROM server_members
+		WHERE server_id = $1 AND federated_identity_id = $2`,
+		serverID, federatedIdentityID,
+	)
+	return err
 }

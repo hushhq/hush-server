@@ -138,6 +138,13 @@ type Store interface {
 	UpdateServerMemberLevel(ctx context.Context, serverID, userID string, permissionLevel int) error
 	ListServerMembers(ctx context.Context, serverID string) ([]models.ServerMemberWithUser, error)
 
+	// AddFederatedServerMember inserts a guild membership record for a federated (foreign-instance) user.
+	AddFederatedServerMember(ctx context.Context, serverID, federatedIdentityID string, permissionLevel int) error
+	// RemoveFederatedServerMember removes a federated user from the guild.
+	RemoveFederatedServerMember(ctx context.Context, serverID, federatedIdentityID string) error
+	// GetServerMemberLevelByFederatedID returns the permission_level for a federated guild member.
+	GetServerMemberLevelByFederatedID(ctx context.Context, serverID, federatedIdentityID string) (int, error)
+
 	// Moderation — bans
 	InsertBan(ctx context.Context, serverID, userID, actorID, reason string, expiresAt *time.Time) (*models.Ban, error)
 	GetActiveBan(ctx context.Context, serverID, userID string) (*models.Ban, error)
