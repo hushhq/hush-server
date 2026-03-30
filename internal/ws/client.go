@@ -19,14 +19,15 @@ const (
 
 // Client is a single WebSocket connection.
 type Client struct {
-	id              string
-	userID          string
-	hub             *Hub
-	conn            *websocket.Conn
-	send            chan []byte
-	handler         *MessageHandler
-	limiter         *rate.Limiter
-	consecutiveHits int
+	id                  string
+	userID              string
+	federatedIdentityID string // non-empty for federated users, empty for local
+	hub                 *Hub
+	conn                *websocket.Conn
+	send                chan []byte
+	handler             *MessageHandler
+	limiter             *rate.Limiter
+	consecutiveHits     int
 }
 
 // Run runs the read and write pumps. Call after Register. Blocks until connection closes.
@@ -162,15 +163,17 @@ func (c *Client) writePump() {
 }
 
 // NewClient creates a client. id and userID are set by the handler after auth.
+// federatedIdentityID is non-empty only for clients authenticated via federated JWT.
 // msgHandler may be nil; when set, it handles message.send, message.history, typing.*.
-func NewClient(conn *websocket.Conn, hub *Hub, userID string, msgHandler *MessageHandler) *Client {
+func NewClient(conn *websocket.Conn, hub *Hub, userID string, federatedIdentityID string, msgHandler *MessageHandler) *Client {
 	return &Client{
-		id:      uuid.New().String(),
-		userID:  userID,
-		hub:     hub,
-		conn:    conn,
-		send:    make(chan []byte, 256),
-		handler: msgHandler,
-		limiter: newClientLimiter(),
+		id:                  uuid.New().String(),
+		userID:              userID,
+		federatedIdentityID: federatedIdentityID,
+		hub:                 hub,
+		conn:                conn,
+		send:                make(chan []byte, 256),
+		handler:             msgHandler,
+		limiter:             newClientLimiter(),
 	}
 }

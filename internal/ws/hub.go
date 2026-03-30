@@ -28,16 +28,22 @@ func NewHub() *Hub {
 }
 
 // Register adds a client. Caller must ensure client has valid userID.
+// Federated clients use "fed:<federatedIdentityID>" as their presence key to
+// avoid collisions with local user IDs.
 func (h *Hub) Register(c *Client) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.clients[c.id] = c
-	h.presence[c.userID] = struct{}{}
+	if c.federatedIdentityID != "" {
+		h.presence["fed:"+c.federatedIdentityID] = struct{}{}
+	} else {
+		h.presence[c.userID] = struct{}{}
+	}
 	h.broadcastPresenceLocked()
 }
 
 // Unregister removes a client and broadcasts presence update.
-// Only removes from presence if no other client shares the same userID.
+// Only removes from presence if no other client shares the same identity.
 func (h *Hub) Unregister(c *Client) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -48,8 +54,14 @@ func (h *Hub) Unregister(c *Client) {
 	for _, m := range h.servers {
 		delete(m, c.id)
 	}
-	if !h.hasOtherClientForUser(c.userID) {
-		delete(h.presence, c.userID)
+	if c.federatedIdentityID != "" {
+		if !h.hasOtherClientForFederatedUser(c.federatedIdentityID) {
+			delete(h.presence, "fed:"+c.federatedIdentityID)
+		}
+	} else {
+		if !h.hasOtherClientForUser(c.userID) {
+			delete(h.presence, c.userID)
+		}
 	}
 	h.broadcastPresenceLocked()
 }
@@ -59,6 +71,17 @@ func (h *Hub) Unregister(c *Client) {
 func (h *Hub) hasOtherClientForUser(userID string) bool {
 	for _, client := range h.clients {
 		if client.userID == userID {
+			return true
+		}
+	}
+	return false
+}
+
+// hasOtherClientForFederatedUser returns true if any remaining client belongs
+// to the given federated identity ID. Must be called with h.mu held.
+func (h *Hub) hasOtherClientForFederatedUser(federatedID string) bool {
+	for _, client := range h.clients {
+		if client.federatedIdentityID == federatedID {
 			return true
 		}
 	}
@@ -154,6 +177,26 @@ func (h *Hub) BroadcastToUser(userID string, message []byte) {
 	clients := make([]*Client, 0)
 	for _, c := range h.clients {
 		if c.userID == userID {
+			clients = append(clients, c)
+		}
+	}
+	h.mu.RUnlock()
+	for _, c := range clients {
+		select {
+		case c.send <- message:
+		default:
+			slog.Warn("ws client send buffer full", "clientID", c.id)
+		}
+	}
+}
+
+// BroadcastToFederatedUser sends the message to all connected clients
+// for the given federated identity ID.
+func (h *Hub) BroadcastToFederatedUser(federatedIdentityID string, message []byte) {
+	h.mu.RLock()
+	clients := make([]*Client, 0)
+	for _, c := range h.clients {
+		if c.federatedIdentityID == federatedIdentityID {
 			clients = append(clients, c)
 		}
 	}
