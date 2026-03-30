@@ -48,6 +48,17 @@ type VerifyRequest struct {
 	DeviceID  string `json:"deviceId"`  // stable per-device identifier (UUID)
 }
 
+// FederatedVerifyRequest is the body for POST /api/auth/federated-verify.
+// Used when a user from a foreign instance authenticates on this instance.
+type FederatedVerifyRequest struct {
+	PublicKey    string `json:"publicKey"`    // base64-encoded Ed25519 public key
+	Nonce        string `json:"nonce"`        // hex nonce from /challenge response
+	Signature    string `json:"signature"`    // base64-encoded Ed25519 signature over nonce bytes
+	HomeInstance string `json:"homeInstance"` // URL of the user's home instance
+	Username     string `json:"username"`     // username on the home instance
+	DisplayName  string `json:"displayName"`  // display name on the home instance
+}
+
 // AuthNonce is a stored challenge nonce pending signature verification.
 type AuthNonce struct {
 	Nonce         string    `json:"-"`

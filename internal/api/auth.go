@@ -71,6 +71,7 @@ func AuthRoutes(store db.Store, jwtSecret string, jwtExpiry time.Duration, trans
 	r.Get("/check-username/{username}", h.checkUsername)
 	r.Post("/challenge", h.challenge)
 	r.Post("/verify", h.verify)
+	r.Post("/federated-verify", h.federatedVerify)
 	r.Group(func(r chi.Router) {
 		r.Use(RequireAuth(jwtSecret, store))
 		r.Post("/logout", h.logout)
@@ -401,6 +402,79 @@ func (h *authHandler) verify(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}(req.DeviceID)
+}
+
+// federatedAuthResponse is returned by POST /api/auth/federated-verify.
+type federatedAuthResponse struct {
+	Token             string                    `json:"token"`
+	FederatedIdentity *models.FederatedIdentity `json:"federatedIdentity"`
+}
+
+// federatedVerify handles POST /api/auth/federated-verify.
+// Authenticates a user from a foreign instance via Ed25519 challenge-response
+// and issues a stateless federated JWT. No DB session record is created.
+func (h *authHandler) federatedVerify(w http.ResponseWriter, r *http.Request) {
+	var req models.FederatedVerifyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+
+	if strings.TrimSpace(req.HomeInstance) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "homeInstance is required"})
+		return
+	}
+
+	publicKeyBytes, err := base64.StdEncoding.DecodeString(req.PublicKey)
+	if err != nil || len(publicKeyBytes) != ed25519PublicKeyLen {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Authentication failed"})
+		return
+	}
+
+	signatureBytes, err := base64.StdEncoding.DecodeString(req.Signature)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Authentication failed"})
+		return
+	}
+
+	// Atomically consume the nonce and retrieve the stored public key.
+	storedKey, err := h.store.ConsumeAuthNonce(r.Context(), req.Nonce)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Challenge expired, please try again"})
+		return
+	}
+
+	// The nonce's stored public key must exactly match the request public key.
+	if subtle.ConstantTimeCompare(storedKey, publicKeyBytes) != 1 {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Authentication failed"})
+		return
+	}
+
+	if err := auth.VerifySignature(publicKeyBytes, req.Nonce, signatureBytes); err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Authentication failed"})
+		return
+	}
+
+	fedIdent, err := h.store.GetOrCreateFederatedIdentity(r.Context(), publicKeyBytes, req.HomeInstance, req.Username, req.DisplayName)
+	if err != nil {
+		slog.Error("get or create federated identity", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "authentication failed"})
+		return
+	}
+
+	sessionID := uuid.New().String()
+	expiresAt := time.Now().Add(h.jwtExpiry)
+	tokenString, err := auth.SignFederatedJWT(fedIdent.ID, sessionID, h.jwtSecret, expiresAt)
+	if err != nil {
+		slog.Error("sign federated jwt", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not create session"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, federatedAuthResponse{
+		Token:             tokenString,
+		FederatedIdentity: fedIdent,
+	})
 }
 
 func (h *authHandler) sendAuthResponse(w http.ResponseWriter, r *http.Request, user *models.User) {
