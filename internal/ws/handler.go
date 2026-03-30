@@ -51,7 +51,7 @@ func Handler(hub *Hub, jwtSecret string, store db.Store, corsOrigin string) http
 			client.Run()
 			return
 		}
-		userID, sessionID, isGuest, err := auth.ValidateJWT(token, jwtSecret)
+		userID, sessionID, isGuest, _, _, err := auth.ValidateJWT(token, jwtSecret)
 		if err != nil {
 			http.Error(w, "invalid token", http.StatusUnauthorized)
 			return
@@ -91,7 +91,7 @@ func authFromFirstMessage(conn *websocket.Conn, jwtSecret string, store db.Store
 	if msg.Type != "auth" || msg.Token == "" {
 		return "", errors.New("invalid auth message: expected type 'auth' with non-empty token")
 	}
-	uid, sessionID, isGuest, err := auth.ValidateJWT(msg.Token, jwtSecret)
+	uid, sessionID, isGuest, _, _, err := auth.ValidateJWT(msg.Token, jwtSecret)
 	if err != nil {
 		return "", err
 	}

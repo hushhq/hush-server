@@ -23,12 +23,14 @@ func TestValidateJWT_ValidToken_ReturnsUserIDAndSessionID(t *testing.T) {
 	token, err := SignJWT(wantUser, wantSession, secret, time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
-	gotUser, gotSession, isGuest, err := ValidateJWT(token, secret)
+	gotUser, gotSession, isGuest, isFederated, federatedID, err := ValidateJWT(token, secret)
 
 	require.NoError(t, err)
 	assert.Equal(t, wantUser, gotUser)
 	assert.Equal(t, wantSession, gotSession)
 	assert.False(t, isGuest)
+	assert.False(t, isFederated)
+	assert.Empty(t, federatedID)
 }
 
 func TestValidateJWT_GuestToken_ReturnsIsGuestTrue(t *testing.T) {
@@ -39,19 +41,21 @@ func TestValidateJWT_GuestToken_ReturnsIsGuestTrue(t *testing.T) {
 	token, err := SignGuestJWT(guestID, sessID, secret, time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
-	gotUser, gotSession, isGuest, err := ValidateJWT(token, secret)
+	gotUser, gotSession, isGuest, isFederated, federatedID, err := ValidateJWT(token, secret)
 
 	require.NoError(t, err)
 	assert.Equal(t, guestID, gotUser)
 	assert.Equal(t, sessID, gotSession)
 	assert.True(t, isGuest)
+	assert.False(t, isFederated)
+	assert.Empty(t, federatedID)
 }
 
 func TestValidateJWT_ExpiredToken_ReturnsError(t *testing.T) {
 	token, err := SignJWT("user-1", "sess-1", "secret", time.Now().Add(-time.Hour))
 	require.NoError(t, err)
 
-	_, _, _, err = ValidateJWT(token, "secret")
+	_, _, _, _, _, err = ValidateJWT(token, "secret")
 
 	assert.Error(t, err)
 }
@@ -60,15 +64,33 @@ func TestValidateJWT_WrongSecret_ReturnsError(t *testing.T) {
 	token, err := SignJWT("user-1", "sess-1", "sign-secret", time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
-	_, _, _, err = ValidateJWT(token, "wrong-secret")
+	_, _, _, _, _, err = ValidateJWT(token, "wrong-secret")
 
 	assert.Error(t, err)
 }
 
 func TestValidateJWT_MalformedToken_ReturnsError(t *testing.T) {
-	_, _, _, err := ValidateJWT("not.a.jwt.at.all", "secret")
+	_, _, _, _, _, err := ValidateJWT("not.a.jwt.at.all", "secret")
 
 	assert.Error(t, err)
+}
+
+func TestSignFederatedJWT_ValidInput_ReturnsFederatedClaims(t *testing.T) {
+	secret := "test-secret"
+	fedID := "fid-abc"
+	sessID := "sess-fed-1"
+
+	token, err := SignFederatedJWT(fedID, sessID, secret, time.Now().Add(time.Hour))
+	require.NoError(t, err)
+
+	gotUser, gotSession, isGuest, isFederated, federatedID, err := ValidateJWT(token, secret)
+
+	require.NoError(t, err)
+	assert.Equal(t, fedID, gotUser)
+	assert.Equal(t, sessID, gotSession)
+	assert.False(t, isGuest)
+	assert.True(t, isFederated)
+	assert.Equal(t, fedID, federatedID)
 }
 
 func TestTokenHash_DeterministicOutput(t *testing.T) {

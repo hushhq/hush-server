@@ -48,7 +48,7 @@ func RequireAuth(jwtSecret string, store db.Store) func(http.Handler) http.Handl
 				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing or invalid authorization"})
 				return
 			}
-			userID, sessionID, isGuest, err := auth.ValidateJWT(token, jwtSecret)
+			userID, sessionID, isGuest, _, _, err := auth.ValidateJWT(token, jwtSecret)
 			if err != nil {
 				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid or expired token"})
 				return
