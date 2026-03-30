@@ -25,8 +25,8 @@ func drainAllClientMessages(c *Client, timeout time.Duration) [][]byte {
 // export_secret — no key material travels over the wire.
 func TestClient_MediaKey_RemovedInM3(t *testing.T) {
 	hub := NewHub()
-	sender := NewClient(nil, hub, "user-1", nil)
-	receiver := NewClient(nil, hub, "user-2", nil)
+	sender := NewClient(nil, hub, "user-1", "", nil)
+	receiver := NewClient(nil, hub, "user-2", "", nil)
 	hub.Register(sender)
 	hub.Register(receiver)
 	defer func() {

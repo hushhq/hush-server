@@ -11,13 +11,14 @@ import (
 )
 
 // InsertMessage stores an encrypted message and returns the created row.
+// Exactly one of senderID or federatedSenderID should be non-nil.
 // recipientID nil = broadcast/single ciphertext; non-nil = fan-out for that recipient.
-func (p *Pool) InsertMessage(ctx context.Context, channelID, senderID string, recipientID *string, ciphertext []byte) (*models.Message, error) {
+func (p *Pool) InsertMessage(ctx context.Context, channelID string, senderID *string, federatedSenderID *string, recipientID *string, ciphertext []byte) (*models.Message, error) {
 	row := p.QueryRow(ctx, `
-		INSERT INTO messages (channel_id, sender_id, recipient_id, ciphertext)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id, channel_id, sender_id, recipient_id, ciphertext, "timestamp"`,
-		channelID, senderID, recipientID, ciphertext,
+		INSERT INTO messages (channel_id, sender_id, federated_sender_id, recipient_id, ciphertext)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id, channel_id, sender_id, federated_sender_id, recipient_id, ciphertext, "timestamp"`,
+		channelID, senderID, federatedSenderID, recipientID, ciphertext,
 	)
 	return scanMessage(row)
 }
@@ -29,7 +30,7 @@ func (p *Pool) GetMessages(ctx context.Context, channelID, recipientID string, b
 	}
 	if before.IsZero() {
 		rows, err := p.Query(ctx, `
-			SELECT id, channel_id, sender_id, recipient_id, ciphertext, "timestamp"
+			SELECT id, channel_id, sender_id, federated_sender_id, recipient_id, ciphertext, "timestamp"
 			FROM messages
 			WHERE channel_id = $1 AND (recipient_id IS NULL OR recipient_id = $2)
 			ORDER BY "timestamp" DESC
@@ -41,7 +42,7 @@ func (p *Pool) GetMessages(ctx context.Context, channelID, recipientID string, b
 		return scanMessages(rows)
 	}
 	rows, err := p.Query(ctx, `
-		SELECT id, channel_id, sender_id, recipient_id, ciphertext, "timestamp"
+		SELECT id, channel_id, sender_id, federated_sender_id, recipient_id, ciphertext, "timestamp"
 		FROM messages
 		WHERE channel_id = $1 AND (recipient_id IS NULL OR recipient_id = $2) AND "timestamp" < $3
 		ORDER BY "timestamp" DESC
@@ -56,7 +57,7 @@ func (p *Pool) GetMessages(ctx context.Context, channelID, recipientID string, b
 // GetMessageByID returns the message with the given ID, or nil if not found.
 func (p *Pool) GetMessageByID(ctx context.Context, messageID string) (*models.Message, error) {
 	row := p.QueryRow(ctx, `
-		SELECT id, channel_id, sender_id, recipient_id, ciphertext, "timestamp"
+		SELECT id, channel_id, sender_id, federated_sender_id, recipient_id, ciphertext, "timestamp"
 		FROM messages
 		WHERE id = $1`,
 		messageID,
@@ -76,7 +77,7 @@ func (p *Pool) DeleteMessage(ctx context.Context, messageID string) error {
 
 func scanMessage(row pgx.Row) (*models.Message, error) {
 	var m models.Message
-	err := row.Scan(&m.ID, &m.ChannelID, &m.SenderID, &m.RecipientID, &m.Ciphertext, &m.Timestamp)
+	err := row.Scan(&m.ID, &m.ChannelID, &m.SenderID, &m.FederatedSenderID, &m.RecipientID, &m.Ciphertext, &m.Timestamp)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +88,7 @@ func scanMessages(rows pgx.Rows) ([]models.Message, error) {
 	var out []models.Message
 	for rows.Next() {
 		var m models.Message
-		if err := rows.Scan(&m.ID, &m.ChannelID, &m.SenderID, &m.RecipientID, &m.Ciphertext, &m.Timestamp); err != nil {
+		if err := rows.Scan(&m.ID, &m.ChannelID, &m.SenderID, &m.FederatedSenderID, &m.RecipientID, &m.Ciphertext, &m.Timestamp); err != nil {
 			return nil, err
 		}
 		out = append(out, m)

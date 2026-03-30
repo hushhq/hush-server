@@ -55,7 +55,7 @@ func TestChannelsGetMessages_ValidRequest_Returns200(t *testing.T) {
 	tokenHash := auth.TokenHash(token)
 	channelID := uuid.New().String()
 	msgs := []models.Message{
-		{ID: "m1", ChannelID: channelID, SenderID: userID, Ciphertext: []byte("ct"), Timestamp: time.Now()},
+		{ID: "m1", ChannelID: channelID, SenderID: &userID, Ciphertext: []byte("ct"), Timestamp: time.Now()},
 	}
 	store := &mockStore{
 		getSessionByTokenHashFn: func(_ context.Context, th string) (*models.Session, error) {

@@ -725,7 +725,7 @@ func TestGuestAuth_IssuesShortLivedToken(t *testing.T) {
 	assert.True(t, resp.ExpiresAt.After(time.Now()), "expiresAt must be in the future")
 
 	// Token must validate and carry is_guest=true.
-	_, _, isGuest, err := internalauth.ValidateJWT(resp.Token, testJWTSecret)
+	_, _, isGuest, _, _, err := internalauth.ValidateJWT(resp.Token, testJWTSecret)
 	require.NoError(t, err)
 	assert.True(t, isGuest, "token must have is_guest=true")
 }

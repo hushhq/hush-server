@@ -154,7 +154,8 @@ func (h *MessageHandler) handleMessageSend(c *Client, raw []byte) {
 		sendError(c, "bad_request", "ciphertext too large")
 		return
 	}
-	msg, err := h.store.InsertMessage(ctx, payload.ChannelID, c.userID, nil, ciphertext)
+	senderID, federatedSenderID := resolveSenderIdentity(c)
+	msg, err := h.store.InsertMessage(ctx, payload.ChannelID, senderID, federatedSenderID, nil, ciphertext)
 	if err != nil {
 		slog.Warn("ws InsertMessage failed", "err", err)
 		sendError(c, "internal", "failed to store message")
@@ -168,19 +169,13 @@ func (h *MessageHandler) handleMessageSend(c *Client, raw []byte) {
 			slog.Warn("ws IncrementGuildMessageCount failed", "err", err, "channelID", payload.ChannelID)
 		}
 	}()
-	out := map[string]interface{}{
-		"type":       "message.new",
-		"id":         msg.ID,
-		"channel_id": msg.ChannelID,
-		"sender_id":  msg.SenderID,
-		"ciphertext": base64.StdEncoding.EncodeToString(msg.Ciphertext),
-		"timestamp":  msg.Timestamp.Format(time.RFC3339Nano),
-	}
+	out := messageNewBroadcast(msg)
 	b, _ := json.Marshal(out)
 	h.hub.Broadcast(payload.ChannelID, b, "")
 }
 
 func (h *MessageHandler) handleMessageSendFanout(c *Client, channelID string, ciphertextByRecipient map[string]string, ctx context.Context) {
+	senderID, federatedSenderID := resolveSenderIdentity(c)
 	for recipientID, b64 := range ciphertextByRecipient {
 		if recipientID == "" || b64 == "" {
 			continue
@@ -194,37 +189,25 @@ func (h *MessageHandler) handleMessageSendFanout(c *Client, channelID string, ci
 			slog.Warn("ws fan-out ciphertext too large", "recipientID", recipientID, "size", len(ct))
 			continue
 		}
-		msg, err := h.store.InsertMessage(ctx, channelID, c.userID, &recipientID, ct)
+		msg, err := h.store.InsertMessage(ctx, channelID, senderID, federatedSenderID, &recipientID, ct)
 		if err != nil {
 			slog.Warn("ws InsertMessage fan-out failed", "err", err, "recipientID", recipientID)
 			continue
 		}
-		out := map[string]interface{}{
-			"type":       "message.new",
-			"id":         msg.ID,
-			"channel_id": msg.ChannelID,
-			"sender_id":  msg.SenderID,
-			"ciphertext": b64,
-			"timestamp":  msg.Timestamp.Format(time.RFC3339Nano),
-		}
+		out := messageNewBroadcast(msg)
+		out["ciphertext"] = b64
 		b, _ := json.Marshal(out)
 		h.hub.BroadcastToUserInChannel(channelID, recipientID, b)
 	}
 	// Insert sender's own copy so their history includes fan-out messages.
 	// Ciphertext is empty - the client caches plaintext at send time.
-	senderID := c.userID
-	senderCopy, err := h.store.InsertMessage(ctx, channelID, c.userID, &senderID, []byte{})
+	selfID := c.userID
+	senderCopy, err := h.store.InsertMessage(ctx, channelID, senderID, federatedSenderID, &selfID, []byte{})
 	if err != nil {
 		slog.Warn("ws InsertMessage sender-copy failed", "err", err)
 		return
 	}
-	echo := map[string]interface{}{
-		"type":       "message.new",
-		"id":         senderCopy.ID,
-		"channel_id": channelID,
-		"sender_id":  c.userID,
-		"timestamp":  senderCopy.Timestamp.Format(time.RFC3339Nano),
-	}
+	echo := messageNewBroadcast(senderCopy)
 	echoBytes, _ := json.Marshal(echo)
 	h.hub.BroadcastToUserInChannel(channelID, c.userID, echoBytes)
 }
@@ -326,13 +309,46 @@ func (h *MessageHandler) handleTyping(c *Client, msgType string, raw []byte) {
 }
 
 func messageToMap(m *models.Message) map[string]interface{} {
-	return map[string]interface{}{
+	out := map[string]interface{}{
 		"id":         m.ID,
 		"channelId":  m.ChannelID,
-		"senderId":   m.SenderID,
 		"ciphertext": base64.StdEncoding.EncodeToString(m.Ciphertext),
 		"timestamp":  m.Timestamp.Format(time.RFC3339Nano),
 	}
+	if m.SenderID != nil {
+		out["senderId"] = *m.SenderID
+	}
+	if m.FederatedSenderID != nil {
+		out["federatedSenderId"] = *m.FederatedSenderID
+	}
+	return out
+}
+
+// resolveSenderIdentity returns the local senderID and federatedSenderID pointers
+// for the given client. Exactly one will be non-nil.
+func resolveSenderIdentity(c *Client) (senderID *string, federatedSenderID *string) {
+	if c.federatedIdentityID != "" {
+		return nil, &c.federatedIdentityID
+	}
+	return &c.userID, nil
+}
+
+// messageNewBroadcast builds the "message.new" WS broadcast payload from a stored message.
+func messageNewBroadcast(msg *models.Message) map[string]interface{} {
+	out := map[string]interface{}{
+		"type":       "message.new",
+		"id":         msg.ID,
+		"channel_id": msg.ChannelID,
+		"ciphertext": base64.StdEncoding.EncodeToString(msg.Ciphertext),
+		"timestamp":  msg.Timestamp.Format(time.RFC3339Nano),
+	}
+	if msg.SenderID != nil {
+		out["sender_id"] = *msg.SenderID
+	}
+	if msg.FederatedSenderID != nil {
+		out["federated_sender_id"] = *msg.FederatedSenderID
+	}
+	return out
 }
 
 func sendError(c *Client, code, message string) {

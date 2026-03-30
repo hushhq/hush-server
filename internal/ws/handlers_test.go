@@ -19,10 +19,13 @@ var _ db.Store = (*messageStoreMock)(nil)
 
 // messageStoreMock implements db.Store for message handler tests. Only message methods are used.
 type messageStoreMock struct {
-	insertMessageFn   func(ctx context.Context, channelID, senderID string, recipientID *string, ciphertext []byte) (*models.Message, error)
+	insertMessageFn   func(ctx context.Context, channelID string, senderID *string, federatedSenderID *string, recipientID *string, ciphertext []byte) (*models.Message, error)
 	getMessagesFn     func(ctx context.Context, channelID, recipientID string, before time.Time, limit int) ([]models.Message, error)
 	isChannelMemberFn func(ctx context.Context, channelID, userID string) (bool, error)
 }
+
+// Ping stub.
+func (m *messageStoreMock) Ping(context.Context) error { return nil }
 
 // User/session stubs (unused in ws handler tests).
 func (m *messageStoreMock) CreateUserWithPublicKey(context.Context, string, string, []byte) (*models.User, error) {
@@ -96,9 +99,9 @@ func (m *messageStoreMock) ListDeviceIDsForUser(context.Context, string) ([]stri
 func (m *messageStoreMock) UpsertDevice(context.Context, string, string, string) error { return nil }
 
 // Message methods (actually used).
-func (m *messageStoreMock) InsertMessage(ctx context.Context, channelID, senderID string, recipientID *string, ciphertext []byte) (*models.Message, error) {
+func (m *messageStoreMock) InsertMessage(ctx context.Context, channelID string, senderID *string, federatedSenderID *string, recipientID *string, ciphertext []byte) (*models.Message, error) {
 	if m.insertMessageFn != nil {
-		return m.insertMessageFn(ctx, channelID, senderID, recipientID, ciphertext)
+		return m.insertMessageFn(ctx, channelID, senderID, federatedSenderID, recipientID, ciphertext)
 	}
 	return nil, nil
 }
@@ -340,6 +343,29 @@ func (m *messageStoreMock) SearchUsersPublic(context.Context, string, int) ([]mo
 	return nil, nil
 }
 
+// Federated identity stubs.
+func (m *messageStoreMock) GetOrCreateFederatedIdentity(context.Context, []byte, string, string, string) (*models.FederatedIdentity, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) GetFederatedIdentityByPublicKey(context.Context, []byte) (*models.FederatedIdentity, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) GetFederatedIdentityByID(context.Context, string) (*models.FederatedIdentity, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) UpdateFederatedIdentityProfile(context.Context, string, string, string) error {
+	return nil
+}
+func (m *messageStoreMock) AddFederatedServerMember(context.Context, string, string, int) error {
+	return nil
+}
+func (m *messageStoreMock) RemoveFederatedServerMember(context.Context, string, string) error {
+	return nil
+}
+func (m *messageStoreMock) GetServerMemberLevelByFederatedID(context.Context, string, string) (int, error) {
+	return 0, nil
+}
+
 // drainUntilType reads from c.send until a message with the given type is received or timeout.
 func drainUntilType(t *testing.T, c *Client, wantType string, timeout time.Duration) []byte {
 	t.Helper()
@@ -371,7 +397,7 @@ func TestMessageHandler_HandleMessageSend_ForbiddenWhenNotMember(t *testing.T) {
 		},
 	}
 	h := NewMessageHandler(store, hub)
-	c := NewClient(nil, hub, "user1", h)
+	c := NewClient(nil, hub, "user1", "", h)
 	hub.Register(c)
 	defer func() { hub.Unregister(c); close(c.send) }()
 
@@ -394,7 +420,7 @@ func TestMessageHandler_HandleMessageSend_StoresAndBroadcasts(t *testing.T) {
 	var inserted *models.Message
 	store := &messageStoreMock{
 		isChannelMemberFn: func(ctx context.Context, channelID, userID string) (bool, error) { return true, nil },
-		insertMessageFn: func(ctx context.Context, channelID, senderID string, recipientID *string, ciphertext []byte) (*models.Message, error) {
+		insertMessageFn: func(ctx context.Context, channelID string, senderID *string, federatedSenderID *string, recipientID *string, ciphertext []byte) (*models.Message, error) {
 			inserted = &models.Message{
 				ID:         "msg-1",
 				ChannelID:  channelID,
@@ -406,9 +432,9 @@ func TestMessageHandler_HandleMessageSend_StoresAndBroadcasts(t *testing.T) {
 		},
 	}
 	h := NewMessageHandler(store, hub)
-	sender := NewClient(nil, hub, "user1", h)
+	sender := NewClient(nil, hub, "user1", "", h)
 	hub.Register(sender)
-	recv := NewClient(nil, hub, "user2", nil)
+	recv := NewClient(nil, hub, "user2", "", nil)
 	hub.Register(recv)
 	hub.Subscribe(sender, "ch1")
 	hub.Subscribe(recv, "ch1")
@@ -424,7 +450,8 @@ func TestMessageHandler_HandleMessageSend_StoresAndBroadcasts(t *testing.T) {
 
 	require.NotNil(t, inserted)
 	assert.Equal(t, "ch1", inserted.ChannelID)
-	assert.Equal(t, "user1", inserted.SenderID)
+	require.NotNil(t, inserted.SenderID)
+	assert.Equal(t, "user1", *inserted.SenderID)
 
 	msg := drainUntilType(t, recv, "message.new", time.Second)
 	{
@@ -448,7 +475,7 @@ func TestMessageHandler_HandleMessageHistory_ForbiddenWhenNotMember(t *testing.T
 		isChannelMemberFn: func(ctx context.Context, channelID, userID string) (bool, error) { return false, nil },
 	}
 	h := NewMessageHandler(store, hub)
-	c := NewClient(nil, hub, "user1", h)
+	c := NewClient(nil, hub, "user1", "", h)
 	hub.Register(c)
 	defer func() { hub.Unregister(c); close(c.send) }()
 
@@ -464,8 +491,9 @@ func TestMessageHandler_HandleMessageHistory_ForbiddenWhenNotMember(t *testing.T
 
 func TestMessageHandler_HandleMessageHistory_ReturnsMessages(t *testing.T) {
 	hub := NewHub()
+	u1 := "u1"
 	msgs := []models.Message{
-		{ID: "m1", ChannelID: "ch1", SenderID: "u1", Ciphertext: []byte("a"), Timestamp: time.Now()},
+		{ID: "m1", ChannelID: "ch1", SenderID: &u1, Ciphertext: []byte("a"), Timestamp: time.Now()},
 	}
 	store := &messageStoreMock{
 		isChannelMemberFn: func(ctx context.Context, channelID, userID string) (bool, error) { return true, nil },
@@ -474,7 +502,7 @@ func TestMessageHandler_HandleMessageHistory_ReturnsMessages(t *testing.T) {
 		},
 	}
 	h := NewMessageHandler(store, hub)
-	c := NewClient(nil, hub, "user1", h)
+	c := NewClient(nil, hub, "user1", "", h)
 	hub.Register(c)
 	defer func() { hub.Unregister(c); close(c.send) }()
 
@@ -500,16 +528,16 @@ func TestMessageHandler_HandleMessageSend_FanoutStoresAndBroadcastsPerRecipient(
 	var lastRecipientID *string
 	store := &messageStoreMock{
 		isChannelMemberFn: func(context.Context, string, string) (bool, error) { return true, nil },
-		insertMessageFn: func(ctx context.Context, channelID, senderID string, recipientID *string, ciphertext []byte) (*models.Message, error) {
+		insertMessageFn: func(ctx context.Context, channelID string, senderID *string, federatedSenderID *string, recipientID *string, ciphertext []byte) (*models.Message, error) {
 			insertCount++
 			lastRecipientID = recipientID
 			return &models.Message{ID: "msg-" + *recipientID, ChannelID: channelID, SenderID: senderID, Ciphertext: ciphertext, Timestamp: time.Now()}, nil
 		},
 	}
 	h := NewMessageHandler(store, hub)
-	sender := NewClient(nil, hub, "user1", h)
+	sender := NewClient(nil, hub, "user1", "", h)
 	hub.Register(sender)
-	recv := NewClient(nil, hub, "user2", nil)
+	recv := NewClient(nil, hub, "user2", "", nil)
 	hub.Register(recv)
 	hub.Subscribe(sender, "ch1")
 	hub.Subscribe(recv, "ch1")
@@ -569,7 +597,7 @@ func TestMessageHandler_HandleMLSCommit_ForbiddenWhenNotMember(t *testing.T) {
 		isChannelMemberFn: func(context.Context, string, string) (bool, error) { return false, nil },
 	}
 	h := NewMessageHandler(store, hub)
-	c := NewClient(nil, hub, "user1", h)
+	c := NewClient(nil, hub, "user1", "", h)
 	hub.Register(c)
 	defer func() { hub.Unregister(c); close(c.send) }()
 
@@ -600,9 +628,9 @@ func TestMessageHandler_HandleMLSCommit_BroadcastsToChannel(t *testing.T) {
 	_ = appendCalled
 
 	h := NewMessageHandler(store, hub)
-	sender := NewClient(nil, hub, "user1", h)
+	sender := NewClient(nil, hub, "user1", "", h)
 	hub.Register(sender)
-	recv := NewClient(nil, hub, "user2", nil)
+	recv := NewClient(nil, hub, "user2", "", nil)
 	hub.Register(recv)
 	hub.Subscribe(sender, "ch1")
 	hub.Subscribe(recv, "ch1")
@@ -642,9 +670,9 @@ func TestMessageHandler_HandleMLSLeaveProposal_BroadcastsAddRequest(t *testing.T
 		isChannelMemberFn: func(context.Context, string, string) (bool, error) { return true, nil },
 	}
 	h := NewMessageHandler(store, hub)
-	sender := NewClient(nil, hub, "user1", h)
+	sender := NewClient(nil, hub, "user1", "", h)
 	hub.Register(sender)
-	recv := NewClient(nil, hub, "user2", nil)
+	recv := NewClient(nil, hub, "user2", "", nil)
 	hub.Register(recv)
 	hub.Subscribe(sender, "ch1")
 	hub.Subscribe(recv, "ch1")
@@ -682,7 +710,7 @@ func TestMessageSizeLimit_RejectsOver8KiB(t *testing.T) {
 		isChannelMemberFn: func(context.Context, string, string) (bool, error) { return true, nil },
 	}
 	h := NewMessageHandler(store, hub)
-	c := NewClient(nil, hub, "user1", h)
+	c := NewClient(nil, hub, "user1", "", h)
 	hub.Register(c)
 	defer func() { hub.Unregister(c); close(c.send) }()
 
@@ -711,7 +739,7 @@ func TestMessageSizeLimit_AcceptsAtLimit(t *testing.T) {
 	hub := NewHub()
 	store := &messageStoreMock{
 		isChannelMemberFn: func(context.Context, string, string) (bool, error) { return true, nil },
-		insertMessageFn: func(ctx context.Context, channelID, senderID string, recipientID *string, ciphertext []byte) (*models.Message, error) {
+		insertMessageFn: func(ctx context.Context, channelID string, senderID *string, federatedSenderID *string, recipientID *string, ciphertext []byte) (*models.Message, error) {
 			return &models.Message{
 				ID:         "msg-ok",
 				ChannelID:  channelID,
@@ -722,9 +750,9 @@ func TestMessageSizeLimit_AcceptsAtLimit(t *testing.T) {
 		},
 	}
 	h := NewMessageHandler(store, hub)
-	sender := NewClient(nil, hub, "user1", h)
+	sender := NewClient(nil, hub, "user1", "", h)
 	hub.Register(sender)
-	recv := NewClient(nil, hub, "user2", nil)
+	recv := NewClient(nil, hub, "user2", "", nil)
 	hub.Register(recv)
 	hub.Subscribe(sender, "ch1")
 	hub.Subscribe(recv, "ch1")
@@ -760,9 +788,9 @@ func TestMessageHandler_HandleTyping_BroadcastsToChannel(t *testing.T) {
 		isChannelMemberFn: func(ctx context.Context, channelID, userID string) (bool, error) { return true, nil },
 	}
 	h := NewMessageHandler(store, hub)
-	c := NewClient(nil, hub, "user1", h)
+	c := NewClient(nil, hub, "user1", "", h)
 	hub.Register(c)
-	other := NewClient(nil, hub, "user2", nil)
+	other := NewClient(nil, hub, "user2", "", nil)
 	hub.Register(other)
 	hub.Subscribe(c, "ch1")
 	hub.Subscribe(other, "ch1")

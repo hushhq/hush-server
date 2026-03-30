@@ -82,7 +82,7 @@ type Store interface {
 	UpsertDevice(ctx context.Context, userID, deviceID, label string) error
 
 	// Message methods
-	InsertMessage(ctx context.Context, channelID, senderID string, recipientID *string, ciphertext []byte) (*models.Message, error)
+	InsertMessage(ctx context.Context, channelID string, senderID *string, federatedSenderID *string, recipientID *string, ciphertext []byte) (*models.Message, error)
 	GetMessages(ctx context.Context, channelID, recipientID string, before time.Time, limit int) ([]models.Message, error)
 	IsChannelMember(ctx context.Context, channelID, userID string) (bool, error)
 

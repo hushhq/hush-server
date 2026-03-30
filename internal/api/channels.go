@@ -41,11 +41,12 @@ type channelsHandler struct {
 
 // messageResponse is the JSON shape for one message (ciphertext as base64 string).
 type messageResponse struct {
-	ID         string `json:"id"`
-	ChannelID  string `json:"channelId"`
-	SenderID   string `json:"senderId"`
-	Ciphertext string `json:"ciphertext"` // base64
-	Timestamp  string `json:"timestamp"`  // RFC3339Nano
+	ID                string  `json:"id"`
+	ChannelID         string  `json:"channelId"`
+	SenderID          *string `json:"senderId,omitempty"`
+	FederatedSenderID *string `json:"federatedSenderId,omitempty"`
+	Ciphertext        string  `json:"ciphertext"` // base64
+	Timestamp         string  `json:"timestamp"`  // RFC3339Nano
 }
 
 func (h *channelsHandler) createChannel(w http.ResponseWriter, r *http.Request) {
@@ -186,11 +187,12 @@ func (h *channelsHandler) getMessages(w http.ResponseWriter, r *http.Request) {
 	out := make([]messageResponse, 0, len(messages))
 	for _, m := range messages {
 		out = append(out, messageResponse{
-			ID:         m.ID,
-			ChannelID:  m.ChannelID,
-			SenderID:   m.SenderID,
-			Ciphertext: base64.StdEncoding.EncodeToString(m.Ciphertext),
-			Timestamp:  m.Timestamp.Format(time.RFC3339Nano),
+			ID:                m.ID,
+			ChannelID:         m.ChannelID,
+			SenderID:          m.SenderID,
+			FederatedSenderID: m.FederatedSenderID,
+			Ciphertext:        base64.StdEncoding.EncodeToString(m.Ciphertext),
+			Timestamp:         m.Timestamp.Format(time.RFC3339Nano),
 		})
 	}
 	writeJSON(w, http.StatusOK, out)

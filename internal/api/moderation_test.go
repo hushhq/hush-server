@@ -474,7 +474,7 @@ func TestDeleteMessage_OwnMessage(t *testing.T) {
 		getMessageByIDFn: func(_ context.Context, messageID string) (*models.Message, error) {
 			return &models.Message{
 				ID:        messageID,
-				SenderID:  actorID, // actor is sender
+				SenderID:  &actorID, // actor is sender
 				ChannelID: "ch-1",
 			}, nil
 		},
@@ -500,7 +500,7 @@ func TestDeleteMessage_ModDeletesOthers(t *testing.T) {
 		getMessageByIDFn: func(_ context.Context, messageID string) (*models.Message, error) {
 			return &models.Message{
 				ID:        messageID,
-				SenderID:  ownerID, // different user sent the message
+				SenderID:  &ownerID, // different user sent the message
 				ChannelID: "ch-1",
 			}, nil
 		},
@@ -525,7 +525,7 @@ func TestDeleteMessage_MemberCannotDeleteOthers(t *testing.T) {
 		getMessageByIDFn: func(_ context.Context, messageID string) (*models.Message, error) {
 			return &models.Message{
 				ID:        messageID,
-				SenderID:  ownerID, // different user
+				SenderID:  &ownerID, // different user
 				ChannelID: "ch-1",
 			}, nil
 		},

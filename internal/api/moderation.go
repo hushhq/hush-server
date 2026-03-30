@@ -383,7 +383,7 @@ func (h *moderationHandler) deleteMessage(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "message not found"})
 		return
 	}
-	isSender := msg.SenderID == actorID
+	isSender := msg.SenderID != nil && *msg.SenderID == actorID
 	if !isSender {
 		actorLevel := guildLevelFromContext(r.Context())
 		if actorLevel < models.PermissionLevelMod {
@@ -396,13 +396,12 @@ func (h *moderationHandler) deleteMessage(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to delete message"})
 		return
 	}
-	senderID := msg.SenderID
 	metadata := map[string]interface{}{
 		"message_id": messageID,
-		"sender_id":  senderID,
+		"sender_id":  msg.SenderID,
 		"channel_id": msg.ChannelID,
 	}
-	if err := h.store.InsertAuditLog(r.Context(), serverID, actorID, &senderID, "message_delete", "message deleted", metadata); err != nil {
+	if err := h.store.InsertAuditLog(r.Context(), serverID, actorID, msg.SenderID, "message_delete", "message deleted", metadata); err != nil {
 		slog.Error("deleteMessage: insert audit log", "err", err)
 	}
 	if h.hub != nil {
