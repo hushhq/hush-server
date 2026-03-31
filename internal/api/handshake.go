@@ -26,7 +26,7 @@ type InstanceCache struct {
 // Matches the instance_config column default (2 hours).
 const voiceKeyRotationHoursDefault = 2
 
-// NewInstanceCache creates an empty cache. Zero values are safe: name="" —
+// NewInstanceCache creates an empty cache. Zero values are safe: name="" -
 // representing a fresh instance before first-user setup.
 // voiceKeyRotationHours defaults to voiceKeyRotationHoursDefault.
 // guildDiscovery defaults to "allowed".
@@ -73,7 +73,7 @@ func (c *InstanceCache) Set(name string, iconURL *string, regMode string, guildD
 
 // SetTransparencyInfo stores the transparency log URL and log signer public key
 // in the cache. Called once at startup after the TransparencyService is initialized.
-// Neither field is updated by the admin config endpoint — they change only on restart.
+// Neither field is updated by the admin config endpoint - they change only on restart.
 func (c *InstanceCache) SetTransparencyInfo(transparencyURL *string, logPublicKey *string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -159,7 +159,7 @@ type handshakeResponse struct {
 }
 
 // HandshakeHandler returns an http.HandlerFunc that serves GET /api/handshake.
-// The endpoint is public (no authentication required) and stateless — it reads
+// The endpoint is public (no authentication required) and stateless - it reads
 // only from the in-memory cache and version constants, never from the database.
 func HandshakeHandler(cache *InstanceCache, voiceEnabled bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

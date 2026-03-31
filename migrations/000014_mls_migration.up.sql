@@ -1,4 +1,4 @@
--- Migration 000014: MLS migration — drop Signal tables, create MLS credential and key package tables.
+-- Migration 000014: MLS migration - drop Signal tables, create MLS credential and key package tables.
 
 -- Drop Signal tables (CASCADE removes all FKs and indices).
 DROP TABLE IF EXISTS signal_spk_history CASCADE;

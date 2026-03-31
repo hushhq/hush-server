@@ -61,7 +61,7 @@ func simulateParticipantLeave(
 	}
 
 	if len(participants) == 0 {
-		// Last participant left — destroy voice MLS group.
+		// Last participant left - destroy voice MLS group.
 		func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -105,7 +105,7 @@ func TestVoiceGroupCleanup_LastParticipantLeave(t *testing.T) {
 
 	// First participant joins.
 	state.join(roomName, "user-alice", "Alice")
-	// Alice leaves — she was the last participant.
+	// Alice leaves - she was the last participant.
 	simulateParticipantLeave(state, store, broadcaster, roomName, "user-alice", "server-1")
 
 	require.True(t, deleteCalled, "DeleteMLSGroupInfo must be called when last participant leaves")
@@ -135,7 +135,7 @@ func TestVoiceGroupCleanup_NotLastParticipant(t *testing.T) {
 	state.join(roomName, "user-alice", "Alice")
 	state.join(roomName, "user-bob", "Bob")
 
-	// Alice leaves — Bob remains. Group must NOT be destroyed.
+	// Alice leaves - Bob remains. Group must NOT be destroyed.
 	remaining := simulateParticipantLeave(state, store, broadcaster, roomName, "user-alice", "server-1")
 
 	assert.False(t, deleteCalled, "DeleteMLSGroupInfo must NOT be called when participants remain")

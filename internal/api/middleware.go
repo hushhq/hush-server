@@ -69,7 +69,7 @@ func RequireAuth(jwtSecret string, store db.Store) func(http.Handler) http.Handl
 				return
 			}
 
-			// Federated sessions are stateless — no DB session record exists.
+			// Federated sessions are stateless - no DB session record exists.
 			if isFederated {
 				r = r.WithContext(withUserID(r.Context(), federatedIdentityID))
 				r = r.WithContext(withSessionID(r.Context(), sessionID))
@@ -80,7 +80,7 @@ func RequireAuth(jwtSecret string, store db.Store) func(http.Handler) http.Handl
 				return
 			}
 
-			// Guest sessions are validated by JWT signature only — no DB record exists.
+			// Guest sessions are validated by JWT signature only - no DB record exists.
 			if !isGuest {
 				tokenHash := auth.TokenHash(token)
 				sess, err := store.GetSessionByTokenHash(r.Context(), tokenHash)

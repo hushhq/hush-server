@@ -147,27 +147,27 @@ type Store interface {
 	// GetServerMemberLevelByFederatedID returns the permission_level for a federated guild member.
 	GetServerMemberLevelByFederatedID(ctx context.Context, serverID, federatedIdentityID string) (int, error)
 
-	// Moderation — bans
+	// Moderation - bans
 	InsertBan(ctx context.Context, serverID, userID, actorID, reason string, expiresAt *time.Time) (*models.Ban, error)
 	GetActiveBan(ctx context.Context, serverID, userID string) (*models.Ban, error)
 	LiftBan(ctx context.Context, banID, liftedByID string) error
 	ListActiveBans(ctx context.Context, serverID string) ([]models.Ban, error)
 
-	// Moderation — mutes
+	// Moderation - mutes
 	InsertMute(ctx context.Context, serverID, userID, actorID, reason string, expiresAt *time.Time) (*models.Mute, error)
 	GetActiveMute(ctx context.Context, serverID, userID string) (*models.Mute, error)
 	LiftMute(ctx context.Context, muteID, liftedByID string) error
 	ListActiveMutes(ctx context.Context, serverID string) ([]models.Mute, error)
 
-	// Moderation — audit log
+	// Moderation - audit log
 	InsertAuditLog(ctx context.Context, serverID, actorID string, targetID *string, action, reason string, metadata map[string]interface{}) error
 	ListAuditLog(ctx context.Context, serverID string, limit, offset int, filter *AuditLogFilter) ([]models.AuditLogEntry, error)
 
-	// Moderation — messages
+	// Moderation - messages
 	GetMessageByID(ctx context.Context, messageID string) (*models.Message, error)
 	DeleteMessage(ctx context.Context, messageID string) error
 
-	// Moderation — sessions
+	// Moderation - sessions
 	DeleteSessionsByUserID(ctx context.Context, userID string) error
 
 	// Instance bans
@@ -189,7 +189,7 @@ type Store interface {
 	GetSystemMessageRetentionDays(ctx context.Context) (*int, error)
 
 	// MLS group methods
-	// groupType is "text" or "voice" — each channel can have one group of each type.
+	// groupType is "text" or "voice" - each channel can have one group of each type.
 	UpsertMLSGroupInfo(ctx context.Context, channelID string, groupType string, groupInfoBytes []byte, epoch int64) error
 	GetMLSGroupInfo(ctx context.Context, channelID string, groupType string) (groupInfoBytes []byte, epoch int64, err error)
 	DeleteMLSGroupInfo(ctx context.Context, channelID string, groupType string) error
@@ -229,7 +229,7 @@ type Store interface {
 	// search query, and sort order. Returns results and total count for pagination.
 	DiscoverGuilds(ctx context.Context, category, search, sort string, page, pageSize int) ([]models.DiscoverGuild, int, error)
 	// SearchUsersPublic returns users matching the query on username or displayName.
-	// Only id, username, and displayName are returned — no ban/role info.
+	// Only id, username, and displayName are returned - no ban/role info.
 	SearchUsersPublic(ctx context.Context, query string, limit int) ([]models.UserSearchPublicResult, error)
 
 	// Transparency log methods (migration 000019).

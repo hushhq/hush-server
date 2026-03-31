@@ -203,7 +203,7 @@ func (p *Pool) DiscoverGuilds(ctx context.Context, category, search, sort string
 }
 
 // SearchUsersPublic returns users matching the query string on username or displayName.
-// Only id, username, and displayName are returned — no ban status, roles, or credentials.
+// Only id, username, and displayName are returned - no ban status, roles, or credentials.
 func (p *Pool) SearchUsersPublic(ctx context.Context, query string, limit int) ([]models.UserSearchPublicResult, error) {
 	pattern := "%" + query + "%"
 	rows, err := p.Query(ctx, `

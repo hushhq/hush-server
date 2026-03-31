@@ -118,10 +118,10 @@ func TestCertifyDevice_Valid_Returns201(t *testing.T) {
 	store := &mockStore{}
 	userID := uuid.New().String()
 
-	// Existing (signing) device keypair — registered and stored in device_keys.
+	// Existing (signing) device keypair - registered and stored in device_keys.
 	signingPub, signingPriv, _ := generateDeviceKeyPair(t)
 
-	// New device keypair — to be certified.
+	// New device keypair - to be certified.
 	newDevicePub, _, newDevicePubBase64 := generateDeviceKeyPair(t)
 
 	// Sign the new device's public key with the existing device's private key.
@@ -176,7 +176,7 @@ func TestCertifyDevice_InvalidCert_Returns401(t *testing.T) {
 	signingPub, _, _ := generateDeviceKeyPair(t)
 	_, _, newDevicePubBase64 := generateDeviceKeyPair(t)
 
-	// Certificate signed by a DIFFERENT (unknown) key — should fail verification.
+	// Certificate signed by a DIFFERENT (unknown) key - should fail verification.
 	_, unknownPriv, _ := generateDeviceKeyPair(t)
 	newDevicePubBytes, err := base64.StdEncoding.DecodeString(newDevicePubBase64)
 	require.NoError(t, err)
@@ -211,7 +211,7 @@ func TestCertifyDevice_MissingSigningDevice_Returns400(t *testing.T) {
 	newDevicePubBytes, _ := base64.StdEncoding.DecodeString(newDevicePubBase64)
 	cert := ed25519.Sign(fakeCertPriv, newDevicePubBytes)
 
-	// No signing device in the store — ListDeviceKeys returns empty list.
+	// No signing device in the store - ListDeviceKeys returns empty list.
 	store.listDeviceKeysFn = func(_ context.Context, uid string) ([]models.DeviceKey, error) {
 		return []models.DeviceKey{}, nil
 	}

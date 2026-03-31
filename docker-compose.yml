@@ -1,4 +1,4 @@
-# docker-compose.yml — SELF-HOSTED deployment (includes LiveKit + Redis)
+# docker-compose.yml - SELF-HOSTED deployment (includes LiveKit + Redis)
 # For gethush.live hosted: use docker-compose.prod.yml override
 # Usage: docker-compose up -d
 
@@ -14,7 +14,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init-hush-db.sql:/docker-entrypoint-initdb.d/02-hush.sql:ro
-    # port 5432 not exposed to host — host postgres already uses it
+    # port 5432 not exposed to host - host postgres already uses it
     # use `docker exec -it hush-postgres psql` for direct access
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hush}"]

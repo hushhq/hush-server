@@ -113,7 +113,7 @@ func TestTransparencyVerify_NoPubkeyEntries(t *testing.T) {
 	token := makeAuth(mockSt, "user-1")
 	router := TransparencyRoutes(svc, mockSt, testJWTSecret)
 
-	// 32 bytes of zero — valid Ed25519 length but no entries in the log.
+	// 32 bytes of zero - valid Ed25519 length but no entries in the log.
 	unknownKey := hex.EncodeToString(make([]byte, 32))
 	req := httptest.NewRequest(http.MethodGet, "/verify?pubkey="+unknownKey, nil)
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -186,7 +186,7 @@ func TestTransparencyVerify_InvalidPubkeyLength(t *testing.T) {
 	token := makeAuth(mockSt, "user-1")
 	router := TransparencyRoutes(svc, mockSt, testJWTSecret)
 
-	// 16 bytes — not Ed25519 length.
+	// 16 bytes - not Ed25519 length.
 	shortKey := hex.EncodeToString(make([]byte, 16))
 	req := httptest.NewRequest(http.MethodGet, "/verify?pubkey="+shortKey, nil)
 	req.Header.Set("Authorization", "Bearer "+token)

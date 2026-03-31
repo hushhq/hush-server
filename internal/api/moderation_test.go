@@ -203,7 +203,7 @@ func TestBanMember_PermanentBan(t *testing.T) {
 	}
 	router := buildModerationRouter(store, actorID, "admin")
 
-	// No ExpiresIn — permanent ban.
+	// No ExpiresIn - permanent ban.
 	rr := postServerJSON(router, "/ban", models.BanRequest{UserID: targetID, Reason: "permanent ban reason"}, "")
 	require.Equal(t, http.StatusNoContent, rr.Code)
 	assert.Nil(t, capturedExpiresAt, "permanent ban must have nil expiresAt")
@@ -681,7 +681,7 @@ func TestAuditLog_NoFilter(t *testing.T) {
 	assert.Nil(t, capturedFilter, "filter must be nil when no filter params are provided")
 }
 
-// ---------- Claim Invite — Banned User ----------
+// ---------- Claim Invite - Banned User ----------
 
 func TestClaimInvite_BannedUser(t *testing.T) {
 	userID := uuid.New().String()

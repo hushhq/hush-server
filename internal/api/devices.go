@@ -56,16 +56,16 @@ type storedLinkResult struct {
 // Route map:
 //
 //	Public:
-//	  POST /link-request      — new device creates a 5-minute link request
-//	  POST /link-result       — new device consumes the encrypted relay payload
+//	  POST /link-request      - new device creates a 5-minute link request
+//	  POST /link-result       - new device consumes the encrypted relay payload
 //
 //	Authenticated:
-//	  GET    /devices            — list authenticated user's devices
-//	  POST   /devices            — certify a new device directly
-//	  DELETE /devices/{deviceId} — revoke a single device
-//	  DELETE /devices?all=true   — revoke all devices
-//	  POST   /link-resolve       — existing device claims a QR/code request
-//	  POST   /link-verify        — existing device certifies + uploads relay payload
+//	  GET    /devices            - list authenticated user's devices
+//	  POST   /devices            - certify a new device directly
+//	  DELETE /devices/{deviceId} - revoke a single device
+//	  DELETE /devices?all=true   - revoke all devices
+//	  POST   /link-resolve       - existing device claims a QR/code request
+//	  POST   /link-verify        - existing device certifies + uploads relay payload
 //
 // transparencySvc may be nil when the transparency log is not configured for
 // this instance. Device certify and revoke operations append synchronously
@@ -148,9 +148,9 @@ func (h *deviceHandler) listDevices(w http.ResponseWriter, r *http.Request) {
 //	{
 //	  "devicePublicKey": "<base64 32-byte Ed25519 public key>",
 //	  "certificate":     "<base64 64-byte Ed25519 signature>",
-//	  "deviceId":        "<string — caller-assigned device ID>",
-//	  "label":           "<string — optional human-readable name>",
-//	  "signingDeviceId": "<string — device ID of the authorising device>"
+//	  "deviceId":        "<string - caller-assigned device ID>",
+//	  "label":           "<string - optional human-readable name>",
+//	  "signingDeviceId": "<string - device ID of the authorising device>"
 //	}
 //
 // The certificate must be a valid Ed25519 signature of devicePublicKey made by
@@ -682,7 +682,7 @@ func linkResultNonce(requestID, secret string) string {
 }
 
 // generateLinkCode returns an 8-character alphanumeric code from [A-Z0-9].
-// Uses math/rand which is fine here — the code is short-lived (5 min) and
+// Uses math/rand which is fine here - the code is short-lived (5 min) and
 // the security property is the certificate, not the code confidentiality.
 func generateLinkCode() string {
 	b := make([]byte, linkCodeLen)

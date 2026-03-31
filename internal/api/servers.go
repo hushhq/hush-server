@@ -25,7 +25,7 @@ func fallbackTemplate() []models.TemplateChannel {
 // ServerRoutes mounts guild CRUD, member management, and nested sub-routes
 // (channels, guild invites, moderation). Auth is applied at the top level;
 // RequireGuildMember is applied to all member-only /{serverId} sub-routes.
-// The /join endpoint is intentionally outside RequireGuildMember — the user
+// The /join endpoint is intentionally outside RequireGuildMember - the user
 // is not yet a member when they hit that route.
 func ServerRoutes(store db.Store, hub GlobalBroadcaster, jwtSecret string) chi.Router {
 	h := &serversHandler{store: store, hub: hub}
@@ -34,7 +34,7 @@ func ServerRoutes(store db.Store, hub GlobalBroadcaster, jwtSecret string) chi.R
 	r.Post("/", h.createServer)
 	r.Get("/", h.listMyServers)
 	r.Route("/{serverId}", func(r chi.Router) {
-		// Join is outside RequireGuildMember — caller is not a member yet.
+		// Join is outside RequireGuildMember - caller is not a member yet.
 		r.Post("/join", h.joinServer)
 		// All other /{serverId} routes require guild membership.
 		r.Group(func(r chi.Router) {
@@ -95,7 +95,7 @@ func (h *serversHandler) createServer(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden,
 			map[string]string{"error": "This instance requires a subscription to create servers."})
 		return
-		// "open": fall through — any authenticated user can create.
+		// "open": fall through - any authenticated user can create.
 	}
 	var req models.CreateServerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -118,7 +118,7 @@ func (h *serversHandler) createServer(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to add creator as guild owner"})
 		return
 	}
-	// Server creation itself succeeded — respond immediately. Template channels are fire-and-forget.
+	// Server creation itself succeeded - respond immediately. Template channels are fire-and-forget.
 	writeJSON(w, http.StatusCreated, server)
 
 	// Resolve the channel template: explicit templateId > default template > hardcoded default.
@@ -183,7 +183,7 @@ func (h *serversHandler) createServer(w http.ResponseWriter, r *http.Request) {
 		// are visible before MLS is bootstrapped. This is safe because default
 		// template names are server-defined constants, not user content.
 		// NOTE: when user-created templates are implemented, user-chosen channel
-		// names MUST be opaque — only hardcoded default templates get plaintext seeding.
+		// names MUST be opaque - only hardcoded default templates get plaintext seeding.
 		var meta []byte
 		if tc.Name != "" {
 			meta = []byte(`{"n":"` + tc.Name + `","d":""}`)
@@ -228,7 +228,7 @@ func (h *serversHandler) createServer(w http.ResponseWriter, r *http.Request) {
 		if existing != nil {
 			continue
 		}
-		// Same plaintext seeding as pass 1 — see note above re: user-created templates.
+		// Same plaintext seeding as pass 1 - see note above re: user-created templates.
 		var meta []byte
 		if tc.Name != "" {
 			meta = []byte(`{"n":"` + tc.Name + `","d":""}`)
@@ -290,7 +290,7 @@ func (h *serversHandler) updateServer(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// listMyServers handles GET /api/servers — returns guilds the caller belongs to.
+// listMyServers handles GET /api/servers - returns guilds the caller belongs to.
 func (h *serversHandler) listMyServers(w http.ResponseWriter, r *http.Request) {
 	userID := userIDFromContext(r.Context())
 	servers, err := h.store.ListServersForUser(r.Context(), userID)
@@ -495,11 +495,11 @@ func (h *serversHandler) joinServer(w http.ResponseWriter, r *http.Request) {
 	}
 	switch server.AccessPolicy {
 	case "open":
-		// Allowed — fall through.
+		// Allowed - fall through.
 	case "request":
 		// MVP: return 202 Accepted with a descriptive message. Full request flow is future work.
 		writeJSON(w, http.StatusAccepted, map[string]string{
-			"message": "join request submitted — waiting for guild admin approval",
+			"message": "join request submitted - waiting for guild admin approval",
 		})
 		return
 	default:
@@ -510,7 +510,7 @@ func (h *serversHandler) joinServer(w http.ResponseWriter, r *http.Request) {
 	// Check whether the user is already a member.
 	_, err = h.store.GetServerMemberLevel(r.Context(), serverID, userID)
 	if err == nil {
-		// No error means the row was found — user is already a member.
+		// No error means the row was found - user is already a member.
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "already a member of this guild"})
 		return
 	}
@@ -553,7 +553,7 @@ func (h *serversHandler) joinServer(w http.ResponseWriter, r *http.Request) {
 }
 
 // listGuildBillingStats handles GET /api/admin/guilds.
-// Instance owner only — returns exactly 5 fields per guild (privacy boundary).
+// Instance owner only - returns exactly 5 fields per guild (privacy boundary).
 func (h *serversHandler) listGuildBillingStats(w http.ResponseWriter, r *http.Request) {
 	userID := userIDFromContext(r.Context())
 	instanceRole, err := h.store.GetUserRole(r.Context(), userID)

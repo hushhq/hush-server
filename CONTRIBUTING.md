@@ -32,7 +32,7 @@ docker-compose up -d postgres redis livekit
 
 ```bash
 cp .env.example .env
-# Edit .env — at minimum fill in DATABASE_URL and JWT_SECRET
+# Edit .env - at minimum fill in DATABASE_URL and JWT_SECRET
 ```
 
 **4. Run database migrations:**
@@ -84,7 +84,7 @@ This project follows standard Go conventions plus the guidelines in the root `CL
 - **Function length:** Keep functions under 30 lines where possible. Extract helpers if a function grows.
 - **Single responsibility:** Each handler, DB function, and helper does one thing.
 - **Error handling:** Never swallow errors silently. Log or propagate.
-- **Naming:** Exported types and functions use PascalCase. Unexported use camelCase. Variables reveal intent — no cryptic abbreviations.
+- **Naming:** Exported types and functions use PascalCase. Unexported use camelCase. Variables reveal intent - no cryptic abbreviations.
 - **Dependency injection:** Handlers receive a `Store` interface, not a concrete DB type. This enables clean testing with mocks.
 - **No magic numbers:** Define named constants for permission levels, rate limits, and similar values.
 

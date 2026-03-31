@@ -1,4 +1,4 @@
--- Migration 000013: SPK lifecycle — version history, staleness tracking, OPK created_at
+-- Migration 000013: SPK lifecycle - version history, staleness tracking, OPK created_at
 
 -- Track current SPK version and upload time on each device's identity key row.
 ALTER TABLE signal_identity_keys

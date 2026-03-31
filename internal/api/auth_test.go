@@ -318,7 +318,7 @@ func TestRegister_AccountRecovery_ExistingPublicKey_ReturnsAuthResponse(t *testi
 	existingUser := newTestUser("alice")
 
 	store := &mockStore{
-		// Probe finds the existing user — account recovery path taken.
+		// Probe finds the existing user - account recovery path taken.
 		getUserByPublicKeyFn: func(_ context.Context, _ []byte) (*models.User, error) {
 			return existingUser, nil
 		},
@@ -447,7 +447,7 @@ func TestRegister_BannedUsername_Returns403(t *testing.T) {
 	// When the implementation is correct: 403 with "Registration blocked".
 	// When the implementation is missing the ban check: 200 OK (falls through).
 	if rr.Code == http.StatusOK {
-		// Confirm the ban check was not called — proving the implementation gap.
+		// Confirm the ban check was not called - proving the implementation gap.
 		assert.False(t, banCheckCalled, "GetActiveInstanceBan was unexpectedly called on register path")
 		t.Fatalf("IMPLEMENTATION GAP (IROLE-03): register() returned 200 for a banned username; "+
 			"expected 403. GetUserByUsername + GetActiveInstanceBan are not called in register(). "+

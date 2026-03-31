@@ -1,4 +1,4 @@
--- Reverse 000007_multi_tenant.up.sql — drop in reverse FK-safe order.
+-- Reverse 000007_multi_tenant.up.sql - drop in reverse FK-safe order.
 
 -- 8. Drop server_id from audit_log
 ALTER TABLE audit_log DROP COLUMN IF EXISTS server_id;

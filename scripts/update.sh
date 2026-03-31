@@ -1,5 +1,5 @@
 #!/bin/sh
-# Hush upgrade script — pulls new images and restarts the stack.
+# Hush upgrade script - pulls new images and restarts the stack.
 # NEVER overwrites secrets (.env is preserved as-is).
 #
 # Usage:
@@ -106,7 +106,7 @@ fi
 # Step 3: Pull latest code and rebuild images
 # ---------------------------------------------------------------------------
 log "Pulling latest code..."
-git pull --ff-only || log "WARNING: git pull failed — building from current local code."
+git pull --ff-only || log "WARNING: git pull failed - building from current local code."
 
 log "Rebuilding Hush images..."
 $DOCKER_COMPOSE -f "$COMPOSE_FILE" build

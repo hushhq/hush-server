@@ -38,7 +38,7 @@ func PublicInviteRoutes(store db.Store, jwtSecret string, hub GlobalBroadcaster)
 	r := chi.NewRouter()
 	// Public: resolve invite info before login (unauthenticated).
 	r.Get("/{code}", h.getInviteInfo)
-	// Authenticated: claim an invite. User is NOT a guild member yet — no RequireGuildMember.
+	// Authenticated: claim an invite. User is NOT a guild member yet - no RequireGuildMember.
 	r.Group(func(r chi.Router) {
 		r.Use(RequireAuth(jwtSecret, store))
 		r.Post("/claim", h.claimInvite)
@@ -52,7 +52,7 @@ type inviteHandler struct {
 }
 
 // inviteInfoResponse is returned for public GET /api/invites/:code.
-// Omits guild name — the server is a blind relay; clients decrypt names from the MLS group.
+// Omits guild name - the server is a blind relay; clients decrypt names from the MLS group.
 type inviteInfoResponse struct {
 	Code        string `json:"code"`
 	MemberCount int    `json:"memberCount"`
@@ -156,7 +156,7 @@ type claimInviteRequest struct {
 }
 
 // claimInviteResponse is returned after a successful invite claim.
-// GuildName is omitted — the server is a blind relay; the client decrypts the name from MLS.
+// GuildName is omitted - the server is a blind relay; the client decrypts the name from MLS.
 type claimInviteResponse struct {
 	ServerID string `json:"serverId"`
 }
@@ -189,7 +189,7 @@ func (h *inviteHandler) claimInvite(w http.ResponseWriter, r *http.Request) {
 	}
 	serverID := *inv.ServerID
 
-	// Guild-scoped ban check — only applicable to local users; federated ban is deferred.
+	// Guild-scoped ban check - only applicable to local users; federated ban is deferred.
 	if fedID == "" {
 		ban, err := h.store.GetActiveBan(r.Context(), serverID, userID)
 		if err != nil {
@@ -220,7 +220,7 @@ func (h *inviteHandler) claimInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Add membership — federated and local users use separate tables.
+	// Add membership - federated and local users use separate tables.
 	if fedID != "" {
 		if err := h.store.AddFederatedServerMember(r.Context(), serverID, fedID, models.PermissionLevelMember); err != nil {
 			slog.Error("claimInvite: add federated server member", "err", err)

@@ -70,7 +70,7 @@ func TestGetInviteInfo_Public_ValidCode_ReturnsServerID(t *testing.T) {
 	}
 	store.getServerByIDFn = func(_ context.Context, sid string) (*models.Server, error) {
 		if sid == serverID {
-			// Server.Name removed — guild names are encrypted in MLS GroupInfo.
+			// Server.Name removed - guild names are encrypted in MLS GroupInfo.
 			return &models.Server{ID: serverID}, nil
 		}
 		return nil, nil
@@ -81,7 +81,7 @@ func TestGetInviteInfo_Public_ValidCode_ReturnsServerID(t *testing.T) {
 	var resp inviteInfoResponse
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
 	assert.Equal(t, "VALID", resp.Code)
-	// GuildName removed — backend is a blind relay; clients decrypt names from MLS.
+	// GuildName removed - backend is a blind relay; clients decrypt names from MLS.
 	assert.Equal(t, serverID, resp.ServerID)
 }
 
@@ -222,7 +222,7 @@ func TestClaimInvite_ValidCode_Returns200(t *testing.T) {
 	var resp claimInviteResponse
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
 	assert.Equal(t, serverID, resp.ServerID)
-	// GuildName removed — backend is a blind relay; clients decrypt names from MLS.
+	// GuildName removed - backend is a blind relay; clients decrypt names from MLS.
 }
 
 func TestClaimInvite_ExpiredCode_Returns400(t *testing.T) {

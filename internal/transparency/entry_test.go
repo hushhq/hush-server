@@ -83,7 +83,7 @@ func TestLogEntryLeafHash(t *testing.T) {
 // TestDualSignature verifies the user signs fields 1-4, and the log countersigns
 // the full entry (fields 1-5). Both signatures verify independently.
 func TestDualSignature(t *testing.T) {
-	// User keypair — GenerateKey returns (public, private, error)
+	// User keypair - GenerateKey returns (public, private, error)
 	userPubKey, userPrivKey, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
 

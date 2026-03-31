@@ -3,7 +3,7 @@
 -- Adds auth_nonces (challenge tokens) and device_keys (certified device public keys).
 
 -- ============================================================
--- 1. users table — replace password_hash with root_public_key
+-- 1. users table - replace password_hash with root_public_key
 -- ============================================================
 
 -- Remove password authentication column.
@@ -26,7 +26,7 @@ ALTER TABLE users ADD CONSTRAINT users_root_public_key_unique UNIQUE (root_publi
 ALTER TABLE users ALTER COLUMN root_public_key DROP DEFAULT;
 
 -- ============================================================
--- 2. auth_nonces table — short-lived challenge tokens
+-- 2. auth_nonces table - short-lived challenge tokens
 -- ============================================================
 
 CREATE TABLE auth_nonces (
@@ -39,7 +39,7 @@ CREATE TABLE auth_nonces (
 CREATE INDEX idx_auth_nonces_expires_at ON auth_nonces(expires_at);
 
 -- ============================================================
--- 3. device_keys table — certified per-device public keys
+-- 3. device_keys table - certified per-device public keys
 -- ============================================================
 
 CREATE TABLE device_keys (

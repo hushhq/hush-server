@@ -22,7 +22,7 @@ func drainAllClientMessages(c *Client, timeout time.Duration) [][]byte {
 
 // TestClient_MediaKey_RemovedInM3 verifies that media.key messages are silently
 // ignored after M.3-01 removal. Frame keys are now derived locally via MLS
-// export_secret — no key material travels over the wire.
+// export_secret - no key material travels over the wire.
 func TestClient_MediaKey_RemovedInM3(t *testing.T) {
 	hub := NewHub()
 	sender := NewClient(nil, hub, "user-1", "", nil)
@@ -53,7 +53,7 @@ func TestClient_MediaKey_RemovedInM3(t *testing.T) {
 
 	select {
 	case msg := <-receiver.send:
-		t.Fatalf("media.key handler was removed in M.3-01 — no message should be relayed, got: %s", string(msg))
+		t.Fatalf("media.key handler was removed in M.3-01 - no message should be relayed, got: %s", string(msg))
 	case <-time.After(100 * time.Millisecond):
 		// Expected: media.key is silently ignored (handler removed).
 	}

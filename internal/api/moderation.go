@@ -109,7 +109,7 @@ func (h *moderationHandler) kickMember(w http.ResponseWriter, r *http.Request) {
 }
 
 // banMember handles POST /api/servers/{serverId}/moderation/ban.
-// Required guild role: admin+. Guild-scoped — does not affect other guilds (IROLE-04).
+// Required guild role: admin+. Guild-scoped - does not affect other guilds (IROLE-04).
 func (h *moderationHandler) banMember(w http.ResponseWriter, r *http.Request) {
 	serverID := chi.URLParam(r, "serverId")
 	actorID := userIDFromContext(r.Context())

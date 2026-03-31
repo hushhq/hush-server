@@ -83,7 +83,7 @@ livekit/
 
 ## 3. Database Schema (High-Level)
 
-All tables are created by migrations in `migrations/`. Schema is managed by `golang-migrate`. Never modify the database schema by hand — create a new migration file.
+All tables are created by migrations in `migrations/`. Schema is managed by `golang-migrate`. Never modify the database schema by hand - create a new migration file.
 
 ### Core tables
 
@@ -113,9 +113,9 @@ Indexed columns for common access patterns: `server_members(server_id)`, `server
 ```
 Hub
 ├── connections: map[serverID]map[connID]*Client
-├── Register(client)     — add connection; subscribe to each guild the user belongs to
-├── Unregister(client)   — remove connection; clean up all subscriptions
-└── BroadcastToServer(serverID, message)  — fan out to all connections in that guild
+├── Register(client)     - add connection; subscribe to each guild the user belongs to
+├── Unregister(client)   - remove connection; clean up all subscriptions
+└── BroadcastToServer(serverID, message)  - fan out to all connections in that guild
 ```
 
 Each `Client` has two goroutines:
@@ -123,10 +123,10 @@ Each `Client` has two goroutines:
 - **Write pump:** drains outbound channel to WebSocket
 
 Message types handled:
-- `message.send` — validate sender membership, write to DB, broadcast to guild
-- `mls.commit` — validate, persist, broadcast MLS commit to group members
-- `mls.welcome` — deliver Welcome message to specific user
-- `presence.*` — broadcast presence events (join/leave voice channel)
+- `message.send` - validate sender membership, write to DB, broadcast to guild
+- `mls.commit` - validate, persist, broadcast MLS commit to group members
+- `mls.welcome` - deliver Welcome message to specific user
+- `presence.*` - broadcast presence events (join/leave voice channel)
 
 ---
 
@@ -134,8 +134,8 @@ Message types handled:
 
 KeyPackages are one-time-use public key material that allow other clients to add a user to an MLS group without the user being online.
 
-- Upload: `POST /api/mls/key-packages` — user uploads a batch of KeyPackages
-- Fetch: `GET /api/mls/key-packages/:user_id` — returns one KeyPackage and marks it consumed
+- Upload: `POST /api/mls/key-packages` - user uploads a batch of KeyPackages
+- Fetch: `GET /api/mls/key-packages/:user_id` - returns one KeyPackage and marks it consumed
 - The server stores KeyPackage bytes opaquely (BYTEA). It cannot read the key material inside.
 - Clients are expected to maintain a minimum number of KeyPackages; `hush-web` includes a background maintenance hook.
 
@@ -158,7 +158,7 @@ Hush implements a signed Merkle tree of key operations per instance (T.1).
 
 ### Challenge-response (Ed25519)
 
-1. Client calls `POST /api/auth/challenge` — server generates a random nonce (stored with a short TTL in `auth_challenges`).
+1. Client calls `POST /api/auth/challenge` - server generates a random nonce (stored with a short TTL in `auth_challenges`).
 2. Client signs the nonce with its Ed25519 private key.
 3. Client calls `POST /api/auth/authenticate` with the nonce and signature.
 4. Server fetches the nonce, verifies expiry, verifies the Ed25519 signature against the user's stored public key, deletes the nonce, and issues a JWT.
@@ -171,7 +171,7 @@ JWTs are HS256-signed with `JWT_SECRET`. Standard claims: `sub` (user UUID), `ex
 
 ### Admin access
 
-Admin endpoints are protected by `X-Admin-Key` header, validated against `ADMIN_API_KEY` config. Admin auth is separate from user auth — the admin dashboard authenticates as an operator, not as a Hush user.
+Admin endpoints are protected by `X-Admin-Key` header, validated against `ADMIN_API_KEY` config. Admin auth is separate from user auth - the admin dashboard authenticates as an operator, not as a Hush user.
 
 ---
 

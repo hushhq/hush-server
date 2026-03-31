@@ -9,7 +9,7 @@ import (
 )
 
 // CreateServer inserts a new guild with an optional encrypted metadata blob and returns the created row.
-// encryptedMetadata may be nil — the two-step creation flow allows the client to set it after
+// encryptedMetadata may be nil - the two-step creation flow allows the client to set it after
 // establishing the guild metadata MLS group.
 func (p *Pool) CreateServer(ctx context.Context, encryptedMetadata []byte) (*models.Server, error) {
 	row := p.QueryRow(ctx, `

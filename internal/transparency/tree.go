@@ -76,7 +76,7 @@ func (t *MerkleTree) Append(leafData []byte) uint64 {
 	carry := h
 	n := idx
 	for n > 0 && n%2 == 1 {
-		// n is odd — the current perfect subtree can be merged with its sibling
+		// n is odd - the current perfect subtree can be merged with its sibling
 		// on the fringe
 		carry = NodeHash(t.fringe[len(t.fringe)-1], carry)
 		t.fringe = t.fringe[:len(t.fringe)-1]
@@ -120,7 +120,7 @@ func (t *MerkleTree) Fringe() [][32]byte {
 
 // Proof returns the inclusion audit path for the leaf at leafIndex.
 // The audit path contains the sibling hashes from the leaf level up to the
-// root — enough to recompute the root without the other leaves.
+// root - enough to recompute the root without the other leaves.
 // Returns an error if leafIndex >= Size().
 func (t *MerkleTree) Proof(leafIndex uint64) ([][32]byte, error) {
 	if leafIndex >= t.size {
@@ -145,7 +145,7 @@ func (t *MerkleTree) Proof(leafIndex uint64) ([][32]byte, error) {
 			}
 			// No sibling (promoted): skip this level entirely.
 		} else {
-			// Current node is right child — sibling is left child.
+			// Current node is right child - sibling is left child.
 			auditPath = append(auditPath, row[idx-1])
 		}
 		idx /= 2
@@ -174,7 +174,7 @@ func VerifyProof(leafData []byte, leafIndex, treeSize uint64, auditPath [][32]by
 				current = NodeHash(current, auditPath[pathIdx])
 				pathIdx++
 			}
-			// Else: promoted — no sibling, no hash, no path element consumed.
+			// Else: promoted - no sibling, no hash, no path element consumed.
 		} else {
 			if pathIdx >= len(auditPath) {
 				return false

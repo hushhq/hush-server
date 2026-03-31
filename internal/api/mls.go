@@ -111,7 +111,7 @@ func (h *mlsHandler) uploadCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Async transparency append — does not block the 204 response.
+	// Async transparency append - does not block the 204 response.
 	// Credential updates are frequent; async pattern prevents latency spikes.
 	if h.transparencySvc != nil {
 		signingPubKeyCopy := make([]byte, len(req.SigningPublicKey))
@@ -189,7 +189,7 @@ func (h *mlsHandler) uploadKeyPackages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Async transparency append — does not block the 204 response.
+	// Async transparency append - does not block the 204 response.
 	// KeyPackage rotation is frequent; async pattern prevents latency spikes.
 	if h.transparencySvc != nil {
 		svc := h.transparencySvc
@@ -272,7 +272,7 @@ func (h *mlsHandler) consumeKeyPackage(w http.ResponseWriter, r *http.Request) {
 }
 
 // maybeSendKeyPackagesLow broadcasts key_packages.low to the target user when their
-// unused KeyPackage count drops below the configured threshold. Fire-and-forget —
+// unused KeyPackage count drops below the configured threshold. Fire-and-forget -
 // errors and above-threshold counts are silently ignored.
 // Called in a goroutine after the response is written, so uses a fresh background context.
 func (h *mlsHandler) maybeSendKeyPackagesLow(userID, deviceID string) {
@@ -421,7 +421,7 @@ func (h *mlsHandler) postCommit(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	// GroupInfo is optional — External Commits from joiners don't have updated
+	// GroupInfo is optional - External Commits from joiners don't have updated
 	// GroupInfo until after mergePendingCommit. The joiner updates GroupInfo
 	// separately via PUT /groups/:id/info.
 	if req.GroupInfo != "" {
@@ -629,7 +629,7 @@ func (h *mlsHandler) putGuildGroupInfo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Any guild member can update GroupInfo after an External Commit join.
-	// The MLS group itself enforces cryptographic membership — the server
+	// The MLS group itself enforces cryptographic membership - the server
 	// just stores the latest GroupInfo blob for subsequent joiners.
 	userID := userIDFromContext(r.Context())
 	level, err := h.store.GetServerMemberLevel(r.Context(), guildID, userID)

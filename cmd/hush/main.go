@@ -41,7 +41,7 @@ func (a *poolTransparencyStore) InsertLogEntry(
 	ctx context.Context, leafIndex uint64, entry *transparency.LogEntry,
 	cborBytes, leafHash, logSig []byte,
 ) error {
-	// Coalesce nil slices to empty — the DB columns are NOT NULL but MVP mode
+	// Coalesce nil slices to empty - the DB columns are NOT NULL but MVP mode
 	// does not yet populate user signatures or public keys for all operations.
 	userPub := entry.UserPublicKey
 	if userPub == nil {
@@ -119,7 +119,7 @@ func main() {
 		icfg, seedErr := pool.GetInstanceConfig(ctx)
 		if seedErr != nil {
 			slog.Warn("handshake cache: no instance_config row at startup", "err", seedErr)
-			// cache stays zero-valued: bootstrapped=false, name="" — valid for fresh instance
+			// cache stays zero-valued: bootstrapped=false, name="" - valid for fresh instance
 		} else {
 			voiceKeyRotationHours, vkrhErr := pool.GetVoiceKeyRotationHours(ctx)
 			if vkrhErr != nil {
@@ -142,7 +142,7 @@ func main() {
 					continue
 				}
 				if retention == nil {
-					// nil means keep forever — skip purge.
+					// nil means keep forever - skip purge.
 					cancel()
 					continue
 				}
@@ -227,7 +227,7 @@ func main() {
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 
-	// Public instance handshake — no auth, no DB query. Clients discover
+	// Public instance handshake - no auth, no DB query. Clients discover
 	// capabilities, version requirements, and registration policy here.
 	r.Get("/api/handshake", api.HandshakeHandler(handshakeCache, cfg.LiveKitAPIKey != ""))
 
@@ -237,14 +237,14 @@ func main() {
 		transparencySvc.SetBroadcaster(wsHub)
 	}
 	if pool != nil && cfg.JWTSecret != "" {
-		// Auth endpoints: per-IP limit — 60 requests per minute, burst 30. SEC-01.
+		// Auth endpoints: per-IP limit - 60 requests per minute, burst 30. SEC-01.
 		// Generous to accommodate React StrictMode (double-fires effects),
 		// multi-instance boot (challenge+verify per instance), and /me polling.
 		r.Route("/api/auth", func(sub chi.Router) {
 			sub.Use(api.IPRateLimiter(rate.Limit(60.0/60.0), 30))
 			sub.Mount("/", api.AuthRoutes(pool, cfg.JWTSecret, cfg.JWTExpiry, transparencySvc))
 		})
-		// MLS key management: per-user limit — 10 requests per minute.
+		// MLS key management: per-user limit - 10 requests per minute.
 		r.Route("/api/mls", func(sub chi.Router) {
 			sub.Use(api.UserRateLimiter(rate.Limit(10.0/60.0), 10))
 			sub.Mount("/", api.MLSRoutes(pool, wsHub, cfg.JWTSecret, transparencySvc))
@@ -266,7 +266,7 @@ func main() {
 		// Public invite info (unauthenticated) + claim (authenticated, not guild-scoped).
 		r.Mount("/api/invites", api.PublicInviteRoutes(pool, cfg.JWTSecret, wsHub))
 
-		// Instance-operator admin endpoints — authenticated by X-Admin-Key header, not JWT.
+		// Instance-operator admin endpoints - authenticated by X-Admin-Key header, not JWT.
 		// AdminAPIKey empty means no admin key is configured; the middleware rejects all requests.
 		r.Mount("/api/admin", api.AdminAPIRoutes(pool, cfg.AdminAPIKey, wsHub, handshakeCache))
 

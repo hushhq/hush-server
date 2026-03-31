@@ -30,7 +30,7 @@ func testAuthMiddlewareFor(userID string) func(http.Handler) http.Handler {
 // ---------- IP Rate Limiter ----------
 
 func TestIPRateLimiter_AllowsUnderLimit(t *testing.T) {
-	// Burst of 5; make exactly 5 requests — all must succeed.
+	// Burst of 5; make exactly 5 requests - all must succeed.
 	limiter := IPRateLimiter(rate.Limit(5.0/60), 5)
 	handler := limiter(okHandler)
 

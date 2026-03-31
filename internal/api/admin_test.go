@@ -105,7 +105,7 @@ func TestAdminListGuilds_ReturnsStatsWithoutNames(t *testing.T) {
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&stats))
 	require.Len(t, stats, 2)
 	assert.Equal(t, 5, stats[0].MemberCount)
-	// No name field in GuildBillingStats — privacy boundary enforced.
+	// No name field in GuildBillingStats - privacy boundary enforced.
 }
 
 func TestAdminListGuilds_EmptyList_Returns200(t *testing.T) {

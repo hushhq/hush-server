@@ -24,7 +24,7 @@ CREATE TABLE server_members (
 CREATE INDEX idx_server_members_server_id ON server_members(server_id);
 CREATE INDEX idx_server_members_user_id   ON server_members(user_id);
 
--- 3. Add server_id FK to channels (NULLABLE — existing rows have no guild)
+-- 3. Add server_id FK to channels (NULLABLE - existing rows have no guild)
 ALTER TABLE channels
     ADD COLUMN server_id UUID REFERENCES servers(id) ON DELETE CASCADE;
 

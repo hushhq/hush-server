@@ -41,7 +41,7 @@ var usernameRE = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
 
 // AuthRoutes returns the chi router for /api/auth.
 // It also starts a background goroutine that purges expired auth nonces every
-// noncePurgeInterval. The goroutine has no shutdown signal — process exit
+// noncePurgeInterval. The goroutine has no shutdown signal - process exit
 // terminates it, consistent with the system_messages cleanup pattern.
 //
 // transparencySvc may be nil when the transparency log is not configured for
@@ -78,7 +78,7 @@ func AuthRoutes(store db.Store, jwtSecret string, jwtExpiry time.Duration, trans
 		r.Get("/me", h.me)
 	})
 
-	// Device management and multi-device linking (require auth — mounted inline).
+	// Device management and multi-device linking (require auth - mounted inline).
 	r.Group(DeviceRoutes(store, jwtSecret, transparencySvc))
 
 	go h.purgeNoncesLoop()
@@ -112,7 +112,7 @@ func (h *authHandler) purgeNoncesLoop() {
 }
 
 // register handles POST /api/auth/register.
-// Accepts {username, displayName, publicKey (base64)} — no password.
+// Accepts {username, displayName, publicKey (base64)} - no password.
 // On success returns JWT + user object.
 func (h *authHandler) register(w http.ResponseWriter, r *http.Request) {
 	var req models.RegisterRequest
@@ -168,7 +168,7 @@ func (h *authHandler) register(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Probe for existing user with this public key — account recovery detection.
+	// Probe for existing user with this public key - account recovery detection.
 	// GetUserByPublicKey error (e.g. DB issue) is fail-open: fall through to
 	// CreateUserWithPublicKey which will either succeed or return its own error.
 	if existingUser, _ := h.store.GetUserByPublicKey(r.Context(), publicKeyBytes); existingUser != nil {
@@ -184,7 +184,7 @@ func (h *authHandler) register(w http.ResponseWriter, r *http.Request) {
 				slog.Error("transparency: append account_recovery entry", "err", logErr, "user_id", existingUser.ID)
 			}
 		}
-		// Re-insert device key for the new device (ON CONFLICT DO UPDATE — idempotent).
+		// Re-insert device key for the new device (ON CONFLICT DO UPDATE - idempotent).
 		deviceID := req.DeviceID
 		if deviceID == "" {
 			deviceID = uuid.New().String()
@@ -230,7 +230,7 @@ func (h *authHandler) register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Append transparency log entry synchronously before responding.
-	// On failure, log the error but still return 201 — the user was created
+	// On failure, log the error but still return 201 - the user was created
 	// successfully. Log failure is non-fatal per Pitfall 4 in RESEARCH.md.
 	if h.transparencySvc != nil {
 		entry := &transparency.LogEntry{
@@ -258,7 +258,7 @@ func (h *authHandler) register(w http.ResponseWriter, r *http.Request) {
 // Returns: { token, guestId, expiresAt }
 func (h *authHandler) guestAuth(w http.ResponseWriter, r *http.Request) {
 	// Generate an ephemeral Ed25519 keypair for the guest identity display name.
-	// The public key is returned to the client as an opaque identifier — it is
+	// The public key is returned to the client as an opaque identifier - it is
 	// NOT stored in the database and cannot be used for account recovery.
 	pubKey, _, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -289,7 +289,7 @@ func (h *authHandler) guestAuth(w http.ResponseWriter, r *http.Request) {
 
 // challenge handles POST /api/auth/challenge.
 // Returns a 60-second nonce for the client to sign. Does not check key existence
-// here — existence is verified at /verify to prevent key-enumeration timing attacks.
+// here - existence is verified at /verify to prevent key-enumeration timing attacks.
 func (h *authHandler) challenge(w http.ResponseWriter, r *http.Request) {
 	var req models.ChallengeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -523,7 +523,7 @@ func (h *authHandler) me(w http.ResponseWriter, r *http.Request) {
 }
 
 // checkUsername handles GET /api/auth/check-username/{username}.
-// Returns {"available": true/false}. Public endpoint — no auth required.
+// Returns {"available": true/false}. Public endpoint - no auth required.
 func (h *authHandler) checkUsername(w http.ResponseWriter, r *http.Request) {
 	username := strings.TrimSpace(chi.URLParam(r, "username"))
 	if err := validateUsername(username); err != nil {

@@ -4,7 +4,7 @@
 
 # hush-server
 
-Go backend for [Hush](https://gethush.live) — an end-to-end encrypted communication platform. The server is a blind relay: it routes and stores ciphertext it cannot read. All encryption happens in the client.
+Go backend for [Hush](https://gethush.live) - an end-to-end encrypted communication platform. The server is a blind relay: it routes and stores ciphertext it cannot read. All encryption happens in the client.
 
 ---
 
@@ -17,7 +17,7 @@ Go backend for [Hush](https://gethush.live) — an end-to-end encrypted communic
 
 ### With a domain (recommended)
 
-A domain gives you a real TLS certificate from Let's Encrypt — no browser warnings, and no friction when users from other instances connect to yours.
+A domain gives you a real TLS certificate from Let's Encrypt - no browser warnings, and no friction when users from other instances connect to yours.
 
 **1. Point a domain at your server** (A record in your DNS provider):
 
@@ -146,7 +146,7 @@ All endpoints are prefixed with `/api`. Authentication uses `Authorization: Bear
 | `GET /api/transparency/verify` | Verify inclusion proof |
 | `GET /api/admin/*` | Admin dashboard endpoints (requires `X-Admin-Key` header) |
 
-WebSocket endpoint: `GET /ws` — real-time message delivery, presence, MLS group operations.
+WebSocket endpoint: `GET /ws` - real-time message delivery, presence, MLS group operations.
 
 For full API documentation including request/response schemas, see `ARCHITECTURE.md`.
 
@@ -173,8 +173,8 @@ docker-compose -f docker-compose.prod.yml up -d
 ### Caddy (default)
 
 The `caddy/` directory contains ready-to-use Caddyfiles:
-- `caddy/Caddyfile` — development/local
-- `caddy/Caddyfile.self-hoster.tmpl` — production template (replace `__DOMAIN__` and `__EMAIL__`)
+- `caddy/Caddyfile` - development/local
+- `caddy/Caddyfile.self-hoster.tmpl` - production template (replace `__DOMAIN__` and `__EMAIL__`)
 
 ### nginx
 

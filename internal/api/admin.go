@@ -36,7 +36,7 @@ func RequireAdminAPIKey(adminAPIKey string) func(http.Handler) http.Handler {
 }
 
 // AdminAPIRoutes returns the chi router for /api/admin.
-// All routes require the X-Admin-Key header — no user auth is used.
+// All routes require the X-Admin-Key header - no user auth is used.
 // The admin API is the only place from which instance-level privileged operations
 // are performed in the opacity model.
 func AdminAPIRoutes(store db.Store, adminAPIKey string, hub GlobalBroadcaster, cache *InstanceCache) chi.Router {

@@ -266,7 +266,7 @@ func TestMLS_ConsumeKeyPackage_Returns_Package(t *testing.T) {
 		return nil, nil
 	}
 	store.countUnusedMLSKeyPackagesFn = func(_ context.Context, uid, _ string) (int, error) {
-		return 50, nil // above threshold — no low event
+		return 50, nil // above threshold - no low event
 	}
 	router := mlsRouter(store, &mockMLSHub{})
 

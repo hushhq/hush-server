@@ -260,7 +260,7 @@ func TestDeleteServer_AdminForbidden(t *testing.T) {
 
 	store := &mockStore{
 		getServerMemberLevelFn: func(_ context.Context, _, _ string) (int, error) {
-			return models.PermissionLevelAdmin, nil // admin cannot delete — only owner can
+			return models.PermissionLevelAdmin, nil // admin cannot delete - only owner can
 		},
 	}
 	token := makeAuth(store, userID)
@@ -375,7 +375,7 @@ func TestChangeRole_CannotPromoteAboveSelf(t *testing.T) {
 	token := makeAuth(store, actorID)
 	router := serversRouter(store)
 
-	// Admin (level 2) trying to promote to owner (level 3) — exceeds own level.
+	// Admin (level 2) trying to promote to owner (level 3) - exceeds own level.
 	rr := putServerJSON(router, "/"+serverID+"/members/"+targetID+"/role",
 		changePermissionLevelRequest{PermissionLevel: models.PermissionLevelOwner}, token)
 	require.Equal(t, http.StatusForbidden, rr.Code)

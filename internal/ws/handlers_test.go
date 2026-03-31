@@ -129,7 +129,7 @@ func (m *messageStoreMock) GetUserRole(context.Context, string) (string, error) 
 func (m *messageStoreMock) UpdateUserRole(context.Context, string, string) error { return nil }
 func (m *messageStoreMock) ListMembers(context.Context) ([]models.Member, error) { return nil, nil }
 
-// Channel stubs (guild-scoped — serverID param).
+// Channel stubs (guild-scoped - serverID param).
 // CreateChannel now takes encryptedMetadata []byte instead of a plaintext name.
 func (m *messageStoreMock) CreateChannel(context.Context, string, []byte, string, *string, *string, int) (*models.Channel, error) {
 	return nil, nil
@@ -162,7 +162,7 @@ func (m *messageStoreMock) UpdateServerTemplate(context.Context, string, string,
 }
 func (m *messageStoreMock) DeleteServerTemplate(context.Context, string) error { return nil }
 
-// Invite stubs (guild-scoped — serverID param).
+// Invite stubs (guild-scoped - serverID param).
 func (m *messageStoreMock) CreateInvite(context.Context, string, string, string, int, time.Time) (*models.InviteCode, error) {
 	return nil, nil
 }
@@ -204,7 +204,7 @@ func (m *messageStoreMock) ListServerMembers(context.Context, string) ([]models.
 	return nil, nil
 }
 
-// Moderation stubs (guild-scoped — serverID param).
+// Moderation stubs (guild-scoped - serverID param).
 func (m *messageStoreMock) InsertBan(context.Context, string, string, string, string, *time.Time) (*models.Ban, error) {
 	return nil, nil
 }

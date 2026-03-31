@@ -44,7 +44,7 @@ func LoadLogSignerFromEnv() (*LogSigner, error) {
 			)
 		}
 		// Dev/test: generate ephemeral key so the service still starts.
-		log.Println("WARN: transparency log key is ephemeral — set TRANSPARENCY_LOG_PRIVATE_KEY for persistent verification")
+		log.Println("WARN: transparency log key is ephemeral - set TRANSPARENCY_LOG_PRIVATE_KEY for persistent verification")
 		return generateEphemeralSigner()
 	}
 

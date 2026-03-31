@@ -57,7 +57,7 @@ func Handler(hub *Hub, jwtSecret string, store db.Store, corsOrigin string) http
 			return
 		}
 		if isFederated {
-			// Federated sessions are stateless — skip DB session validation.
+			// Federated sessions are stateless - skip DB session validation.
 		} else if store != nil && !isGuest {
 			tokenHash := auth.TokenHash(token)
 			sess, err := store.GetSessionByTokenHash(r.Context(), tokenHash)
@@ -101,10 +101,10 @@ func authFromFirstMessage(conn *websocket.Conn, jwtSecret string, store db.Store
 		return "", "", err
 	}
 	if isFederated {
-		// Federated sessions are stateless — skip DB session validation.
+		// Federated sessions are stateless - skip DB session validation.
 		return uid, fedID, nil
 	}
-	// Guest sessions are ephemeral — no DB session record exists.
+	// Guest sessions are ephemeral - no DB session record exists.
 	if store != nil && !isGuest {
 		tokenHash := auth.TokenHash(msg.Token)
 		sess, err := store.GetSessionByTokenHash(r.Context(), tokenHash)

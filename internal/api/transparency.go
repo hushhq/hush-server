@@ -22,7 +22,7 @@ type transparencyHandler struct {
 //
 // Route map:
 //
-//	GET /verify — return inclusion proofs for a given Ed25519 public key
+//	GET /verify - return inclusion proofs for a given Ed25519 public key
 func TransparencyRoutes(svc *transparency.TransparencyService, store db.Store, jwtSecret string) chi.Router {
 	r := chi.NewRouter()
 	h := &transparencyHandler{svc: svc}
@@ -68,7 +68,7 @@ func (h *transparencyHandler) verify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Ensure slices are never null in the JSON response — always emit arrays.
+	// Ensure slices are never null in the JSON response - always emit arrays.
 	entries := proof.Entries
 	if entries == nil {
 		entries = make([]models.TransparencyLogEntry, 0)

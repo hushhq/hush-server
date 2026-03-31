@@ -26,7 +26,7 @@ var _ db.Store = (*mockStore)(nil)
 type mockStore struct {
 	pingFn func(ctx context.Context) error
 
-	// User/session — BIP39 public-key identity
+	// User/session - BIP39 public-key identity
 	createUserWithPublicKeyFn func(ctx context.Context, username, displayName string, publicKey []byte) (*models.User, error)
 	getUserByPublicKeyFn      func(ctx context.Context, publicKey []byte) (*models.User, error)
 	getUserByUsernameFn       func(ctx context.Context, username string) (*models.User, error)
@@ -75,7 +75,7 @@ type mockStore struct {
 	updateUserRoleFn       func(ctx context.Context, userID, role string) error
 	listMembersFn          func(ctx context.Context) ([]models.Member, error)
 
-	// Channels (guild-scoped — serverID param)
+	// Channels (guild-scoped - serverID param)
 	createChannelFn               func(ctx context.Context, serverID string, encryptedMetadata []byte, channelType string, voiceMode *string, parentID *string, position int) (*models.Channel, error)
 	listChannelsFn                func(ctx context.Context, serverID string) ([]models.Channel, error)
 	getChannelByIDFn              func(ctx context.Context, channelID string) (*models.Channel, error)
@@ -91,7 +91,7 @@ type mockStore struct {
 	updateServerTemplateFn     func(ctx context.Context, id string, name string, channels json.RawMessage, isDefault bool) error
 	deleteServerTemplateFn     func(ctx context.Context, id string) error
 
-	// Invites (guild-scoped — serverID param)
+	// Invites (guild-scoped - serverID param)
 	createInviteFn    func(ctx context.Context, serverID, code, createdBy string, maxUses int, expiresAt time.Time) (*models.InviteCode, error)
 	getInviteByCodeFn func(ctx context.Context, code string) (*models.InviteCode, error)
 	claimInviteUseFn  func(ctx context.Context, code string) (bool, error)
@@ -111,27 +111,27 @@ type mockStore struct {
 	updateServerMemberLevelFn func(ctx context.Context, serverID, userID string, permissionLevel int) error
 	listServerMembersFn       func(ctx context.Context, serverID string) ([]models.ServerMemberWithUser, error)
 
-	// Moderation — bans (guild-scoped — serverID param)
+	// Moderation - bans (guild-scoped - serverID param)
 	insertBanFn      func(ctx context.Context, serverID, userID, actorID, reason string, expiresAt *time.Time) (*models.Ban, error)
 	getActiveBanFn   func(ctx context.Context, serverID, userID string) (*models.Ban, error)
 	liftBanFn        func(ctx context.Context, banID, liftedByID string) error
 	listActiveBansFn func(ctx context.Context, serverID string) ([]models.Ban, error)
 
-	// Moderation — mutes (guild-scoped — serverID param)
+	// Moderation - mutes (guild-scoped - serverID param)
 	insertMuteFn      func(ctx context.Context, serverID, userID, actorID, reason string, expiresAt *time.Time) (*models.Mute, error)
 	getActiveMuteFn   func(ctx context.Context, serverID, userID string) (*models.Mute, error)
 	liftMuteFn        func(ctx context.Context, muteID, liftedByID string) error
 	listActiveMutesFn func(ctx context.Context, serverID string) ([]models.Mute, error)
 
-	// Moderation — audit log (guild-scoped — serverID param)
+	// Moderation - audit log (guild-scoped - serverID param)
 	insertAuditLogFn func(ctx context.Context, serverID, actorID string, targetID *string, action, reason string, metadata map[string]interface{}) error
 	listAuditLogFn   func(ctx context.Context, serverID string, limit, offset int, filter *db.AuditLogFilter) ([]models.AuditLogEntry, error)
 
-	// Moderation — messages
+	// Moderation - messages
 	getMessageByIDFn func(ctx context.Context, messageID string) (*models.Message, error)
 	deleteMessageFn  func(ctx context.Context, messageID string) error
 
-	// Moderation — sessions
+	// Moderation - sessions
 	deleteSessionsByUserIDFn func(ctx context.Context, userID string) error
 
 	// Instance bans
@@ -194,7 +194,7 @@ func (m *mockStore) Ping(ctx context.Context) error {
 	return nil
 }
 
-// ---------- User/session — BIP39 public-key identity ----------
+// ---------- User/session - BIP39 public-key identity ----------
 
 func (m *mockStore) CreateUserWithPublicKey(ctx context.Context, username, displayName string, publicKey []byte) (*models.User, error) {
 	if m.createUserWithPublicKeyFn != nil {

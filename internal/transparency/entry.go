@@ -104,7 +104,7 @@ func (e *LogEntry) MarshalCBOR() ([]byte, error) {
 	return b, nil
 }
 
-// LeafHash returns leafHash(MarshalCBOR()) — the 32-byte value stored in the
+// LeafHash returns leafHash(MarshalCBOR()) - the 32-byte value stored in the
 // Merkle tree for this entry.
 func (e *LogEntry) LeafHash() ([32]byte, error) {
 	cborBytes, err := e.MarshalCBOR()

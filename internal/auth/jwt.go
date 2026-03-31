@@ -16,10 +16,10 @@ type Claims struct {
 	// Guest sessions have no DB record; for guests, SessionID holds the guest UUID.
 	SessionID string `json:"sid"`
 	// IsGuest marks a short-lived ephemeral guest session. Guest sessions are
-	// validated by JWT signature only — no DB session record is required.
+	// validated by JWT signature only - no DB session record is required.
 	IsGuest bool `json:"is_guest,omitempty"`
 	// IsFederated marks a stateless federated session. Federated sessions have no
-	// DB session record — the JWT is the sole source of truth.
+	// DB session record - the JWT is the sole source of truth.
 	IsFederated bool `json:"is_federated,omitempty"`
 	// FederatedIdentityID is the federated_identities row ID for the remote user.
 	FederatedIdentityID string `json:"fid,omitempty"`
@@ -31,7 +31,7 @@ func SignJWT(userID, sessionID, secret string, expiresAt time.Time) (string, err
 }
 
 // SignGuestJWT builds and signs a short-lived guest JWT. The token is
-// validated by signature only — no DB session record is stored.
+// validated by signature only - no DB session record is stored.
 func SignGuestJWT(guestID, sessionID, secret string, expiresAt time.Time) (string, error) {
 	return signJWT(guestID, sessionID, secret, expiresAt, true)
 }
@@ -53,7 +53,7 @@ func signJWT(userID, sessionID, secret string, expiresAt time.Time, isGuest bool
 }
 
 // SignFederatedJWT builds and signs a JWT for a federated user.
-// Federated sessions have no DB session record — the JWT is stateless.
+// Federated sessions have no DB session record - the JWT is stateless.
 func SignFederatedJWT(federatedID, sessionID, secret string, expiresAt time.Time) (string, error) {
 	now := time.Now()
 	claims := Claims{

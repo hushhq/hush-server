@@ -116,7 +116,7 @@ Hush implements a signed Merkle tree of key operations per instance.
 | **Secrets** | Do not use default values. `setup.sh` generates all secrets. |
 | **Transparency key** | Never rotate `TRANSPARENCY_LOG_PRIVATE_KEY` after first log entry. Back it up. |
 | **Database access** | PostgreSQL should not be exposed to the public internet. Use Docker networking or firewall rules. |
-| **Redis access** | Same as PostgreSQL — internal network only. |
+| **Redis access** | Same as PostgreSQL - internal network only. |
 | **Dependencies** | Run `go mod verify` and check for CVEs before production deployment. |
 
 ---

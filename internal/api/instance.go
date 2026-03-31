@@ -78,7 +78,7 @@ func (h *instanceHandler) getConfig(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// updateConfig is no longer on InstanceRoutes — it has moved to AdminAPIRoutes (PUT /api/admin/config).
+// updateConfig is no longer on InstanceRoutes - it has moved to AdminAPIRoutes (PUT /api/admin/config).
 // This stub is intentionally absent; see admin.go.
 
 func (h *instanceHandler) listMembers(w http.ResponseWriter, r *http.Request) {
@@ -155,14 +155,14 @@ func (h *instanceHandler) instanceBan(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cannot ban yourself"})
 		return
 	}
-	// Check target role — admin cannot ban another admin (only instance operator can).
+	// Check target role - admin cannot ban another admin (only instance operator can).
 	targetRole, err := h.store.GetUserRole(r.Context(), req.UserID)
 	if err != nil {
 		slog.Error("get target user role", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify target role"})
 		return
 	}
-	// Admin cannot ban other admins — only the instance operator (API key level) can.
+	// Admin cannot ban other admins - only the instance operator (API key level) can.
 	if role == "admin" && targetRole == "admin" {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin cannot ban another admin"})
 		return
@@ -288,4 +288,4 @@ func (h *instanceHandler) listServerTemplates(w http.ResponseWriter, r *http.Req
 }
 
 // Server template CRUD (create/update/delete) moved to AdminAPIRoutes. See admin.go.
-// listServerTemplates stays here — it's available to all authenticated users for the template picker.
+// listServerTemplates stays here - it's available to all authenticated users for the template picker.

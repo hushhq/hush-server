@@ -83,7 +83,7 @@ func (h *livekitHandler) token(w http.ResponseWriter, r *http.Request) {
 	userID := userIDFromContext(r.Context())
 
 	// Mute check: deny token if the user is muted in the channel's server.
-	// roomName format: "channel-{channelId}" — skip check for other formats.
+	// roomName format: "channel-{channelId}" - skip check for other formats.
 	if h.store != nil {
 		channelID := strings.TrimPrefix(roomName, "channel-")
 		if channelID != roomName { // roomName started with "channel-"

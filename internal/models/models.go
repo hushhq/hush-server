@@ -23,7 +23,7 @@ type Session struct {
 
 // RegisterRequest is the body for POST /api/auth/register.
 // PublicKey is the base64-encoded Ed25519 root public key derived from the
-// user's BIP39 mnemonic. No password field — identity is cryptographic.
+// user's BIP39 mnemonic. No password field - identity is cryptographic.
 type RegisterRequest struct {
 	Username    string `json:"username"`
 	DisplayName string `json:"displayName"`
@@ -98,7 +98,7 @@ type AuthResponse struct {
 }
 
 // GuestAuthResponse is returned by POST /api/auth/guest.
-// The guest session is ephemeral — no user record is persisted. The client
+// The guest session is ephemeral - no user record is persisted. The client
 // uses ExpiresAt to schedule the 5-minute warning and expiry redirect.
 type GuestAuthResponse struct {
 	Token     string    `json:"token"`
@@ -168,8 +168,8 @@ const (
 )
 
 // Server is a guild within this Hush instance.
-// All plaintext name/icon/owner fields are removed — the backend is a blind relay.
-// Exception: PublicName and PublicDescription are plaintext when Discoverable=true —
+// All plaintext name/icon/owner fields are removed - the backend is a blind relay.
+// Exception: PublicName and PublicDescription are plaintext when Discoverable=true -
 // guild admins explicitly opt in to this exposure by enabling discoverability.
 type Server struct {
 	ID                  string     `json:"id"`
@@ -217,7 +217,7 @@ type ServerMemberWithUser struct {
 }
 
 // GuildBillingStats exposes guild infrastructure metrics to the instance operator.
-// No guild name, channel list, or member details — privacy boundary is preserved.
+// No guild name, channel list, or member details - privacy boundary is preserved.
 type GuildBillingStats struct {
 	ID               string     `json:"id"`
 	MemberCount      int        `json:"memberCount"`
@@ -280,7 +280,7 @@ type Member struct {
 }
 
 // Channel is a text or voice channel within a guild.
-// Name is removed — it lives in EncryptedMetadata. Type stays plaintext for routing.
+// Name is removed - it lives in EncryptedMetadata. Type stays plaintext for routing.
 type Channel struct {
 	ID                string  `json:"id"`
 	ServerID          *string `json:"serverId,omitempty"`
@@ -372,7 +372,7 @@ type UnmuteRequest struct {
 }
 
 // ChangePermissionLevelRequest is the body for PUT /api/servers/:id/members/:userId/level.
-// Replaces the old ChangeRoleRequest — role string is now an opaque integer.
+// Replaces the old ChangeRoleRequest - role string is now an opaque integer.
 type ChangePermissionLevelRequest struct {
 	UserID          string `json:"userId"`
 	PermissionLevel int    `json:"permissionLevel"`
@@ -495,7 +495,7 @@ type TransparencyLogEntry struct {
 type TransparencyTreeHead struct {
 	TreeSize  uint64    `json:"treeSize"`
 	RootHash  []byte    `json:"rootHash"`
-	Fringe    []byte    `json:"-"` // serialized [][32]byte — not sent to clients
+	Fringe    []byte    `json:"-"` // serialized [][32]byte - not sent to clients
 	HeadSig   []byte    `json:"headSig"`
 	CreatedAt time.Time `json:"createdAt"`
 }
@@ -544,7 +544,7 @@ type DiscoverGuild struct {
 }
 
 // UserSearchPublicResult is a user record safe for public search endpoints.
-// Contains only identity fields — no ban status, roles, or credentials.
+// Contains only identity fields - no ban status, roles, or credentials.
 type UserSearchPublicResult struct {
 	ID          string `json:"id"`
 	Username    string `json:"username"`

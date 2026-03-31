@@ -9,7 +9,7 @@ import (
 	"github.com/hushhq/hush-server/internal/transparency"
 )
 
-// leafHash computes SHA-256(0x00 || data) — RFC 6962 §2.1 leaf prefix.
+// leafHash computes SHA-256(0x00 || data) - RFC 6962 §2.1 leaf prefix.
 func expectedLeafHash(data []byte) [32]byte {
 	h := sha256.New()
 	h.Write([]byte{0x00})
@@ -19,7 +19,7 @@ func expectedLeafHash(data []byte) [32]byte {
 	return out
 }
 
-// nodeHash computes SHA-256(0x01 || left || right) — RFC 6962 §2.1 node prefix.
+// nodeHash computes SHA-256(0x01 || left || right) - RFC 6962 §2.1 node prefix.
 func expectedNodeHash(left, right [32]byte) [32]byte {
 	h := sha256.New()
 	h.Write([]byte{0x01})
@@ -112,13 +112,13 @@ func TestVerifyProof(t *testing.T) {
 	// Valid proof
 	require.True(t, transparency.VerifyProof(leafData[5], 5, tree.Size(), auditPath, root))
 
-	// Tampered leaf data — must fail
+	// Tampered leaf data - must fail
 	require.False(t, transparency.VerifyProof([]byte("tampered"), 5, tree.Size(), auditPath, root))
 
-	// Wrong leaf index — must fail
+	// Wrong leaf index - must fail
 	require.False(t, transparency.VerifyProof(leafData[5], 4, tree.Size(), auditPath, root))
 
-	// Tampered root — must fail
+	// Tampered root - must fail
 	var badRoot [32]byte
 	copy(badRoot[:], root[:])
 	badRoot[0] ^= 0xFF

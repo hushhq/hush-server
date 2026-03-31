@@ -89,7 +89,7 @@ ALTER TABLE instance_config ADD COLUMN guild_discovery TEXT NOT NULL DEFAULT 'al
 -- PostgreSQL forbids DROP NOT NULL on PK columns.
 ALTER TABLE mls_group_info DROP CONSTRAINT mls_group_info_pkey;
 
--- Also drop the FK on channel_id — we'll re-add it after making it nullable.
+-- Also drop the FK on channel_id - we'll re-add it after making it nullable.
 ALTER TABLE mls_group_info DROP CONSTRAINT mls_group_info_channel_id_fkey;
 
 -- Allow NULL channel_id so rows can reference a server (guild metadata group) instead.

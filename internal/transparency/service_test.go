@@ -136,7 +136,7 @@ func TestAppendEntryRejectsBadUserSig(t *testing.T) {
 		OperationType: transparency.OpRegister,
 		UserPublicKey: pubKey,
 		Timestamp:     time.Now().Unix(),
-		UserSignature: make([]byte, 64), // all zeros — invalid
+		UserSignature: make([]byte, 64), // all zeros - invalid
 	}
 
 	_, err = svc.AppendEntry(context.Background(), entry)

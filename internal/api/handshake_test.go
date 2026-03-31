@@ -56,7 +56,7 @@ func TestHandshake_Returns200_NoAuth(t *testing.T) {
 	handler := HandshakeHandler(cache, true)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/handshake", nil)
-	// No Authorization header — this endpoint is public
+	// No Authorization header - this endpoint is public
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 
@@ -178,7 +178,7 @@ func TestHandshake_VoiceChannels_FalseWhenDisabled(t *testing.T) {
 
 func TestHandshake_UninitializedCache_ReturnsZeroValues(t *testing.T) {
 	cache := NewInstanceCache()
-	// Do NOT call Set — test zero-value behavior
+	// Do NOT call Set - test zero-value behavior
 
 	handler := HandshakeHandler(cache, false)
 	req := httptest.NewRequest(http.MethodGet, "/api/handshake", nil)
@@ -230,7 +230,7 @@ func TestHandshake_VoiceKeyRotationHours_InResponse(t *testing.T) {
 
 func TestHandshake_VoiceKeyRotationHours_DefaultIs2(t *testing.T) {
 	cache := NewInstanceCache()
-	// Do NOT call Set — verify default is 2 hours
+	// Do NOT call Set - verify default is 2 hours
 
 	handler := HandshakeHandler(cache, true)
 	req := httptest.NewRequest(http.MethodGet, "/api/handshake", nil)
@@ -264,7 +264,7 @@ func TestHandshake_ServerCreationPolicy(t *testing.T) {
 // includes server_creation_policy="open" when the cache uses its default value.
 func TestHandshake_ServerCreationPolicy_DefaultIsOpen(t *testing.T) {
 	cache := NewInstanceCache()
-	// Do NOT call Set — verify default is "open"
+	// Do NOT call Set - verify default is "open"
 
 	handler := HandshakeHandler(cache, true)
 	req := httptest.NewRequest(http.MethodGet, "/api/handshake", nil)

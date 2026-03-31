@@ -101,7 +101,7 @@ func (p *Pool) InsertMLSLastResortKeyPackage(ctx context.Context, userID, device
 
 // ConsumeMLSKeyPackage atomically marks one unused, non-expired, non-last-resort
 // KeyPackage as consumed and returns its bytes. If no regular packages remain, it
-// falls back to the last-resort package (without marking it consumed — it is reusable).
+// falls back to the last-resort package (without marking it consumed - it is reusable).
 // Returns (nil, nil) when no package is available at all.
 func (p *Pool) ConsumeMLSKeyPackage(ctx context.Context, userID, deviceID string) ([]byte, error) {
 	// Attempt to atomically consume a regular package.
@@ -129,7 +129,7 @@ func (p *Pool) ConsumeMLSKeyPackage(ctx context.Context, userID, deviceID string
 		return nil, err
 	}
 
-	// No regular package available — fall back to last-resort (read-only, reusable).
+	// No regular package available - fall back to last-resort (read-only, reusable).
 	err = p.QueryRow(ctx, `
 		SELECT key_package_bytes FROM mls_key_packages
 		WHERE user_id  = $1
@@ -164,7 +164,7 @@ func (p *Pool) CountUnusedMLSKeyPackages(ctx context.Context, userID, deviceID s
 
 // PurgeExpiredMLSKeyPackages deletes key package rows that are safe to remove:
 //   - Consumed rows older than 30 days (no longer needed for audit or retry).
-//   - Unconsumed rows whose expiry has passed (useless — would be rejected on consume).
+//   - Unconsumed rows whose expiry has passed (useless - would be rejected on consume).
 //
 // Last-resort packages are never deleted. Processes at most 10 000 rows per call
 // to bound the DELETE scan time (consistent with the prior OPK cleanup pattern).
