@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"hush.app/server/internal/models"
+	"github.com/hushhq/hush-server/internal/models"
 )
 
 // Broadcaster sends WS messages to connected users. Implemented by ws.Hub.

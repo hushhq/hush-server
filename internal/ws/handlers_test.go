@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"hush.app/server/internal/db"
-	"hush.app/server/internal/models"
+	"github.com/hushhq/hush-server/internal/db"
+	"github.com/hushhq/hush-server/internal/models"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

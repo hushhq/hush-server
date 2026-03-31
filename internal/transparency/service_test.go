@@ -9,8 +9,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"hush.app/server/internal/models"
-	"hush.app/server/internal/transparency"
+	"github.com/hushhq/hush-server/internal/models"
+	"github.com/hushhq/hush-server/internal/transparency"
 )
 
 // memStore is an in-memory TransparencyStore for unit testing.

@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"hush.app/server/internal/models"
-	"hush.app/server/internal/transparency"
+	"github.com/hushhq/hush-server/internal/models"
+	"github.com/hushhq/hush-server/internal/transparency"
 )
 
 // testNoOpStore is an in-memory TransparencyStore backed by a slice, satisfying

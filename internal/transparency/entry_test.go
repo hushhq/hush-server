@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"hush.app/server/internal/transparency"
+	"github.com/hushhq/hush-server/internal/transparency"
 )
 
 // TestEntryCBORDeterminism verifies that marshaling the same LogEntry twice

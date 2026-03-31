@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"hush.app/server/internal/models"
+	"github.com/hushhq/hush-server/internal/models"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"

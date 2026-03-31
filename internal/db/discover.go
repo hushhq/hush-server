@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
-	"hush.app/server/internal/models"
+	"github.com/hushhq/hush-server/internal/models"
 )
 
 // FindDMGuild returns the DM guild for the given user pair, or pgx.ErrNoRows when

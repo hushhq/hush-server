@@ -39,7 +39,7 @@ services:
 
   hush-api:
     build:
-      context: ./server
+      context: .
       dockerfile: Dockerfile
     image: hush-api:local
     container_name: hush-api
@@ -98,25 +98,6 @@ services:
     networks:
       - hush-network
 
-  caddy:
-    build:
-      context: .
-      dockerfile: client/Dockerfile
-    image: hush-caddy:local
-    container_name: hush-caddy
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./caddy/Caddyfile.self-hoster:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - hush-api
-    restart: unless-stopped
-    networks:
-      - hush-network
-
 networks:
   hush-network:
     driver: bridge
@@ -124,5 +105,3 @@ networks:
 volumes:
   postgres_data:
   redis_data:
-  caddy_data:
-  caddy_config:

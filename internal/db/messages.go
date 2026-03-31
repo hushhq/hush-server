@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"hush.app/server/internal/models"
+	"github.com/hushhq/hush-server/internal/models"
 
 	"github.com/jackc/pgx/v5"
 )

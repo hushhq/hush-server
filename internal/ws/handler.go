@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 
-	"hush.app/server/internal/auth"
-	"hush.app/server/internal/db"
+	"github.com/hushhq/hush-server/internal/auth"
+	"github.com/hushhq/hush-server/internal/db"
 
 	"github.com/gorilla/websocket"
 )

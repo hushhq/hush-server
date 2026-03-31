@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"hush.app/server/internal/models"
+	"github.com/hushhq/hush-server/internal/models"
 )
 
 // CreateSession inserts a session with the given id (for JWT session_id claim) and returns it.

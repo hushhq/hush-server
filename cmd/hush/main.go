@@ -13,12 +13,12 @@ import (
 
 	"encoding/hex"
 
-	"hush.app/server/internal/api"
-	"hush.app/server/internal/config"
-	"hush.app/server/internal/db"
-	"hush.app/server/internal/models"
-	"hush.app/server/internal/transparency"
-	"hush.app/server/internal/ws"
+	"github.com/hushhq/hush-server/internal/api"
+	"github.com/hushhq/hush-server/internal/config"
+	"github.com/hushhq/hush-server/internal/db"
+	"github.com/hushhq/hush-server/internal/models"
+	"github.com/hushhq/hush-server/internal/transparency"
+	"github.com/hushhq/hush-server/internal/ws"
 
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"

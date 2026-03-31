@@ -7,7 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"hush.app/server/internal/models"
+	"github.com/hushhq/hush-server/internal/models"
 )
 
 // InsertTransparencyLogEntry persists a fully-signed transparency log entry.

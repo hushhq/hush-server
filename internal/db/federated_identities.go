@@ -5,7 +5,7 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
-	"hush.app/server/internal/models"
+	"github.com/hushhq/hush-server/internal/models"
 )
 
 // GetOrCreateFederatedIdentity upserts a foreign-instance user by their Ed25519

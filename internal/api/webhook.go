@@ -13,8 +13,8 @@ import (
 	"github.com/livekit/protocol/livekit"
 	"github.com/livekit/protocol/webhook"
 
-	"hush.app/server/internal/db"
-	"hush.app/server/internal/ws"
+	"github.com/hushhq/hush-server/internal/db"
+	"github.com/hushhq/hush-server/internal/ws"
 )
 
 // voiceParticipant is a single participant in a voice channel.

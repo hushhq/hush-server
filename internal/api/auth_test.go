@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	internalauth "hush.app/server/internal/auth"
-	"hush.app/server/internal/models"
+	internalauth "github.com/hushhq/hush-server/internal/auth"
+	"github.com/hushhq/hush-server/internal/models"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"

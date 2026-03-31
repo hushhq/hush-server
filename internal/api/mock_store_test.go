@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"hush.app/server/internal/auth"
-	"hush.app/server/internal/db"
-	"hush.app/server/internal/models"
+	"github.com/hushhq/hush-server/internal/auth"
+	"github.com/hushhq/hush-server/internal/db"
+	"github.com/hushhq/hush-server/internal/models"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"

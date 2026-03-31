@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"hush.app/server/internal/models"
+	"github.com/hushhq/hush-server/internal/models"
 )
 
 // InsertSystemMessage inserts a system message row and returns it with generated UUID and timestamp.

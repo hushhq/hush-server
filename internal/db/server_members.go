@@ -3,7 +3,7 @@ package db
 import (
 	"context"
 
-	"hush.app/server/internal/models"
+	"github.com/hushhq/hush-server/internal/models"
 )
 
 // AddServerMember inserts a new guild membership record with the given permission level.

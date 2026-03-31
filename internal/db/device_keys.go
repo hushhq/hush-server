@@ -3,7 +3,7 @@ package db
 import (
 	"context"
 
-	"hush.app/server/internal/models"
+	"github.com/hushhq/hush-server/internal/models"
 )
 
 // InsertDeviceKey stores a certified device public key for a user.

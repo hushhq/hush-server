@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"hush.app/server/internal/transparency"
+	"github.com/hushhq/hush-server/internal/transparency"
 )
 
 // leafHash computes SHA-256(0x00 || data) — RFC 6962 §2.1 leaf prefix.

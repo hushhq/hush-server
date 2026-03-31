@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"hush.app/server/internal/models"
+	"github.com/hushhq/hush-server/internal/models"
 )
 
 // Store defines the database operations used by the API and WebSocket layers.

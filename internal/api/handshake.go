@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"sync"
 
-	"hush.app/server/internal/version"
+	"github.com/hushhq/hush-server/internal/version"
 )
 
 // InstanceCache holds a snapshot of the instance_config row in memory so the

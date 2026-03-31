@@ -3,7 +3,7 @@ package transparency
 import (
 	"context"
 
-	"hush.app/server/internal/models"
+	"github.com/hushhq/hush-server/internal/models"
 )
 
 // TransparencyStore is the persistence contract for the transparency log.

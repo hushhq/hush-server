@@ -27,7 +27,7 @@ services:
 
   hush-api:
     build:
-      context: ./server
+      context: .
       dockerfile: Dockerfile
     container_name: hush-api
     environment:
@@ -89,29 +89,6 @@ services:
     networks:
       - hush-network
 
-  caddy:
-    build:
-      context: .
-      dockerfile: client/Dockerfile
-      args:
-        - VITE_DEBUG_TOOLBAR=${VITE_DEBUG_TOOLBAR:-true}
-    container_name: hush-caddy
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    environment:
-      - CORS_ORIGIN=${CORS_ORIGIN:-*}
-    ports:
-      - "127.0.0.1:8081:80"
-    volumes:
-      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - hush-api
-    restart: unless-stopped
-    networks:
-      - hush-network
-
 networks:
   hush-network:
     driver: bridge
@@ -119,5 +96,3 @@ networks:
 volumes:
   postgres_data:
   redis_data:
-  caddy_data:
-  caddy_config:

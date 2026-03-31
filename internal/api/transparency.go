@@ -5,9 +5,9 @@ import (
 	"encoding/hex"
 	"net/http"
 
-	"hush.app/server/internal/db"
-	"hush.app/server/internal/models"
-	"hush.app/server/internal/transparency"
+	"github.com/hushhq/hush-server/internal/db"
+	"github.com/hushhq/hush-server/internal/models"
+	"github.com/hushhq/hush-server/internal/transparency"
 
 	"github.com/go-chi/chi/v5"
 )

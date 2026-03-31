@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"net/http"
 
-	"hush.app/server/internal/db"
-	"hush.app/server/internal/models"
+	"github.com/hushhq/hush-server/internal/db"
+	"github.com/hushhq/hush-server/internal/models"
 
 	"github.com/go-chi/chi/v5"
 )

@@ -2,21 +2,21 @@
 //
 // ServerVersion, APIVersion, and MinClientVersion can be overridden at build time via ldflags:
 //
-//	go build -ldflags "-X hush.app/server/internal/version.ServerVersion=1.0.0 \
-//	  -X hush.app/server/internal/version.APIVersion=v2 \
-//	  -X hush.app/server/internal/version.MinClientVersion=0.5.0"
+//	go build -ldflags "-X github.com/hushhq/hush-server/internal/version.ServerVersion=1.0.0 \
+//	  -X github.com/hushhq/hush-server/internal/version.APIVersion=v2 \
+//	  -X github.com/hushhq/hush-server/internal/version.MinClientVersion=0.5.0"
 package version
 
 // ServerVersion is the server release version. Defaults to "dev" for local builds.
-// Override via: -ldflags "-X hush.app/server/internal/version.ServerVersion=x.y.z"
+// Override via: -ldflags "-X github.com/hushhq/hush-server/internal/version.ServerVersion=x.y.z"
 var ServerVersion = "dev"
 
 // APIVersion is the API version prefix. Defaults to "v1".
-// Override via: -ldflags "-X hush.app/server/internal/version.APIVersion=v2"
+// Override via: -ldflags "-X github.com/hushhq/hush-server/internal/version.APIVersion=v2"
 var APIVersion = "v1"
 
 // MinClientVersion is the minimum client version required to connect. Defaults to "0.0.0".
-// Override via: -ldflags "-X hush.app/server/internal/version.MinClientVersion=x.y.z"
+// Override via: -ldflags "-X github.com/hushhq/hush-server/internal/version.MinClientVersion=x.y.z"
 var MinClientVersion = "0.0.0"
 
 // KeyPackageLowThreshold is the minimum number of unused MLS KeyPackages the server

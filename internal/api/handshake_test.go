@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"hush.app/server/internal/version"
+	"github.com/hushhq/hush-server/internal/version"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
