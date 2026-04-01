@@ -397,7 +397,7 @@ func TestMessageHandler_HandleMessageSend_ForbiddenWhenNotMember(t *testing.T) {
 		},
 	}
 	h := NewMessageHandler(store, hub)
-	c := NewClient(nil, hub, "user1", "", h)
+	c := NewClient(nil, hub, "user1", "device-1", "", h)
 	hub.Register(c)
 	defer func() { hub.Unregister(c); close(c.send) }()
 
@@ -432,9 +432,9 @@ func TestMessageHandler_HandleMessageSend_StoresAndBroadcasts(t *testing.T) {
 		},
 	}
 	h := NewMessageHandler(store, hub)
-	sender := NewClient(nil, hub, "user1", "", h)
+	sender := NewClient(nil, hub, "user1", "device-1", "", h)
 	hub.Register(sender)
-	recv := NewClient(nil, hub, "user2", "", nil)
+	recv := NewClient(nil, hub, "user2", "device-2", "", nil)
 	hub.Register(recv)
 	hub.Subscribe(sender, "ch1")
 	hub.Subscribe(recv, "ch1")
@@ -475,7 +475,7 @@ func TestMessageHandler_HandleMessageHistory_ForbiddenWhenNotMember(t *testing.T
 		isChannelMemberFn: func(ctx context.Context, channelID, userID string) (bool, error) { return false, nil },
 	}
 	h := NewMessageHandler(store, hub)
-	c := NewClient(nil, hub, "user1", "", h)
+	c := NewClient(nil, hub, "user1", "device-1", "", h)
 	hub.Register(c)
 	defer func() { hub.Unregister(c); close(c.send) }()
 
@@ -502,7 +502,7 @@ func TestMessageHandler_HandleMessageHistory_ReturnsMessages(t *testing.T) {
 		},
 	}
 	h := NewMessageHandler(store, hub)
-	c := NewClient(nil, hub, "user1", "", h)
+	c := NewClient(nil, hub, "user1", "device-1", "", h)
 	hub.Register(c)
 	defer func() { hub.Unregister(c); close(c.send) }()
 
@@ -535,9 +535,9 @@ func TestMessageHandler_HandleMessageSend_FanoutStoresAndBroadcastsPerRecipient(
 		},
 	}
 	h := NewMessageHandler(store, hub)
-	sender := NewClient(nil, hub, "user1", "", h)
+	sender := NewClient(nil, hub, "user1", "device-1", "", h)
 	hub.Register(sender)
-	recv := NewClient(nil, hub, "user2", "", nil)
+	recv := NewClient(nil, hub, "user2", "device-2", "", nil)
 	hub.Register(recv)
 	hub.Subscribe(sender, "ch1")
 	hub.Subscribe(recv, "ch1")
@@ -597,7 +597,7 @@ func TestMessageHandler_HandleMLSCommit_ForbiddenWhenNotMember(t *testing.T) {
 		isChannelMemberFn: func(context.Context, string, string) (bool, error) { return false, nil },
 	}
 	h := NewMessageHandler(store, hub)
-	c := NewClient(nil, hub, "user1", "", h)
+	c := NewClient(nil, hub, "user1", "device-1", "", h)
 	hub.Register(c)
 	defer func() { hub.Unregister(c); close(c.send) }()
 
@@ -628,9 +628,9 @@ func TestMessageHandler_HandleMLSCommit_BroadcastsToChannel(t *testing.T) {
 	_ = appendCalled
 
 	h := NewMessageHandler(store, hub)
-	sender := NewClient(nil, hub, "user1", "", h)
+	sender := NewClient(nil, hub, "user1", "device-1", "", h)
 	hub.Register(sender)
-	recv := NewClient(nil, hub, "user2", "", nil)
+	recv := NewClient(nil, hub, "user2", "device-2", "", nil)
 	hub.Register(recv)
 	hub.Subscribe(sender, "ch1")
 	hub.Subscribe(recv, "ch1")
@@ -652,16 +652,18 @@ func TestMessageHandler_HandleMLSCommit_BroadcastsToChannel(t *testing.T) {
 	// receiver should get mls.commit broadcast
 	msg := drainUntilType(t, recv, "mls.commit", time.Second)
 	var out struct {
-		Type      string `json:"type"`
-		ChannelID string `json:"channel_id"`
-		Epoch     int64  `json:"epoch"`
-		SenderID  string `json:"sender_id"`
+		Type           string `json:"type"`
+		ChannelID      string `json:"channel_id"`
+		Epoch          int64  `json:"epoch"`
+		SenderID       string `json:"sender_id"`
+		SenderDeviceID string `json:"sender_device_id"`
 	}
 	require.NoError(t, json.Unmarshal(msg, &out))
 	assert.Equal(t, "mls.commit", out.Type)
 	assert.Equal(t, "ch1", out.ChannelID)
 	assert.Equal(t, int64(2), out.Epoch)
 	assert.Equal(t, "user1", out.SenderID)
+	assert.Equal(t, "device-1", out.SenderDeviceID)
 }
 
 func TestMessageHandler_HandleMLSLeaveProposal_BroadcastsAddRequest(t *testing.T) {
@@ -670,9 +672,9 @@ func TestMessageHandler_HandleMLSLeaveProposal_BroadcastsAddRequest(t *testing.T
 		isChannelMemberFn: func(context.Context, string, string) (bool, error) { return true, nil },
 	}
 	h := NewMessageHandler(store, hub)
-	sender := NewClient(nil, hub, "user1", "", h)
+	sender := NewClient(nil, hub, "user1", "device-1", "", h)
 	hub.Register(sender)
-	recv := NewClient(nil, hub, "user2", "", nil)
+	recv := NewClient(nil, hub, "user2", "device-2", "", nil)
 	hub.Register(recv)
 	hub.Subscribe(sender, "ch1")
 	hub.Subscribe(recv, "ch1")
@@ -710,7 +712,7 @@ func TestMessageSizeLimit_RejectsOver8KiB(t *testing.T) {
 		isChannelMemberFn: func(context.Context, string, string) (bool, error) { return true, nil },
 	}
 	h := NewMessageHandler(store, hub)
-	c := NewClient(nil, hub, "user1", "", h)
+	c := NewClient(nil, hub, "user1", "device-1", "", h)
 	hub.Register(c)
 	defer func() { hub.Unregister(c); close(c.send) }()
 
@@ -750,9 +752,9 @@ func TestMessageSizeLimit_AcceptsAtLimit(t *testing.T) {
 		},
 	}
 	h := NewMessageHandler(store, hub)
-	sender := NewClient(nil, hub, "user1", "", h)
+	sender := NewClient(nil, hub, "user1", "device-1", "", h)
 	hub.Register(sender)
-	recv := NewClient(nil, hub, "user2", "", nil)
+	recv := NewClient(nil, hub, "user2", "device-2", "", nil)
 	hub.Register(recv)
 	hub.Subscribe(sender, "ch1")
 	hub.Subscribe(recv, "ch1")
@@ -788,9 +790,9 @@ func TestMessageHandler_HandleTyping_BroadcastsToChannel(t *testing.T) {
 		isChannelMemberFn: func(ctx context.Context, channelID, userID string) (bool, error) { return true, nil },
 	}
 	h := NewMessageHandler(store, hub)
-	c := NewClient(nil, hub, "user1", "", h)
+	c := NewClient(nil, hub, "user1", "device-1", "", h)
 	hub.Register(c)
-	other := NewClient(nil, hub, "user2", "", nil)
+	other := NewClient(nil, hub, "user2", "device-2", "", nil)
 	hub.Register(other)
 	hub.Subscribe(c, "ch1")
 	hub.Subscribe(other, "ch1")

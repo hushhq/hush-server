@@ -571,7 +571,13 @@ func (h *deviceHandler) linkVerify(w http.ResponseWriter, r *http.Request) {
 	}
 	// Both "signing device not found" and "invalid certificate" return the same
 	// generic 401 to prevent information leakage about which check failed.
-	if signingPub == nil || !ed25519.Verify(signingPub, newDevicePubBytes, certBytes) {
+	if signingPub == nil {
+		slog.Warn("link-verify rejected: signing device not registered", "user_id", userID, "signing_device_id", req.SigningDeviceID)
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": errLinkingFailed})
+		return
+	}
+	if !ed25519.Verify(signingPub, newDevicePubBytes, certBytes) {
+		slog.Warn("link-verify rejected: certificate verification failed", "user_id", userID, "signing_device_id", req.SigningDeviceID)
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": errLinkingFailed})
 		return
 	}

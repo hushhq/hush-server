@@ -23,20 +23,23 @@ type Claims struct {
 	IsFederated bool `json:"is_federated,omitempty"`
 	// FederatedIdentityID is the federated_identities row ID for the remote user.
 	FederatedIdentityID string `json:"fid,omitempty"`
+	// DeviceID identifies the local device that obtained the session.
+	// Empty for guests and federated sessions.
+	DeviceID string `json:"did,omitempty"`
 }
 
 // SignJWT builds and signs a JWT for the user/session. Expires at expiresAt.
-func SignJWT(userID, sessionID, secret string, expiresAt time.Time) (string, error) {
-	return signJWT(userID, sessionID, secret, expiresAt, false)
+func SignJWT(userID, sessionID, deviceID, secret string, expiresAt time.Time) (string, error) {
+	return signJWT(userID, sessionID, deviceID, secret, expiresAt, false)
 }
 
 // SignGuestJWT builds and signs a short-lived guest JWT. The token is
 // validated by signature only - no DB session record is stored.
 func SignGuestJWT(guestID, sessionID, secret string, expiresAt time.Time) (string, error) {
-	return signJWT(guestID, sessionID, secret, expiresAt, true)
+	return signJWT(guestID, sessionID, "", secret, expiresAt, true)
 }
 
-func signJWT(userID, sessionID, secret string, expiresAt time.Time, isGuest bool) (string, error) {
+func signJWT(userID, sessionID, deviceID, secret string, expiresAt time.Time, isGuest bool) (string, error) {
 	now := time.Now()
 	claims := Claims{
 		RegisteredClaims: jwt.RegisteredClaims{
@@ -47,6 +50,7 @@ func signJWT(userID, sessionID, secret string, expiresAt time.Time, isGuest bool
 		},
 		SessionID: sessionID,
 		IsGuest:   isGuest,
+		DeviceID:  deviceID,
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return tok.SignedString([]byte(secret))
@@ -73,7 +77,7 @@ func SignFederatedJWT(federatedID, sessionID, secret string, expiresAt time.Time
 
 // ValidateJWT parses and validates the token, returning userID, sessionID,
 // isGuest, isFederated, federatedIdentityID, and any error.
-func ValidateJWT(tokenString, secret string) (userID, sessionID string, isGuest, isFederated bool, federatedIdentityID string, err error) {
+func ValidateJWT(tokenString, secret string) (userID, sessionID, deviceID string, isGuest, isFederated bool, federatedIdentityID string, err error) {
 	tok, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(t *jwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
@@ -81,13 +85,13 @@ func ValidateJWT(tokenString, secret string) (userID, sessionID string, isGuest,
 		return []byte(secret), nil
 	})
 	if err != nil {
-		return "", "", false, false, "", err
+		return "", "", "", false, false, "", err
 	}
 	claims, ok := tok.Claims.(*Claims)
 	if !ok || !tok.Valid {
-		return "", "", false, false, "", fmt.Errorf("invalid token")
+		return "", "", "", false, false, "", fmt.Errorf("invalid token")
 	}
-	return claims.Subject, claims.SessionID, claims.IsGuest, claims.IsFederated, claims.FederatedIdentityID, nil
+	return claims.Subject, claims.SessionID, claims.DeviceID, claims.IsGuest, claims.IsFederated, claims.FederatedIdentityID, nil
 }
 
 // TokenHash returns a deterministic hash of the token for storage/lookup.

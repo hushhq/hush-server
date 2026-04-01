@@ -1037,7 +1037,7 @@ func (m *mockStore) SearchUsersPublic(ctx context.Context, query string, limit i
 // Returns the bearer token string.
 func makeAuth(store *mockStore, userID string) string {
 	sessionID := uuid.New().String()
-	token, err := auth.SignJWT(userID, sessionID, testJWTSecret, time.Now().Add(time.Hour))
+	token, err := auth.SignJWT(userID, sessionID, "device-1", testJWTSecret, time.Now().Add(time.Hour))
 	if err != nil {
 		panic(err)
 	}

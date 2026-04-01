@@ -550,6 +550,65 @@ func TestVerify_ValidSignature_Returns200(t *testing.T) {
 	assert.Equal(t, "alice", resp.User.Username)
 }
 
+func TestVerify_BackfillsDeviceKey_WhenDeviceIDProvided(t *testing.T) {
+	pubBase64, priv := generateEd25519KeyPair(t)
+	user := newTestUser("alice")
+	nonceStore := newInMemoryNonceStore()
+
+	var insertedDeviceUserID string
+	var insertedDeviceID string
+	var insertedPublicKey []byte
+	var upsertedDeviceUserID string
+	var upsertedDeviceID string
+
+	store := &mockStore{
+		insertAuthNonceFn:  nonceStore.insertFn,
+		consumeAuthNonceFn: nonceStore.consumeFn,
+		getUserByPublicKeyFn: func(_ context.Context, _ []byte) (*models.User, error) {
+			return user, nil
+		},
+		insertDeviceKeyFn: func(_ context.Context, userID, deviceID, label string, devicePublicKey, certificate []byte) error {
+			insertedDeviceUserID = userID
+			insertedDeviceID = deviceID
+			insertedPublicKey = append([]byte(nil), devicePublicKey...)
+			require.Nil(t, certificate)
+			require.Empty(t, label)
+			return nil
+		},
+		upsertDeviceFn: func(_ context.Context, userID, deviceID, label string) error {
+			upsertedDeviceUserID = userID
+			upsertedDeviceID = deviceID
+			require.Empty(t, label)
+			return nil
+		},
+	}
+	router := newTestRouter(store)
+
+	rr := postJSON(router, "/challenge", models.ChallengeRequest{PublicKey: pubBase64})
+	require.Equal(t, http.StatusOK, rr.Code)
+	var challengeResp map[string]string
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&challengeResp))
+	nonce := challengeResp["nonce"]
+
+	sig := signNonce(nonce, priv)
+	rr = postJSON(router, "/verify", models.VerifyRequest{
+		PublicKey: pubBase64,
+		Nonce:     nonce,
+		Signature: sig,
+		DeviceID:  "device-backfill-1",
+	})
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	assert.Equal(t, user.ID, insertedDeviceUserID)
+	assert.Equal(t, "device-backfill-1", insertedDeviceID)
+	assert.Equal(t, user.ID, upsertedDeviceUserID)
+	assert.Equal(t, "device-backfill-1", upsertedDeviceID)
+
+	expectedPublicKey, err := base64.StdEncoding.DecodeString(pubBase64)
+	require.NoError(t, err)
+	assert.Equal(t, expectedPublicKey, insertedPublicKey)
+}
+
 func TestVerify_ExpiredNonce_Returns401(t *testing.T) {
 	pubBase64, _ := generateEd25519KeyPair(t)
 
@@ -725,7 +784,7 @@ func TestGuestAuth_IssuesShortLivedToken(t *testing.T) {
 	assert.True(t, resp.ExpiresAt.After(time.Now()), "expiresAt must be in the future")
 
 	// Token must validate and carry is_guest=true.
-	_, _, isGuest, _, _, err := internalauth.ValidateJWT(resp.Token, testJWTSecret)
+	_, _, _, isGuest, _, _, err := internalauth.ValidateJWT(resp.Token, testJWTSecret)
 	require.NoError(t, err)
 	assert.True(t, isGuest, "token must have is_guest=true")
 }

@@ -104,6 +104,27 @@ type authHandler struct {
 	transparencySvc      *transparency.TransparencyService
 }
 
+// ensureVerifiedDeviceRegistered backfills the current device into the device
+// registry after a successful challenge-response login. This keeps older
+// accounts, created before device-key tracking existed, compatible with flows
+// مثل multi-device linking that need the approving device to have a stored key.
+//
+// The operation is intentionally best-effort: authentication must not fail just
+// because auxiliary device metadata could not be upserted.
+func (h *authHandler) ensureVerifiedDeviceRegistered(ctx context.Context, userID, deviceID string, publicKey []byte) {
+	if strings.TrimSpace(deviceID) == "" {
+		return
+	}
+
+	if err := h.store.InsertDeviceKey(ctx, userID, deviceID, "", publicKey, nil); err != nil {
+		slog.Warn("backfill device key on verify", "user_id", userID, "device_id", deviceID, "err", err)
+		return
+	}
+	if err := h.store.UpsertDevice(ctx, userID, deviceID, ""); err != nil {
+		slog.Warn("backfill device row on verify", "user_id", userID, "device_id", deviceID, "err", err)
+	}
+}
+
 // purgeNoncesLoop runs PurgeExpiredNonces every noncePurgeInterval.
 // Uses a 30-second context timeout per tick to prevent leaked connections.
 func (h *authHandler) purgeNoncesLoop() {
@@ -202,7 +223,7 @@ func (h *authHandler) register(w http.ResponseWriter, r *http.Request) {
 		if err := h.store.InsertDeviceKey(r.Context(), existingUser.ID, deviceID, req.Label, publicKeyBytes, nil); err != nil {
 			slog.Error("insert device key on account recovery", "err", err)
 		}
-		h.sendAuthResponse(w, r, existingUser)
+		h.sendAuthResponse(w, r, existingUser, deviceID)
 		return
 	}
 
@@ -255,7 +276,7 @@ func (h *authHandler) register(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	h.sendAuthResponse(w, r, user)
+	h.sendAuthResponse(w, r, user, deviceID)
 }
 
 // guestAuth handles POST /api/auth/guest.
@@ -387,7 +408,8 @@ func (h *authHandler) verify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.sendAuthResponse(w, r, user)
+	h.ensureVerifiedDeviceRegistered(r.Context(), user.ID, req.DeviceID, publicKeyBytes)
+	h.sendAuthResponse(w, r, user, req.DeviceID)
 
 	// Fire-and-forget: update device last_seen. Prefer the caller-supplied
 	// device ID so linked devices with non-root device public keys still track
@@ -487,10 +509,10 @@ func (h *authHandler) federatedVerify(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *authHandler) sendAuthResponse(w http.ResponseWriter, r *http.Request, user *models.User) {
+func (h *authHandler) sendAuthResponse(w http.ResponseWriter, r *http.Request, user *models.User, deviceID string) {
 	expiresAt := time.Now().Add(h.jwtExpiry)
 	sessionID := uuid.New().String()
-	tokenString, err := auth.SignJWT(user.ID, sessionID, h.jwtSecret, expiresAt)
+	tokenString, err := auth.SignJWT(user.ID, sessionID, deviceID, h.jwtSecret, expiresAt)
 	if err != nil {
 		slog.Error("sign jwt", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not create session"})

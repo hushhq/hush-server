@@ -50,7 +50,7 @@ func getChannelMessages(handler http.Handler, channelID, token string, before st
 func TestChannelsGetMessages_ValidRequest_Returns200(t *testing.T) {
 	userID := uuid.New().String()
 	sessionID := uuid.New().String()
-	token, err := auth.SignJWT(userID, sessionID, testJWTSecret, time.Now().Add(time.Hour))
+	token, err := auth.SignJWT(userID, sessionID, "device-1", testJWTSecret, time.Now().Add(time.Hour))
 	require.NoError(t, err)
 	tokenHash := auth.TokenHash(token)
 	channelID := uuid.New().String()
@@ -93,7 +93,7 @@ func TestChannelsGetMessages_ValidRequest_Returns200(t *testing.T) {
 func TestChannelsGetMessages_NotMember_Returns403(t *testing.T) {
 	userID := uuid.New().String()
 	sessionID := uuid.New().String()
-	token, _ := auth.SignJWT(userID, sessionID, testJWTSecret, time.Now().Add(time.Hour))
+	token, _ := auth.SignJWT(userID, sessionID, "device-1", testJWTSecret, time.Now().Add(time.Hour))
 	tokenHash := auth.TokenHash(token)
 	store := &mockStore{
 		getSessionByTokenHashFn: func(_ context.Context, th string) (*models.Session, error) {
@@ -114,7 +114,7 @@ func TestChannelsGetMessages_NotMember_Returns403(t *testing.T) {
 func TestChannelsGetMessages_InvalidLimit_Returns400(t *testing.T) {
 	userID := uuid.New().String()
 	sessionID := uuid.New().String()
-	token, _ := auth.SignJWT(userID, sessionID, testJWTSecret, time.Now().Add(time.Hour))
+	token, _ := auth.SignJWT(userID, sessionID, "device-1", testJWTSecret, time.Now().Add(time.Hour))
 	tokenHash := auth.TokenHash(token)
 	store := &mockStore{
 		getSessionByTokenHashFn: func(_ context.Context, th string) (*models.Session, error) {
@@ -133,7 +133,7 @@ func TestChannelsGetMessages_InvalidLimit_Returns400(t *testing.T) {
 func TestChannelsGetMessages_InvalidBefore_Returns400(t *testing.T) {
 	userID := uuid.New().String()
 	sessionID := uuid.New().String()
-	token, _ := auth.SignJWT(userID, sessionID, testJWTSecret, time.Now().Add(time.Hour))
+	token, _ := auth.SignJWT(userID, sessionID, "device-1", testJWTSecret, time.Now().Add(time.Hour))
 	tokenHash := auth.TokenHash(token)
 	store := &mockStore{
 		getSessionByTokenHashFn: func(_ context.Context, th string) (*models.Session, error) {

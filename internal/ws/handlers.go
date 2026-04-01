@@ -428,6 +428,7 @@ func (h *MessageHandler) handleMLSCommit(c *Client, raw []byte) {
 		"epoch":        payload.Epoch,
 		"commit_bytes": payload.CommitBytes,
 		"sender_id":    c.userID,
+		"sender_device_id": c.deviceID,
 		"group_type":   groupType,
 	})
 	h.hub.Broadcast(payload.ChannelID, out, "")

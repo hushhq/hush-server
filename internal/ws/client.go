@@ -21,6 +21,7 @@ const (
 type Client struct {
 	id                  string
 	userID              string
+	deviceID            string
 	federatedIdentityID string // non-empty for federated users, empty for local
 	hub                 *Hub
 	conn                *websocket.Conn
@@ -165,10 +166,11 @@ func (c *Client) writePump() {
 // NewClient creates a client. id and userID are set by the handler after auth.
 // federatedIdentityID is non-empty only for clients authenticated via federated JWT.
 // msgHandler may be nil; when set, it handles message.send, message.history, typing.*.
-func NewClient(conn *websocket.Conn, hub *Hub, userID string, federatedIdentityID string, msgHandler *MessageHandler) *Client {
+func NewClient(conn *websocket.Conn, hub *Hub, userID string, deviceID string, federatedIdentityID string, msgHandler *MessageHandler) *Client {
 	return &Client{
 		id:                  uuid.New().String(),
 		userID:              userID,
+		deviceID:            deviceID,
 		federatedIdentityID: federatedIdentityID,
 		hub:                 hub,
 		conn:                conn,
