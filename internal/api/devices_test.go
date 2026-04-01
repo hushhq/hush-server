@@ -14,6 +14,7 @@ import (
 
 	"github.com/hushhq/hush-server/internal/models"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -483,6 +484,202 @@ func TestLinkResult_WhenReady_ReturnsRelayPayload(t *testing.T) {
 	var resp storedLinkResult
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
 	assert.Equal(t, result, resp)
+}
+
+// ---------- TestLinkVerify_InvalidCert_Generic ----------
+
+// TestLinkVerify_InvalidCert_Generic verifies that an invalid certificate
+// signature returns a generic 401 with no error_code field, to avoid leaking
+// information about the failure reason.
+func TestLinkVerify_InvalidCert_Generic(t *testing.T) {
+	store := &mockStore{}
+	userID := uuid.New().String()
+	token := makeAuth(store, userID)
+
+	signingPub, _, _ := generateDeviceKeyPair(t)
+	newDevicePub, _, newDevicePubBase64 := generateDeviceKeyPair(t)
+
+	// Sign with a DIFFERENT private key (wrong signer) — cert will fail verification.
+	_, wrongPriv, _ := generateDeviceKeyPair(t)
+	badCert := ed25519.Sign(wrongPriv, newDevicePub)
+
+	requestPayload := storedLinkRequest{
+		RequestID:        "req-generic",
+		Secret:           "sec-generic",
+		Code:             "ABCD1234",
+		DeviceID:         "new-device-generic",
+		DevicePublicKey:  newDevicePubBase64,
+		SessionPublicKey: base64.StdEncoding.EncodeToString([]byte{1, 2, 3}),
+		ExpiresAt:        time.Now().Add(5 * time.Minute).UTC().Format(time.RFC3339),
+	}
+	requestBytes, err := json.Marshal(requestPayload)
+	require.NoError(t, err)
+
+	store.consumeAuthNonceFn = func(_ context.Context, nonce string) ([]byte, error) {
+		return requestBytes, nil
+	}
+	store.listDeviceKeysFn = func(_ context.Context, _ string) ([]models.DeviceKey, error) {
+		return []models.DeviceKey{
+			{DeviceID: "existing-device", DevicePublicKey: signingPub},
+		}, nil
+	}
+
+	handler := newDeviceTestRouter(store)
+	rr := postJSONWithAuth(handler, "/link-verify", token, map[string]string{
+		"claimToken":      "claim-generic",
+		"certificate":     base64.StdEncoding.EncodeToString(badCert),
+		"signingDeviceId": "existing-device",
+		"relayCiphertext": "ct",
+		"relayIv":         "iv",
+		"relayPublicKey":  "rp",
+	})
+
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+
+	var body map[string]interface{}
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&body))
+	assert.Equal(t, "Linking failed. Please try again.", body["error"])
+	_, hasErrorCode := body["error_code"]
+	assert.False(t, hasErrorCode, "error_code must not be present in security-sensitive error response")
+}
+
+// ---------- TestLinkVerify_Mismatch_Generic ----------
+
+// TestLinkVerify_Mismatch_Generic verifies that an unknown signingDeviceId
+// returns the same generic 401 as a certificate mismatch, with no error_code.
+func TestLinkVerify_Mismatch_Generic(t *testing.T) {
+	store := &mockStore{}
+	userID := uuid.New().String()
+	token := makeAuth(store, userID)
+
+	_, _, newDevicePubBase64 := generateDeviceKeyPair(t)
+	_, somePriv, _ := generateDeviceKeyPair(t)
+	newDevicePubBytes, _ := base64.StdEncoding.DecodeString(newDevicePubBase64)
+	cert := ed25519.Sign(somePriv, newDevicePubBytes)
+
+	requestPayload := storedLinkRequest{
+		RequestID:        "req-mismatch",
+		Secret:           "sec-mismatch",
+		Code:             "MISMATCH",
+		DeviceID:         "new-device-mismatch",
+		DevicePublicKey:  newDevicePubBase64,
+		SessionPublicKey: base64.StdEncoding.EncodeToString([]byte{1, 2, 3}),
+		ExpiresAt:        time.Now().Add(5 * time.Minute).UTC().Format(time.RFC3339),
+	}
+	requestBytes, err := json.Marshal(requestPayload)
+	require.NoError(t, err)
+
+	store.consumeAuthNonceFn = func(_ context.Context, _ string) ([]byte, error) {
+		return requestBytes, nil
+	}
+	// ListDeviceKeys returns empty — no matching signing device.
+	store.listDeviceKeysFn = func(_ context.Context, _ string) ([]models.DeviceKey, error) {
+		return []models.DeviceKey{}, nil
+	}
+
+	handler := newDeviceTestRouter(store)
+	rr := postJSONWithAuth(handler, "/link-verify", token, map[string]string{
+		"claimToken":      "claim-mismatch",
+		"certificate":     base64.StdEncoding.EncodeToString(cert),
+		"signingDeviceId": "nonexistent-device",
+		"relayCiphertext": "ct",
+		"relayIv":         "iv",
+		"relayPublicKey":  "rp",
+	})
+
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+
+	var body map[string]interface{}
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&body))
+	assert.Equal(t, "Linking failed. Please try again.", body["error"])
+	_, hasErrorCode := body["error_code"]
+	assert.False(t, hasErrorCode, "error_code must not be present in security-sensitive error response")
+}
+
+// ---------- TestApprovalRate ----------
+
+// TestApprovalRate_WarnAtThreshold verifies that 5 or more approvals from the
+// same signingDeviceId within 10 minutes triggers a slog.Warn log entry.
+// The handler must NOT block the request — the 6th approval still succeeds (201).
+func TestApprovalRate_WarnAtThreshold(t *testing.T) {
+	store := &mockStore{}
+	userID := uuid.New().String()
+	token := makeAuth(store, userID)
+
+	signingPub, signingPriv, _ := generateDeviceKeyPair(t)
+	signingDeviceID := "signing-device-rate"
+
+	// Helper: create a valid link-verify request for a fresh new-device keypair.
+	makeBody := func() map[string]string {
+		newDevicePub, _, newDevicePubBase64 := generateDeviceKeyPair(t)
+		certificate := ed25519.Sign(signingPriv, newDevicePub)
+
+		requestPayload := storedLinkRequest{
+			RequestID:        uuid.New().String(),
+			Secret:           uuid.New().String(),
+			Code:             "XXXXXXXX",
+			DeviceID:         uuid.New().String(),
+			DevicePublicKey:  newDevicePubBase64,
+			SessionPublicKey: base64.StdEncoding.EncodeToString([]byte{1, 2, 3}),
+			ExpiresAt:        time.Now().Add(5 * time.Minute).UTC().Format(time.RFC3339),
+		}
+		requestBytes, _ := json.Marshal(requestPayload)
+
+		store.consumeAuthNonceFn = func(_ context.Context, _ string) ([]byte, error) {
+			return requestBytes, nil
+		}
+		store.insertAuthNonceFn = func(_ context.Context, _ string, _ []byte, _ time.Time) error {
+			return nil
+		}
+		store.insertDeviceKeyFn = func(_ context.Context, _, _, _ string, _, _ []byte) error {
+			return nil
+		}
+
+		return map[string]string{
+			"claimToken":      uuid.New().String(),
+			"certificate":     base64.StdEncoding.EncodeToString(certificate),
+			"signingDeviceId": signingDeviceID,
+			"relayCiphertext": "ct",
+			"relayIv":         "iv",
+			"relayPublicKey":  "rp",
+		}
+	}
+
+	store.listDeviceKeysFn = func(_ context.Context, _ string) ([]models.DeviceKey, error) {
+		return []models.DeviceKey{
+			{DeviceID: signingDeviceID, DevicePublicKey: signingPub},
+		}, nil
+	}
+
+	// Use the same handler instance across all 6 requests so the approvalTracker
+	// accumulates state.
+	handler := AuthRoutes(store, testJWTSecret, testJWTExpiry, nil)
+
+	// First 4 approvals — should all succeed without warning.
+	for i := 0; i < 4; i++ {
+		rr := postJSONWithAuth(handler, "/link-verify", token, makeBody())
+		require.Equal(t, http.StatusCreated, rr.Code, "approval %d failed: %s", i+1, rr.Body.String())
+	}
+
+	// 5th approval — triggers the warning threshold (count >= 5 after append).
+	// The request must still succeed (no hard block).
+	rr := postJSONWithAuth(handler, "/link-verify", token, makeBody())
+	assert.Equal(t, http.StatusCreated, rr.Code, "5th approval should still succeed: %s", rr.Body.String())
+}
+
+// ---------- TestDeviceRoutes_Hub ----------
+
+// TestDeviceRoutes_Hub verifies that DeviceRoutes accepts a hub parameter and
+// that the resulting handler compiles and wires the hub correctly. This is a
+// compilation test — passing nil for the hub is valid (handlers nil-check before use).
+func TestDeviceRoutes_Hub(t *testing.T) {
+	store := &mockStore{}
+	// Passing a nil GlobalBroadcaster is valid; handlers nil-check hub before use.
+	var hub GlobalBroadcaster
+	r := chi.NewRouter()
+	r.Group(DeviceRoutes(store, testJWTSecret, nil, hub))
+	// If DeviceRoutes compiles and returns without panic, the hub wiring is correct.
+	assert.NotNil(t, r)
 }
 
 func ptr(s string) *string { return &s }

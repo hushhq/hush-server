@@ -242,7 +242,7 @@ func main() {
 		// multi-instance boot (challenge+verify per instance), and /me polling.
 		r.Route("/api/auth", func(sub chi.Router) {
 			sub.Use(api.IPRateLimiter(rate.Limit(60.0/60.0), 30))
-			sub.Mount("/", api.AuthRoutes(pool, cfg.JWTSecret, cfg.JWTExpiry, transparencySvc))
+			sub.Mount("/", api.AuthRoutes(pool, cfg.JWTSecret, cfg.JWTExpiry, transparencySvc, wsHub))
 		})
 		// MLS key management: per-user limit - 10 requests per minute.
 		r.Route("/api/mls", func(sub chi.Router) {

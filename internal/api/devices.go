@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hushhq/hush-server/internal/db"
@@ -26,6 +27,17 @@ const (
 	linkClaimNoncePrefix   = "link:claim:"
 	linkResultNoncePrefix  = "link:result:"
 	ed25519CertLen         = 64
+
+	// approvalRateWindow is the rolling window for soft rate monitoring.
+	approvalRateWindow = 10 * time.Minute
+	// approvalRateThreshold is the count at which a slog.Warn is emitted.
+	// The threshold fires when count >= approvalRateThreshold after an approval.
+	approvalRateThreshold = 5
+
+	// errLinkingFailed is the generic message for all cryptographic/key failures
+	// in link-verify. A single message prevents information leakage about which
+	// check specifically failed (replay, cert mismatch, unknown key).
+	errLinkingFailed = "Linking failed. Please try again."
 )
 
 var linkCodeCharset = []byte("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
@@ -70,8 +82,15 @@ type storedLinkResult struct {
 // transparencySvc may be nil when the transparency log is not configured for
 // this instance. Device certify and revoke operations append synchronously
 // when the service is non-nil (non-fatal on failure).
-func DeviceRoutes(store db.Store, jwtSecret string, transparencySvc *transparency.TransparencyService) func(r chi.Router) {
-	h := &deviceHandler{store: store, transparencySvc: transparencySvc}
+//
+// hub may be nil; all broadcast calls are nil-checked before use.
+func DeviceRoutes(store db.Store, jwtSecret string, transparencySvc *transparency.TransparencyService, hub GlobalBroadcaster) func(r chi.Router) {
+	h := &deviceHandler{
+		store:           store,
+		transparencySvc: transparencySvc,
+		hub:             hub,
+		approvalTracker: make(map[string][]time.Time),
+	}
 	return func(r chi.Router) {
 		// New-device side: no auth session exists yet.
 		r.Post("/link-request", h.linkRequest)
@@ -96,6 +115,13 @@ func DeviceRoutes(store db.Store, jwtSecret string, transparencySvc *transparenc
 type deviceHandler struct {
 	store           db.Store
 	transparencySvc *transparency.TransparencyService
+	// hub is used for downstream WS notifications. May be nil.
+	hub GlobalBroadcaster
+
+	// approvalTracker tracks per-signing-device approval timestamps for soft
+	// rate monitoring. Access is guarded by approvalMu.
+	approvalMu      sync.Mutex
+	approvalTracker map[string][]time.Time
 }
 
 // ---------- List ----------
@@ -543,12 +569,10 @@ func (h *deviceHandler) linkVerify(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not look up signing device"})
 		return
 	}
-	if signingPub == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "signing device not found"})
-		return
-	}
-	if !ed25519.Verify(signingPub, newDevicePubBytes, certBytes) {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid certificate"})
+	// Both "signing device not found" and "invalid certificate" return the same
+	// generic 401 to prevent information leakage about which check failed.
+	if signingPub == nil || !ed25519.Verify(signingPub, newDevicePubBytes, certBytes) {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": errLinkingFailed})
 		return
 	}
 
@@ -558,6 +582,10 @@ func (h *deviceHandler) linkVerify(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not register device"})
 		return
 	}
+
+	// Soft approval rate monitoring: log a warning when a single device approves
+	// an unusual number of link requests within a short window. No hard block.
+	h.recordApproval(req.SigningDeviceID)
 	if requestPayload.Label != "" {
 		if err := h.store.UpsertDevice(r.Context(), userID, requestPayload.DeviceID, requestPayload.Label); err != nil {
 			slog.Warn("upsert linked device label", "err", err, "device_id", requestPayload.DeviceID)
@@ -641,6 +669,35 @@ func (h *deviceHandler) linkResult(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------- Helpers ----------
+
+// recordApproval tracks a successful link-verify approval from signingDeviceID
+// and emits a slog.Warn when the count within the rolling window reaches
+// approvalRateThreshold. This is a soft signal only — the request is never blocked.
+func (h *deviceHandler) recordApproval(signingDeviceID string) {
+	now := time.Now()
+	cutoff := now.Add(-approvalRateWindow)
+
+	h.approvalMu.Lock()
+	defer h.approvalMu.Unlock()
+
+	// Prune timestamps older than the rolling window.
+	existing := h.approvalTracker[signingDeviceID]
+	fresh := existing[:0]
+	for _, ts := range existing {
+		if ts.After(cutoff) {
+			fresh = append(fresh, ts)
+		}
+	}
+	fresh = append(fresh, now)
+	h.approvalTracker[signingDeviceID] = fresh
+
+	if len(fresh) >= approvalRateThreshold {
+		slog.Warn("unusual device approval rate",
+			"signing_device_id", signingDeviceID,
+			"count", len(fresh),
+		)
+	}
+}
 
 // findDevicePublicKey looks up the raw public key for a specific device belonging
 // to a user. Returns nil (no error) when the device is not found.

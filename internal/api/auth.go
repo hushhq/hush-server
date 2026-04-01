@@ -47,8 +47,11 @@ var usernameRE = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
 // transparencySvc may be nil when the transparency log is not configured for
 // this instance. All transparency operations nil-guard before use.
 //
+// hub may be nil; all broadcast calls within device handlers are nil-checked
+// before use. Pass the *ws.Hub from router setup for WS notifications.
+//
 // Guest session duration is read from GUEST_SESSION_HOURS (default 1 hour).
-func AuthRoutes(store db.Store, jwtSecret string, jwtExpiry time.Duration, transparencySvc *transparency.TransparencyService) chi.Router {
+func AuthRoutes(store db.Store, jwtSecret string, jwtExpiry time.Duration, transparencySvc *transparency.TransparencyService, hub ...GlobalBroadcaster) chi.Router {
 	guestHours := defaultGuestSessionHours
 	if h := os.Getenv("GUEST_SESSION_HOURS"); h != "" {
 		if v, err := strconv.Atoi(h); err == nil && v > 0 {
@@ -79,7 +82,14 @@ func AuthRoutes(store db.Store, jwtSecret string, jwtExpiry time.Duration, trans
 	})
 
 	// Device management and multi-device linking (require auth - mounted inline).
-	r.Group(DeviceRoutes(store, jwtSecret, transparencySvc))
+	// Hub is variadic to maintain backward compatibility with existing call sites
+	// (tests and main.go) that omit the hub parameter. Nil is safe — all device
+	// handler broadcast calls nil-check before use.
+	var deviceHub GlobalBroadcaster
+	if len(hub) > 0 {
+		deviceHub = hub[0]
+	}
+	r.Group(DeviceRoutes(store, jwtSecret, transparencySvc, deviceHub))
 
 	go h.purgeNoncesLoop()
 
