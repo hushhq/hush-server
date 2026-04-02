@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -19,50 +20,103 @@ import (
 // and forcefully disconnecting the user. Gives the client time to receive the message.
 const banDisconnectGrace = 500 * time.Millisecond
 
-// RequireAdminAPIKey is middleware that enforces X-Admin-Key header authentication.
-// It returns 401 when the header is missing or does not match adminAPIKey.
-// This middleware is applied to all /api/admin routes.
-func RequireAdminAPIKey(adminAPIKey string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			key := r.Header.Get("X-Admin-Key")
-			if key == "" || key != adminAPIKey {
-				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid or missing admin API key"})
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
+type adminStore interface {
+	Ping(ctx context.Context) error
+	CountInstanceAdmins(ctx context.Context) (int, error)
+	CreateInstanceAdmin(ctx context.Context, username string, email *string, passwordHash, role string) (*models.InstanceAdmin, error)
+	GetInstanceAdminByUsername(ctx context.Context, username string) (*models.InstanceAdmin, error)
+	GetInstanceAdminByID(ctx context.Context, id string) (*models.InstanceAdmin, error)
+	ListInstanceAdmins(ctx context.Context) ([]models.InstanceAdmin, error)
+	UpdateInstanceAdmin(ctx context.Context, id string, email *string, role string, isActive bool) (*models.InstanceAdmin, error)
+	UpdateInstanceAdminPassword(ctx context.Context, id, passwordHash string) error
+	TouchInstanceAdminLastLogin(ctx context.Context, id string, loginAt time.Time) error
+	CreateInstanceAdminSession(ctx context.Context, sessionID, adminID, tokenHash string, expiresAt time.Time, createdIP, userAgent *string) (*models.InstanceAdminSession, error)
+	GetInstanceAdminSessionByTokenHash(ctx context.Context, tokenHash string) (*models.InstanceAdminSession, error)
+	DeleteInstanceAdminSessionByID(ctx context.Context, sessionID string) error
+	UpdateInstanceAdminSessionLastSeen(ctx context.Context, sessionID string, seenAt time.Time) error
+	GetInstanceServiceIdentity(ctx context.Context) (*models.InstanceServiceIdentity, error)
+	UpsertInstanceServiceIdentity(ctx context.Context, username string, publicKey, wrappedPrivateKey []byte, wrappingKeyVersion string) (*models.InstanceServiceIdentity, error)
+	ListGuildBillingStats(ctx context.Context) ([]models.GuildBillingStats, error)
+	ListMembers(ctx context.Context) ([]models.Member, error)
+	GetInstanceConfig(ctx context.Context) (*models.InstanceConfig, error)
+	UpdateInstanceConfig(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string, serverCreationPolicy *string) error
+	GetVoiceKeyRotationHours(ctx context.Context) (int, error)
+	ListServerTemplates(ctx context.Context) ([]models.ServerTemplate, error)
+	GetServerTemplateByID(ctx context.Context, id string) (*models.ServerTemplate, error)
+	CreateServerTemplate(ctx context.Context, name string, channels json.RawMessage, isDefault bool) (*models.ServerTemplate, error)
+	UpdateServerTemplate(ctx context.Context, id string, name string, channels json.RawMessage, isDefault bool) error
+	DeleteServerTemplate(ctx context.Context, id string) error
+	InsertInstanceBanByAdmin(ctx context.Context, userID, actorAdminID, reason string, expiresAt *time.Time) (*models.InstanceBan, error)
+	GetActiveInstanceBan(ctx context.Context, userID string) (*models.InstanceBan, error)
+	LiftInstanceBanByAdmin(ctx context.Context, banID, liftedByAdminID string) error
+	ListServersForUser(ctx context.Context, userID string) ([]models.Server, error)
+	RemoveServerMember(ctx context.Context, serverID, userID string) error
+	DeleteSessionsByUserID(ctx context.Context, userID string) error
+	ListInstanceAuditLog(ctx context.Context, limit, offset int, filter *db.InstanceAuditLogFilter) ([]models.InstanceAuditLogEntry, error)
 }
 
 // AdminAPIRoutes returns the chi router for /api/admin.
-// All routes require the X-Admin-Key header - no user auth is used.
-// The admin API is the only place from which instance-level privileged operations
-// are performed in the opacity model.
-func AdminAPIRoutes(store db.Store, adminAPIKey string, hub GlobalBroadcaster, cache *InstanceCache) chi.Router {
-	h := &adminHandler{store: store, hub: hub, cache: cache, startedAt: time.Now()}
+// Bootstrap and session routes are public; all resource routes use local admin sessions.
+func AdminAPIRoutes(
+	store adminStore,
+	bootstrapSecret string,
+	sessionTTL time.Duration,
+	secureCookies bool,
+	serviceIdentityMasterKey string,
+	hub GlobalBroadcaster,
+	cache *InstanceCache,
+) chi.Router {
+	h := &adminHandler{
+		store:                    store,
+		hub:                      hub,
+		cache:                    cache,
+		startedAt:                time.Now(),
+		bootstrapSecret:          bootstrapSecret,
+		sessionTTL:               sessionTTL,
+		secureCookies:            secureCookies,
+		serviceIdentityMasterKey: serviceIdentityMasterKey,
+	}
 	r := chi.NewRouter()
-	r.Use(RequireAdminAPIKey(adminAPIKey))
-	r.Get("/guilds", h.listGuilds)
-	r.Get("/users", h.listUsers)
-	r.Get("/health", h.health)
-	r.Get("/config", h.getConfig)
-	r.Put("/config", h.updateConfig)
-	r.Get("/templates", h.listServerTemplates)
-	r.Post("/templates", h.createServerTemplate)
-	r.Put("/templates/{templateId}", h.updateServerTemplate)
-	r.Delete("/templates/{templateId}", h.deleteServerTemplate)
-	r.Post("/bans", h.instanceBan)
-	r.Delete("/bans/{userId}", h.instanceUnban)
-	r.Get("/audit-log", h.instanceAuditLog)
+	r.Post("/bootstrap/status", h.bootstrapStatus)
+	r.Post("/bootstrap/claim", h.bootstrapClaim)
+	r.Post("/session/login", h.login)
+	r.With(RequireAdminSession(store), RequireAdminOrigin()).Post("/session/logout", h.logout)
+	r.With(RequireAdminSession(store)).Get("/session/me", h.me)
+
+	r.Group(func(protected chi.Router) {
+		protected.Use(RequireAdminSession(store))
+		protected.Use(RequireAdminOrigin())
+		protected.Get("/guilds", h.listGuilds)
+		protected.Get("/users", h.listUsers)
+		protected.Get("/health", h.health)
+		protected.Get("/config", h.getConfig)
+		protected.Put("/config", h.updateConfig)
+		protected.Get("/templates", h.listServerTemplates)
+		protected.Post("/templates", h.createServerTemplate)
+		protected.Put("/templates/{templateId}", h.updateServerTemplate)
+		protected.Delete("/templates/{templateId}", h.deleteServerTemplate)
+		protected.Post("/bans", h.instanceBan)
+		protected.Delete("/bans/{userId}", h.instanceUnban)
+		protected.Get("/audit-log", h.instanceAuditLog)
+		protected.Get("/service-identity", h.getServiceIdentity)
+		protected.With(RequireAdminRole("owner")).Get("/admins", h.listAdmins)
+		protected.With(RequireAdminRole("owner")).Post("/admins", h.createAdminAccount)
+		protected.With(RequireAdminRole("owner")).Patch("/admins/{adminId}", h.patchAdminAccount)
+		protected.With(RequireAdminRole("owner")).Post("/admins/{adminId}/reset-password", h.resetAdminPassword)
+		protected.With(RequireAdminRole("owner")).Post("/service-identity/provision", h.provisionServiceIdentity)
+	})
 	return r
 }
 
 type adminHandler struct {
-	store     db.Store
-	hub       GlobalBroadcaster
-	cache     *InstanceCache
-	startedAt time.Time
+	store                    adminStore
+	hub                      GlobalBroadcaster
+	cache                    *InstanceCache
+	startedAt                time.Time
+	bootstrapSecret          string
+	sessionTTL               time.Duration
+	secureCookies            bool
+	serviceIdentityMasterKey string
 }
 
 // listGuilds handles GET /api/admin/guilds.
@@ -102,11 +156,11 @@ func (h *adminHandler) health(w http.ResponseWriter, r *http.Request) {
 		dbStatus = "unreachable"
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"status":    "ok",
-		"dbStatus":  dbStatus,
-		"version":   version.ServerVersion,
+		"status":        "ok",
+		"dbStatus":      dbStatus,
+		"version":       version.ServerVersion,
 		"uptimeSeconds": time.Since(h.startedAt).Seconds(),
-		"startedAt": h.startedAt.Format(time.RFC3339),
+		"startedAt":     h.startedAt.Format(time.RFC3339),
 	})
 }
 
@@ -188,34 +242,10 @@ func (h *adminHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	oldCfg, _ := h.store.GetInstanceConfig(r.Context())
-
 	if err := h.store.UpdateInstanceConfig(r.Context(), req.Name, req.IconURL, req.RegistrationMode, req.GuildDiscovery, req.ServerCreationPolicy); err != nil {
 		slog.Error("admin updateConfig", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update config"})
 		return
-	}
-
-	// Audit log config_change with old/new values.
-	if oldCfg != nil {
-		metadata := map[string]interface{}{}
-		if req.Name != nil && *req.Name != oldCfg.Name {
-			metadata["name"] = map[string]string{"old": oldCfg.Name, "new": *req.Name}
-		}
-		if req.RegistrationMode != nil && *req.RegistrationMode != oldCfg.RegistrationMode {
-			metadata["registration_mode"] = map[string]string{"old": oldCfg.RegistrationMode, "new": *req.RegistrationMode}
-		}
-		if req.GuildDiscovery != nil && *req.GuildDiscovery != oldCfg.GuildDiscovery {
-			metadata["guild_discovery"] = map[string]string{"old": oldCfg.GuildDiscovery, "new": *req.GuildDiscovery}
-		}
-		if req.ServerCreationPolicy != nil && *req.ServerCreationPolicy != oldCfg.ServerCreationPolicy {
-			metadata["server_creation_policy"] = map[string]string{"old": oldCfg.ServerCreationPolicy, "new": *req.ServerCreationPolicy}
-		}
-		if len(metadata) > 0 {
-			if err := h.store.InsertInstanceAuditLog(r.Context(), "admin-api", nil, "config_change", "instance config updated via admin API", metadata); err != nil {
-				slog.Error("admin updateConfig: insert audit log", "err", err)
-			}
-		}
 	}
 
 	// Refresh handshake cache.
@@ -322,9 +352,6 @@ func (h *adminHandler) createServerTemplate(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create template"})
 		return
 	}
-	if err := h.store.InsertInstanceAuditLog(r.Context(), "admin-api", nil, "template_created", "server template created: "+tmpl.Name, nil); err != nil {
-		slog.Error("admin createServerTemplate: insert audit log", "err", err)
-	}
 	writeJSON(w, http.StatusCreated, tmpl)
 }
 
@@ -355,9 +382,6 @@ func (h *adminHandler) updateServerTemplate(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update template"})
 		return
 	}
-	if err := h.store.InsertInstanceAuditLog(r.Context(), "admin-api", nil, "template_updated", "server template updated: "+req.Name, nil); err != nil {
-		slog.Error("admin updateServerTemplate: insert audit log", "err", err)
-	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -373,9 +397,6 @@ func (h *adminHandler) deleteServerTemplate(w http.ResponseWriter, r *http.Reque
 		slog.Error("admin deleteServerTemplate", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to delete template"})
 		return
-	}
-	if err := h.store.InsertInstanceAuditLog(r.Context(), "admin-api", nil, "template_deleted", "server template deleted: "+existing.Name, nil); err != nil {
-		slog.Error("admin deleteServerTemplate: insert audit log", "err", err)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -423,7 +444,7 @@ func (h *adminHandler) instanceBan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 3. Insert ban record.
-	_, err := h.store.InsertInstanceBan(r.Context(), req.UserID, "admin-api", req.Reason, expiresAt)
+	_, err := h.store.InsertInstanceBanByAdmin(r.Context(), req.UserID, adminIDFromContext(r.Context()), req.Reason, expiresAt)
 	if err != nil {
 		slog.Error("admin instanceBan: insert ban", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create ban"})
@@ -443,15 +464,6 @@ func (h *adminHandler) instanceBan(w http.ResponseWriter, r *http.Request) {
 			})
 			h.hub.BroadcastToServer(guild.ID, msg)
 		}
-	}
-
-	// 5. Audit log.
-	var metadata map[string]interface{}
-	if req.ExpiresIn != nil {
-		metadata = map[string]interface{}{"expires_in": *req.ExpiresIn}
-	}
-	if err := h.store.InsertInstanceAuditLog(r.Context(), "admin-api", &req.UserID, "instance_ban", req.Reason, metadata); err != nil {
-		slog.Error("admin instanceBan: insert audit log", "err", err)
 	}
 
 	w.WriteHeader(http.StatusNoContent)
@@ -482,13 +494,10 @@ func (h *adminHandler) instanceUnban(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no active instance ban for this user"})
 		return
 	}
-	if err := h.store.LiftInstanceBan(r.Context(), ban.ID, "admin-api"); err != nil {
+	if err := h.store.LiftInstanceBanByAdmin(r.Context(), ban.ID, adminIDFromContext(r.Context())); err != nil {
 		slog.Error("admin instanceUnban: lift ban", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to lift ban"})
 		return
-	}
-	if err := h.store.InsertInstanceAuditLog(r.Context(), "admin-api", &targetUserID, "instance_unban", reason, nil); err != nil {
-		slog.Error("admin instanceUnban: insert audit log", "err", err)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

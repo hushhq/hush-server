@@ -39,7 +39,7 @@ The Hush server is designed to be a blind relay. It routes and stores encrypted 
 
 ### Admin dashboard
 
-The admin dashboard (`X-Admin-Key` header auth) sees only opaque data: UUIDs, member counts, message counts, timestamps. It cannot read guild names, channel names, or message content.
+The admin dashboard uses local instance-admin accounts authenticated by secure session cookies. It sees only opaque data: UUIDs, member counts, message counts, timestamps. It cannot read guild names, channel names, or message content.
 
 ---
 
@@ -66,7 +66,7 @@ API request bodies are validated server-side in the Go backend before any databa
 | `publicKey` | Valid Ed25519 public key (32 bytes) |
 | `encrypted_metadata` | Accepted as opaque BYTEA; server never parses contents |
 | `permission_level` | Integer 0–3 |
-| `X-Admin-Key` | Required header for admin endpoints; validated against `ADMIN_API_KEY` config |
+| Admin session cookie | Required for `/api/admin/*` after bootstrap/login; stored as `HttpOnly` and validated server-side |
 
 Chat messages are stored as MLS ciphertext blobs. The server never processes plaintext content.
 

@@ -171,7 +171,7 @@ JWTs are HS256-signed with `JWT_SECRET`. Standard claims: `sub` (user UUID), `ex
 
 ### Admin access
 
-Admin endpoints are protected by `X-Admin-Key` header, validated against `ADMIN_API_KEY` config. Admin auth is separate from user auth - the admin dashboard authenticates as an operator, not as a Hush user.
+Admin endpoints use local instance-admin accounts plus secure session cookies. The first owner account is created through a one-time `ADMIN_BOOTSTRAP_SECRET`; normal dashboard access then uses `/api/admin/session/login` and an `HttpOnly` session cookie. Admin auth is separate from Hush user auth.
 
 ---
 

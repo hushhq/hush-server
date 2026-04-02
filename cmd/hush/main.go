@@ -208,13 +208,13 @@ func main() {
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"*"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Admin-Key"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
 		AllowCredentials: false,
 	}))
 	// General per-IP rate limit: 100 requests per minute with a burst of 100. SEC-04.
 	r.Use(api.IPRateLimiter(rate.Limit(100.0/60.0), 100))
 
-	r.Get("/api/health", func(w http.ResponseWriter, r *http.Request) {
+	healthHandler := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if pool != nil {
 			if err := pool.Ping(r.Context()); err != nil {
@@ -225,7 +225,9 @@ func main() {
 		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
-	})
+	}
+	r.Get("/api/health", healthHandler)
+	r.Post("/api/health", healthHandler)
 
 	// Public instance handshake - no auth, no DB query. Clients discover
 	// capabilities, version requirements, and registration policy here.
@@ -266,9 +268,15 @@ func main() {
 		// Public invite info (unauthenticated) + claim (authenticated, not guild-scoped).
 		r.Mount("/api/invites", api.PublicInviteRoutes(pool, cfg.JWTSecret, wsHub))
 
-		// Instance-operator admin endpoints - authenticated by X-Admin-Key header, not JWT.
-		// AdminAPIKey empty means no admin key is configured; the middleware rejects all requests.
-		r.Mount("/api/admin", api.AdminAPIRoutes(pool, cfg.AdminAPIKey, wsHub, handshakeCache))
+		r.Mount("/api/admin", api.AdminAPIRoutes(
+			pool,
+			cfg.AdminBootstrapSecret,
+			cfg.AdminSessionTTL,
+			cfg.Production,
+			cfg.ServiceIdentityMasterKey,
+			wsHub,
+			handshakeCache,
+		))
 
 		r.Get("/ws", ws.Handler(wsHub, cfg.JWTSecret, pool, cfg.CORSOrigin))
 		r.Mount("/api/livekit", api.LiveKitRoutes(pool, cfg.JWTSecret, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret))

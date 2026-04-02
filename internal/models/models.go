@@ -21,6 +21,46 @@ type Session struct {
 	ExpiresAt time.Time `json:"-"`
 }
 
+// InstanceAdmin is a local instance-operator account for the admin dashboard.
+// It is separate from Hush users and cannot be used for end-user authentication.
+type InstanceAdmin struct {
+	ID           string     `json:"id"`
+	Username     string     `json:"username"`
+	Email        *string    `json:"email,omitempty"`
+	PasswordHash string     `json:"-"`
+	Role         string     `json:"role"`
+	IsActive     bool       `json:"isActive"`
+	LastLoginAt  *time.Time `json:"lastLoginAt,omitempty"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	UpdatedAt    time.Time  `json:"updatedAt"`
+}
+
+// InstanceAdminSession is a persisted dashboard session for an instance admin.
+// Only the opaque cookie token hash is stored server-side.
+type InstanceAdminSession struct {
+	ID         string     `json:"id"`
+	AdminID    string     `json:"adminId"`
+	TokenHash  string     `json:"-"`
+	ExpiresAt  time.Time  `json:"expiresAt"`
+	LastSeenAt *time.Time `json:"lastSeenAt,omitempty"`
+	CreatedIP  *string    `json:"createdIp,omitempty"`
+	UserAgent  *string    `json:"userAgent,omitempty"`
+	CreatedAt  time.Time  `json:"createdAt"`
+	RevokedAt  *time.Time `json:"revokedAt,omitempty"`
+}
+
+// InstanceServiceIdentity stores the instance-scoped technical Hush identity.
+// It is a non-human account and must never be used for dashboard login.
+type InstanceServiceIdentity struct {
+	ID                 string    `json:"id"`
+	Username           string    `json:"username"`
+	PublicKey          []byte    `json:"-"`
+	WrappedPrivateKey  []byte    `json:"-"`
+	WrappingKeyVersion string    `json:"wrappingKeyVersion"`
+	CreatedAt          time.Time `json:"createdAt"`
+	UpdatedAt          time.Time `json:"updatedAt"`
+}
+
 // RegisterRequest is the body for POST /api/auth/register.
 // PublicKey is the base64-encoded Ed25519 root public key derived from the
 // user's BIP39 mnemonic. No password field - identity is cryptographic.

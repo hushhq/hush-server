@@ -111,12 +111,20 @@ The server reads configuration from environment variables (or `.env` in the proj
 | `JWT_SECRET` | Random secret for JWT signing (min 32 bytes) |
 | `JWT_EXPIRY_HOURS` | Session token lifetime in hours |
 | `ADMIN_API_KEY` | API key for admin dashboard access |
+| `ADMIN_BOOTSTRAP_SECRET` | One-time secret used only to create the first local admin owner |
 | `DOMAIN` | Public instance hostname; also used to derive `CORS_ORIGIN` when omitted |
 | `CORS_ORIGIN` | Allowed frontend origin (do not use `*` in production) |
 | `LIVEKIT_API_KEY` | LiveKit API key |
 | `LIVEKIT_API_SECRET` | LiveKit API secret |
 | `LIVEKIT_URL` | LiveKit signaling URL |
 | `TRANSPARENCY_LOG_PRIVATE_KEY` | Hex-encoded 32-byte Ed25519 seed for key transparency log signing; never change after first log entry |
+
+Optional:
+
+| Variable | Default | Description |
+|-|-|-|
+| `ADMIN_SESSION_TTL_HOURS` | `24` | Dashboard session lifetime in hours |
+| `SERVICE_IDENTITY_MASTER_KEY` | unset | 32-byte hex/base64 key used to wrap the instance service identity private key at rest |
 
 See `.env.example` for the full list with defaults and descriptions.
 
@@ -154,7 +162,9 @@ All endpoints are prefixed with `/api`. Authentication uses `Authorization: Bear
 | `POST /api/mls/commit` | Deliver MLS commit to group members |
 | `POST /api/transparency/append` | Append entry to key transparency log |
 | `GET /api/transparency/verify` | Verify inclusion proof |
-| `GET /api/admin/*` | Admin dashboard endpoints (requires `X-Admin-Key` header) |
+| `POST /api/admin/bootstrap/claim` | Create the first local admin owner using the bootstrap secret |
+| `POST /api/admin/session/login` | Log in to the admin dashboard and receive a secure session cookie |
+| `GET /api/admin/*` | Admin dashboard endpoints (requires local admin session cookie) |
 
 WebSocket endpoint: `GET /ws` - real-time message delivery, presence, MLS group operations.
 
