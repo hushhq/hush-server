@@ -63,7 +63,7 @@ func RequireAuth(jwtSecret string, store db.Store) func(http.Handler) http.Handl
 				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing or invalid authorization"})
 				return
 			}
-			userID, sessionID, _, isGuest, isFederated, federatedIdentityID, err := auth.ValidateJWT(token, jwtSecret)
+			userID, sessionID, deviceID, isGuest, isFederated, federatedIdentityID, err := auth.ValidateJWT(token, jwtSecret)
 			if err != nil {
 				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid or expired token"})
 				return
@@ -73,6 +73,7 @@ func RequireAuth(jwtSecret string, store db.Store) func(http.Handler) http.Handl
 			if isFederated {
 				r = r.WithContext(withUserID(r.Context(), federatedIdentityID))
 				r = r.WithContext(withSessionID(r.Context(), sessionID))
+				r = r.WithContext(withDeviceID(r.Context(), ""))
 				r = r.WithContext(withIsGuest(r.Context(), false))
 				r = r.WithContext(withIsFederated(r.Context(), true))
 				r = r.WithContext(withFederatedIdentityID(r.Context(), federatedIdentityID))
@@ -95,6 +96,7 @@ func RequireAuth(jwtSecret string, store db.Store) func(http.Handler) http.Handl
 			}
 			r = r.WithContext(withUserID(r.Context(), userID))
 			r = r.WithContext(withSessionID(r.Context(), sessionID))
+			r = r.WithContext(withDeviceID(r.Context(), deviceID))
 			r = r.WithContext(withIsGuest(r.Context(), isGuest))
 			next.ServeHTTP(w, r)
 		})

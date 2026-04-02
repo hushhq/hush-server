@@ -104,7 +104,6 @@ func (h *mlsHandler) uploadCredential(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
 		return
 	}
-
 	if err := h.store.UpsertMLSCredential(r.Context(), userID, req.DeviceID, req.CredentialBytes, req.SigningPublicKey, 1); err != nil {
 		slog.Error("mls: upsert credential", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "upload failed"})
@@ -401,6 +400,7 @@ func (h *mlsHandler) postCommit(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
 		return
 	}
+	deviceID := deviceIDFromContext(r.Context())
 
 	groupType := resolveGroupType(r)
 
@@ -444,12 +444,13 @@ func (h *mlsHandler) postCommit(w http.ResponseWriter, r *http.Request) {
 
 	// group_type is included so Plan 03's handleVoiceCommit can filter voice vs text commits.
 	msg, _ := json.Marshal(map[string]interface{}{
-		"type":         "mls.commit",
-		"channel_id":   channelID,
-		"epoch":        req.Epoch,
-		"commit_bytes": req.CommitBytes,
-		"sender_id":    userID,
-		"group_type":   groupType,
+		"type":             "mls.commit",
+		"channel_id":       channelID,
+		"epoch":            req.Epoch,
+		"commit_bytes":     req.CommitBytes,
+		"sender_id":        userID,
+		"sender_device_id": deviceID,
+		"group_type":       groupType,
 	})
 	h.hub.Broadcast(channelID, msg, "")
 	w.WriteHeader(http.StatusNoContent)

@@ -71,10 +71,22 @@ func (p *Pool) AppendMLSCommit(ctx context.Context, channelID string, epoch int6
 // ordered by epoch ascending, limited to at most limit rows.
 func (p *Pool) GetMLSCommitsSinceEpoch(ctx context.Context, channelID string, sinceEpoch int64, limit int) ([]MLSCommitRow, error) {
 	rows, err := p.Query(ctx, `
-		SELECT epoch, commit_bytes, sender_id, created_at
-		FROM mls_commits
-		WHERE channel_id = $1 AND epoch > $2
-		ORDER BY epoch ASC
+		WITH ordered_commits AS (
+			SELECT
+				CASE
+					WHEN epoch > 0 THEN epoch
+					ELSE ROW_NUMBER() OVER (PARTITION BY channel_id ORDER BY created_at ASC, id ASC)
+				END AS effective_epoch,
+				commit_bytes,
+				sender_id,
+				created_at
+			FROM mls_commits
+			WHERE channel_id = $1
+		)
+		SELECT effective_epoch, commit_bytes, sender_id, created_at
+		FROM ordered_commits
+		WHERE effective_epoch > $2
+		ORDER BY effective_epoch ASC
 		LIMIT $3`,
 		channelID, sinceEpoch, limit,
 	)

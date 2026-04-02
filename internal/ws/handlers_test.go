@@ -67,7 +67,45 @@ func (m *messageStoreMock) CreateSession(context.Context, string, string, string
 func (m *messageStoreMock) GetSessionByTokenHash(context.Context, string) (*models.Session, error) {
 	return nil, nil
 }
-func (m *messageStoreMock) DeleteSessionByID(context.Context, string) error { return nil }
+func (m *messageStoreMock) DeleteSessionByID(context.Context, string) error  { return nil }
+func (m *messageStoreMock) CountInstanceAdmins(context.Context) (int, error) { return 0, nil }
+func (m *messageStoreMock) CreateInstanceAdmin(context.Context, string, *string, string, string) (*models.InstanceAdmin, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) GetInstanceAdminByUsername(context.Context, string) (*models.InstanceAdmin, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) GetInstanceAdminByID(context.Context, string) (*models.InstanceAdmin, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) ListInstanceAdmins(context.Context) ([]models.InstanceAdmin, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) UpdateInstanceAdmin(context.Context, string, *string, string, bool) (*models.InstanceAdmin, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) UpdateInstanceAdminPassword(context.Context, string, string) error {
+	return nil
+}
+func (m *messageStoreMock) TouchInstanceAdminLastLogin(context.Context, string, time.Time) error {
+	return nil
+}
+func (m *messageStoreMock) CreateInstanceAdminSession(context.Context, string, string, string, time.Time, *string, *string) (*models.InstanceAdminSession, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) GetInstanceAdminSessionByTokenHash(context.Context, string) (*models.InstanceAdminSession, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) DeleteInstanceAdminSessionByID(context.Context, string) error { return nil }
+func (m *messageStoreMock) UpdateInstanceAdminSessionLastSeen(context.Context, string, time.Time) error {
+	return nil
+}
+func (m *messageStoreMock) GetInstanceServiceIdentity(context.Context) (*models.InstanceServiceIdentity, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) UpsertInstanceServiceIdentity(context.Context, string, []byte, []byte, string) (*models.InstanceServiceIdentity, error) {
+	return nil, nil
+}
 
 // MLS credential stubs.
 func (m *messageStoreMock) UpsertMLSCredential(context.Context, string, string, []byte, []byte, int) error {
@@ -241,10 +279,16 @@ func (m *messageStoreMock) DeleteSessionsByUserID(context.Context, string) error
 func (m *messageStoreMock) InsertInstanceBan(context.Context, string, string, string, *time.Time) (*models.InstanceBan, error) {
 	return nil, nil
 }
+func (m *messageStoreMock) InsertInstanceBanByAdmin(context.Context, string, string, string, *time.Time) (*models.InstanceBan, error) {
+	return nil, nil
+}
 func (m *messageStoreMock) GetActiveInstanceBan(context.Context, string) (*models.InstanceBan, error) {
 	return nil, nil
 }
 func (m *messageStoreMock) LiftInstanceBan(context.Context, string, string) error { return nil }
+func (m *messageStoreMock) LiftInstanceBanByAdmin(context.Context, string, string) error {
+	return nil
+}
 
 // Instance audit log stubs.
 func (m *messageStoreMock) InsertInstanceAuditLog(context.Context, string, *string, string, string, map[string]interface{}) error {
@@ -456,16 +500,18 @@ func TestMessageHandler_HandleMessageSend_StoresAndBroadcasts(t *testing.T) {
 	msg := drainUntilType(t, recv, "message.new", time.Second)
 	{
 		var out struct {
-			Type      string `json:"type"`
-			ID        string `json:"id"`
-			ChannelID string `json:"channel_id"`
-			SenderID  string `json:"sender_id"`
+			Type           string `json:"type"`
+			ID             string `json:"id"`
+			ChannelID      string `json:"channel_id"`
+			SenderID       string `json:"sender_id"`
+			SenderDeviceID string `json:"sender_device_id"`
 		}
 		require.NoError(t, json.Unmarshal(msg, &out))
 		assert.Equal(t, "message.new", out.Type)
 		assert.Equal(t, "msg-1", out.ID)
 		assert.Equal(t, "ch1", out.ChannelID)
 		assert.Equal(t, "user1", out.SenderID)
+		assert.Equal(t, "device-1", out.SenderDeviceID)
 	}
 }
 
@@ -563,31 +609,35 @@ func TestMessageHandler_HandleMessageSend_FanoutStoresAndBroadcastsPerRecipient(
 	// user2 should receive only their own ciphertext, not user3's
 	msg := drainUntilType(t, recv, "message.new", time.Second)
 	var out struct {
-		Type       string `json:"type"`
-		ID         string `json:"id"`
-		ChannelID  string `json:"channel_id"`
-		SenderID   string `json:"sender_id"`
-		Ciphertext string `json:"ciphertext"`
+		Type           string `json:"type"`
+		ID             string `json:"id"`
+		ChannelID      string `json:"channel_id"`
+		SenderID       string `json:"sender_id"`
+		SenderDeviceID string `json:"sender_device_id"`
+		Ciphertext     string `json:"ciphertext"`
 	}
 	require.NoError(t, json.Unmarshal(msg, &out))
 	assert.Equal(t, "message.new", out.Type)
 	assert.Equal(t, "ch1", out.ChannelID)
 	assert.Equal(t, "user1", out.SenderID)
+	assert.Equal(t, "device-1", out.SenderDeviceID)
 	assert.Equal(t, "YWVz", out.Ciphertext)
 	assert.NotEmpty(t, out.ID)
 
 	// sender should receive a self-echo for the sender copy (no ciphertext)
 	selfEcho := drainUntilType(t, sender, "message.new", time.Second)
 	var echoOut struct {
-		Type      string `json:"type"`
-		ID        string `json:"id"`
-		ChannelID string `json:"channel_id"`
-		SenderID  string `json:"sender_id"`
+		Type           string `json:"type"`
+		ID             string `json:"id"`
+		ChannelID      string `json:"channel_id"`
+		SenderID       string `json:"sender_id"`
+		SenderDeviceID string `json:"sender_device_id"`
 	}
 	require.NoError(t, json.Unmarshal(selfEcho, &echoOut))
 	assert.Equal(t, "message.new", echoOut.Type)
 	assert.Equal(t, "ch1", echoOut.ChannelID)
 	assert.Equal(t, "user1", echoOut.SenderID)
+	assert.Equal(t, "device-1", echoOut.SenderDeviceID)
 	assert.Equal(t, "msg-user1", echoOut.ID)
 }
 

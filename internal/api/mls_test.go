@@ -538,8 +538,20 @@ func TestMLS_PostCommit_Valid_Returns204(t *testing.T) {
 
 	hub.mu.Lock()
 	broadcastCount := len(hub.channelBroadcastCalls)
+	require.Len(t, hub.channelBroadcastCalls, 1)
+	var broadcast struct {
+		Type           string `json:"type"`
+		ChannelID      string `json:"channel_id"`
+		SenderID       string `json:"sender_id"`
+		SenderDeviceID string `json:"sender_device_id"`
+	}
+	require.NoError(t, json.Unmarshal(hub.channelBroadcastCalls[0].message, &broadcast))
 	hub.mu.Unlock()
 	assert.Equal(t, 1, broadcastCount, "must broadcast mls.commit to channel")
+	assert.Equal(t, "mls.commit", broadcast.Type)
+	assert.Equal(t, channelID, broadcast.ChannelID)
+	assert.Equal(t, userID, broadcast.SenderID)
+	assert.Equal(t, "device-1", broadcast.SenderDeviceID)
 }
 
 // ---------- GET /groups/:channelId/commits ----------
@@ -861,4 +873,3 @@ func (m *mockMLSHub) Broadcast(channelID string, message []byte, excludeClientID
 		message   []byte
 	}{channelID, message})
 }
-
