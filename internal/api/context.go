@@ -7,9 +7,10 @@ type contextKey string
 const (
 	contextKeyUserID              contextKey = "userID"
 	contextKeySessionID           contextKey = "sessionID"
-	contextKeyGuildRole           contextKey = "guildRole"   // kept for handlers not yet migrated to levels
-	contextKeyGuildLevel          contextKey = "guildLevel"  // integer permission level (0-3)
-	contextKeyIsGuest             contextKey = "isGuest"     // true for ephemeral guest sessions
+	contextKeyDeviceID            contextKey = "deviceID"
+	contextKeyGuildRole           contextKey = "guildRole"  // kept for handlers not yet migrated to levels
+	contextKeyGuildLevel          contextKey = "guildLevel" // integer permission level (0-3)
+	contextKeyIsGuest             contextKey = "isGuest"    // true for ephemeral guest sessions
 	contextKeyIsFederated         contextKey = "isFederated"
 	contextKeyFederatedIdentityID contextKey = "federatedIdentityID"
 )
@@ -29,6 +30,15 @@ func withSessionID(ctx context.Context, sessionID string) context.Context {
 
 func sessionIDFromContext(ctx context.Context) string {
 	v, _ := ctx.Value(contextKeySessionID).(string)
+	return v
+}
+
+func withDeviceID(ctx context.Context, deviceID string) context.Context {
+	return context.WithValue(ctx, contextKeyDeviceID, deviceID)
+}
+
+func deviceIDFromContext(ctx context.Context) string {
+	v, _ := ctx.Value(contextKeyDeviceID).(string)
 	return v
 }
 

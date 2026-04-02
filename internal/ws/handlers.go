@@ -169,7 +169,7 @@ func (h *MessageHandler) handleMessageSend(c *Client, raw []byte) {
 			slog.Warn("ws IncrementGuildMessageCount failed", "err", err, "channelID", payload.ChannelID)
 		}
 	}()
-	out := messageNewBroadcast(msg)
+	out := messageNewBroadcast(msg, c.deviceID)
 	b, _ := json.Marshal(out)
 	h.hub.Broadcast(payload.ChannelID, b, "")
 }
@@ -194,7 +194,7 @@ func (h *MessageHandler) handleMessageSendFanout(c *Client, channelID string, ci
 			slog.Warn("ws InsertMessage fan-out failed", "err", err, "recipientID", recipientID)
 			continue
 		}
-		out := messageNewBroadcast(msg)
+		out := messageNewBroadcast(msg, c.deviceID)
 		out["ciphertext"] = b64
 		b, _ := json.Marshal(out)
 		h.hub.BroadcastToUserInChannel(channelID, recipientID, b)
@@ -207,7 +207,7 @@ func (h *MessageHandler) handleMessageSendFanout(c *Client, channelID string, ci
 		slog.Warn("ws InsertMessage sender-copy failed", "err", err)
 		return
 	}
-	echo := messageNewBroadcast(senderCopy)
+	echo := messageNewBroadcast(senderCopy, c.deviceID)
 	echoBytes, _ := json.Marshal(echo)
 	h.hub.BroadcastToUserInChannel(channelID, c.userID, echoBytes)
 }
@@ -334,7 +334,7 @@ func resolveSenderIdentity(c *Client) (senderID *string, federatedSenderID *stri
 }
 
 // messageNewBroadcast builds the "message.new" WS broadcast payload from a stored message.
-func messageNewBroadcast(msg *models.Message) map[string]interface{} {
+func messageNewBroadcast(msg *models.Message, senderDeviceID string) map[string]interface{} {
 	out := map[string]interface{}{
 		"type":       "message.new",
 		"id":         msg.ID,
@@ -344,6 +344,9 @@ func messageNewBroadcast(msg *models.Message) map[string]interface{} {
 	}
 	if msg.SenderID != nil {
 		out["sender_id"] = *msg.SenderID
+	}
+	if senderDeviceID != "" {
+		out["sender_device_id"] = senderDeviceID
 	}
 	if msg.FederatedSenderID != nil {
 		out["federated_sender_id"] = *msg.FederatedSenderID
