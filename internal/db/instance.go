@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/hushhq/hush-server/internal/models"
+	"github.com/jackc/pgx/v5"
 )
 
 // GetInstanceConfig returns the single instance configuration row.
@@ -231,8 +231,24 @@ func (p *Pool) InsertInstanceBan(ctx context.Context, userID, actorID, reason st
 	row := p.QueryRow(ctx, `
 		INSERT INTO instance_bans (user_id, actor_id, reason, expires_at)
 		VALUES ($1, $2, $3, $4)
-		RETURNING id, user_id, actor_id, reason, expires_at, created_at, lifted_at, lifted_by`,
+		RETURNING id, user_id, COALESCE(actor_id::text, actor_admin_id::text, ''), reason, expires_at, created_at, lifted_at, COALESCE(lifted_by::text, lifted_by_admin_id::text)`,
 		userID, actorID, reason, expiresAt,
+	)
+	var b models.InstanceBan
+	err := row.Scan(&b.ID, &b.UserID, &b.ActorID, &b.Reason, &b.ExpiresAt, &b.CreatedAt, &b.LiftedAt, &b.LiftedBy)
+	if err != nil {
+		return nil, err
+	}
+	return &b, nil
+}
+
+// InsertInstanceBanByAdmin creates a new instance-level ban with a local admin actor.
+func (p *Pool) InsertInstanceBanByAdmin(ctx context.Context, userID, actorAdminID, reason string, expiresAt *time.Time) (*models.InstanceBan, error) {
+	row := p.QueryRow(ctx, `
+		INSERT INTO instance_bans (user_id, actor_admin_id, reason, expires_at)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id, user_id, COALESCE(actor_id::text, actor_admin_id::text, ''), reason, expires_at, created_at, lifted_at, COALESCE(lifted_by::text, lifted_by_admin_id::text)`,
+		userID, actorAdminID, reason, expiresAt,
 	)
 	var b models.InstanceBan
 	err := row.Scan(&b.ID, &b.UserID, &b.ActorID, &b.Reason, &b.ExpiresAt, &b.CreatedAt, &b.LiftedAt, &b.LiftedBy)
@@ -246,7 +262,7 @@ func (p *Pool) InsertInstanceBan(ctx context.Context, userID, actorID, reason st
 // A ban is active when lifted_at IS NULL and either expires_at IS NULL or expires_at > now().
 func (p *Pool) GetActiveInstanceBan(ctx context.Context, userID string) (*models.InstanceBan, error) {
 	row := p.QueryRow(ctx, `
-		SELECT id, user_id, actor_id, reason, expires_at, created_at, lifted_at, lifted_by
+		SELECT id, user_id, COALESCE(actor_id::text, actor_admin_id::text, ''), reason, expires_at, created_at, lifted_at, COALESCE(lifted_by::text, lifted_by_admin_id::text)
 		FROM instance_bans
 		WHERE user_id = $1
 		  AND lifted_at IS NULL
@@ -273,6 +289,17 @@ func (p *Pool) LiftInstanceBan(ctx context.Context, banID, liftedByID string) er
 		SET lifted_at = now(), lifted_by = $2
 		WHERE id = $1 AND lifted_at IS NULL`,
 		banID, liftedByID,
+	)
+	return err
+}
+
+// LiftInstanceBanByAdmin sets lifted_at = now() and lifted_by_admin_id for the ban.
+func (p *Pool) LiftInstanceBanByAdmin(ctx context.Context, banID, liftedByAdminID string) error {
+	_, err := p.Exec(ctx, `
+		UPDATE instance_bans
+		SET lifted_at = now(), lifted_by_admin_id = $2
+		WHERE id = $1 AND lifted_at IS NULL`,
+		banID, liftedByAdminID,
 	)
 	return err
 }

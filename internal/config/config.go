@@ -8,13 +8,15 @@ import (
 
 // Config holds environment-based configuration for the Hush API.
 type Config struct {
-	Port         int
-	DatabaseURL  string
-	JWTSecret    string
-	JWTExpiry    time.Duration
-	CORSOrigin   string
-	Production   bool
-	AdminAPIKey              string // X-Admin-Key header value for /api/admin; empty disables admin routes
+	Port                     int
+	DatabaseURL              string
+	JWTSecret                string
+	JWTExpiry                time.Duration
+	CORSOrigin               string
+	Production               bool
+	AdminBootstrapSecret     string
+	AdminSessionTTL          time.Duration
+	ServiceIdentityMasterKey string
 	LiveKitAPIKey            string
 	LiveKitAPISecret         string
 	LiveKitURL               string
@@ -38,6 +40,12 @@ func Load() Config {
 			jwtExpiryHours = v
 		}
 	}
+	adminSessionTTLHours := 24
+	if h := os.Getenv("ADMIN_SESSION_TTL_HOURS"); h != "" {
+		if v, err := strconv.Atoi(h); err == nil && v > 0 {
+			adminSessionTTLHours = v
+		}
+	}
 	prod := os.Getenv("PRODUCTION")
 	production := prod == "1" || prod == "true" || prod == "yes"
 
@@ -49,16 +57,18 @@ func Load() Config {
 	}
 
 	return Config{
-		Port:                     port,
-		DatabaseURL:              os.Getenv("DATABASE_URL"),
-		JWTSecret:                os.Getenv("JWT_SECRET"),
-		JWTExpiry:                time.Duration(jwtExpiryHours) * time.Hour,
-		CORSOrigin:               corsOrigin,
-		Production:               production,
-		AdminAPIKey:              os.Getenv("ADMIN_API_KEY"),
-		LiveKitAPIKey:            os.Getenv("LIVEKIT_API_KEY"),
-		LiveKitAPISecret:         os.Getenv("LIVEKIT_API_SECRET"),
-		LiveKitURL:               os.Getenv("LIVEKIT_URL"),
+		Port:                      port,
+		DatabaseURL:               os.Getenv("DATABASE_URL"),
+		JWTSecret:                 os.Getenv("JWT_SECRET"),
+		JWTExpiry:                 time.Duration(jwtExpiryHours) * time.Hour,
+		CORSOrigin:                corsOrigin,
+		Production:                production,
+		AdminBootstrapSecret:      os.Getenv("ADMIN_BOOTSTRAP_SECRET"),
+		AdminSessionTTL:           time.Duration(adminSessionTTLHours) * time.Hour,
+		ServiceIdentityMasterKey:  os.Getenv("SERVICE_IDENTITY_MASTER_KEY"),
+		LiveKitAPIKey:             os.Getenv("LIVEKIT_API_KEY"),
+		LiveKitAPISecret:          os.Getenv("LIVEKIT_API_SECRET"),
+		LiveKitURL:                os.Getenv("LIVEKIT_URL"),
 		TransparencyLogPrivateKey: os.Getenv("TRANSPARENCY_LOG_PRIVATE_KEY"),
 	}
 }

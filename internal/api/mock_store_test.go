@@ -39,14 +39,28 @@ type mockStore struct {
 	purgeExpiredNoncesFn func(ctx context.Context) (int64, error)
 
 	// Device keys
-	insertDeviceKeyFn       func(ctx context.Context, userID, deviceID, label string, devicePublicKey, certificate []byte) error
-	listDeviceKeysFn        func(ctx context.Context, userID string) ([]models.DeviceKey, error)
-	revokeDeviceKeyFn       func(ctx context.Context, userID, deviceID string) error
-	revokeAllDeviceKeysFn   func(ctx context.Context, userID string) error
-	updateDeviceLastSeenFn  func(ctx context.Context, userID, deviceID string) error
-	createSessionFn         func(ctx context.Context, sessionID, userID, tokenHash string, expiresAt time.Time) (*models.Session, error)
-	getSessionByTokenHashFn func(ctx context.Context, tokenHash string) (*models.Session, error)
-	deleteSessionByIDFn     func(ctx context.Context, sessionID string) error
+	insertDeviceKeyFn                    func(ctx context.Context, userID, deviceID, label string, devicePublicKey, certificate []byte) error
+	listDeviceKeysFn                     func(ctx context.Context, userID string) ([]models.DeviceKey, error)
+	revokeDeviceKeyFn                    func(ctx context.Context, userID, deviceID string) error
+	revokeAllDeviceKeysFn                func(ctx context.Context, userID string) error
+	updateDeviceLastSeenFn               func(ctx context.Context, userID, deviceID string) error
+	createSessionFn                      func(ctx context.Context, sessionID, userID, tokenHash string, expiresAt time.Time) (*models.Session, error)
+	getSessionByTokenHashFn              func(ctx context.Context, tokenHash string) (*models.Session, error)
+	deleteSessionByIDFn                  func(ctx context.Context, sessionID string) error
+	countInstanceAdminsFn                func(ctx context.Context) (int, error)
+	createInstanceAdminFn                func(ctx context.Context, username string, email *string, passwordHash, role string) (*models.InstanceAdmin, error)
+	getInstanceAdminByUsernameFn         func(ctx context.Context, username string) (*models.InstanceAdmin, error)
+	getInstanceAdminByIDFn               func(ctx context.Context, id string) (*models.InstanceAdmin, error)
+	listInstanceAdminsFn                 func(ctx context.Context) ([]models.InstanceAdmin, error)
+	updateInstanceAdminFn                func(ctx context.Context, id string, email *string, role string, isActive bool) (*models.InstanceAdmin, error)
+	updateInstanceAdminPasswordFn        func(ctx context.Context, id, passwordHash string) error
+	touchInstanceAdminLastLoginFn        func(ctx context.Context, id string, loginAt time.Time) error
+	createInstanceAdminSessionFn         func(ctx context.Context, sessionID, adminID, tokenHash string, expiresAt time.Time, createdIP, userAgent *string) (*models.InstanceAdminSession, error)
+	getInstanceAdminSessionByTokenHashFn func(ctx context.Context, tokenHash string) (*models.InstanceAdminSession, error)
+	deleteInstanceAdminSessionByIDFn     func(ctx context.Context, sessionID string) error
+	updateInstanceAdminSessionLastSeenFn func(ctx context.Context, sessionID string, seenAt time.Time) error
+	getInstanceServiceIdentityFn         func(ctx context.Context) (*models.InstanceServiceIdentity, error)
+	upsertInstanceServiceIdentityFn      func(ctx context.Context, username string, publicKey, wrappedPrivateKey []byte, wrappingKeyVersion string) (*models.InstanceServiceIdentity, error)
 
 	// MLS credentials
 	upsertMLSCredentialFn func(ctx context.Context, userID, deviceID string, credentialBytes, signingPublicKey []byte, identityVersion int) error
@@ -135,9 +149,11 @@ type mockStore struct {
 	deleteSessionsByUserIDFn func(ctx context.Context, userID string) error
 
 	// Instance bans
-	insertInstanceBanFn    func(ctx context.Context, userID, actorID, reason string, expiresAt *time.Time) (*models.InstanceBan, error)
-	getActiveInstanceBanFn func(ctx context.Context, userID string) (*models.InstanceBan, error)
-	liftInstanceBanFn      func(ctx context.Context, banID, liftedByID string) error
+	insertInstanceBanFn        func(ctx context.Context, userID, actorID, reason string, expiresAt *time.Time) (*models.InstanceBan, error)
+	insertInstanceBanByAdminFn func(ctx context.Context, userID, actorAdminID, reason string, expiresAt *time.Time) (*models.InstanceBan, error)
+	getActiveInstanceBanFn     func(ctx context.Context, userID string) (*models.InstanceBan, error)
+	liftInstanceBanFn          func(ctx context.Context, banID, liftedByID string) error
+	liftInstanceBanByAdminFn   func(ctx context.Context, banID, liftedByAdminID string) error
 
 	// Instance audit log
 	insertInstanceAuditLogFn func(ctx context.Context, actorID string, targetID *string, action, reason string, metadata map[string]interface{}) error
@@ -315,6 +331,137 @@ func (m *mockStore) DeleteSessionByID(ctx context.Context, sessionID string) err
 		return m.deleteSessionByIDFn(ctx, sessionID)
 	}
 	return nil
+}
+
+func (m *mockStore) CountInstanceAdmins(ctx context.Context) (int, error) {
+	if m.countInstanceAdminsFn != nil {
+		return m.countInstanceAdminsFn(ctx)
+	}
+	return 0, nil
+}
+
+func (m *mockStore) CreateInstanceAdmin(ctx context.Context, username string, email *string, passwordHash, role string) (*models.InstanceAdmin, error) {
+	if m.createInstanceAdminFn != nil {
+		return m.createInstanceAdminFn(ctx, username, email, passwordHash, role)
+	}
+	return &models.InstanceAdmin{
+		ID:           uuid.NewString(),
+		Username:     username,
+		Email:        email,
+		PasswordHash: passwordHash,
+		Role:         role,
+		IsActive:     true,
+		CreatedAt:    time.Now().UTC(),
+		UpdatedAt:    time.Now().UTC(),
+	}, nil
+}
+
+func (m *mockStore) GetInstanceAdminByUsername(ctx context.Context, username string) (*models.InstanceAdmin, error) {
+	if m.getInstanceAdminByUsernameFn != nil {
+		return m.getInstanceAdminByUsernameFn(ctx, username)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) GetInstanceAdminByID(ctx context.Context, id string) (*models.InstanceAdmin, error) {
+	if m.getInstanceAdminByIDFn != nil {
+		return m.getInstanceAdminByIDFn(ctx, id)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) ListInstanceAdmins(ctx context.Context) ([]models.InstanceAdmin, error) {
+	if m.listInstanceAdminsFn != nil {
+		return m.listInstanceAdminsFn(ctx)
+	}
+	return []models.InstanceAdmin{}, nil
+}
+
+func (m *mockStore) UpdateInstanceAdmin(ctx context.Context, id string, email *string, role string, isActive bool) (*models.InstanceAdmin, error) {
+	if m.updateInstanceAdminFn != nil {
+		return m.updateInstanceAdminFn(ctx, id, email, role, isActive)
+	}
+	return &models.InstanceAdmin{
+		ID:           id,
+		Email:        email,
+		Role:         role,
+		IsActive:     isActive,
+		PasswordHash: "",
+		CreatedAt:    time.Now().UTC(),
+		UpdatedAt:    time.Now().UTC(),
+	}, nil
+}
+
+func (m *mockStore) UpdateInstanceAdminPassword(ctx context.Context, id, passwordHash string) error {
+	if m.updateInstanceAdminPasswordFn != nil {
+		return m.updateInstanceAdminPasswordFn(ctx, id, passwordHash)
+	}
+	return nil
+}
+
+func (m *mockStore) TouchInstanceAdminLastLogin(ctx context.Context, id string, loginAt time.Time) error {
+	if m.touchInstanceAdminLastLoginFn != nil {
+		return m.touchInstanceAdminLastLoginFn(ctx, id, loginAt)
+	}
+	return nil
+}
+
+func (m *mockStore) CreateInstanceAdminSession(ctx context.Context, sessionID, adminID, tokenHash string, expiresAt time.Time, createdIP, userAgent *string) (*models.InstanceAdminSession, error) {
+	if m.createInstanceAdminSessionFn != nil {
+		return m.createInstanceAdminSessionFn(ctx, sessionID, adminID, tokenHash, expiresAt, createdIP, userAgent)
+	}
+	return &models.InstanceAdminSession{
+		ID:        sessionID,
+		AdminID:   adminID,
+		TokenHash: tokenHash,
+		ExpiresAt: expiresAt,
+		CreatedIP: createdIP,
+		UserAgent: userAgent,
+		CreatedAt: time.Now().UTC(),
+	}, nil
+}
+
+func (m *mockStore) GetInstanceAdminSessionByTokenHash(ctx context.Context, tokenHash string) (*models.InstanceAdminSession, error) {
+	if m.getInstanceAdminSessionByTokenHashFn != nil {
+		return m.getInstanceAdminSessionByTokenHashFn(ctx, tokenHash)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) DeleteInstanceAdminSessionByID(ctx context.Context, sessionID string) error {
+	if m.deleteInstanceAdminSessionByIDFn != nil {
+		return m.deleteInstanceAdminSessionByIDFn(ctx, sessionID)
+	}
+	return nil
+}
+
+func (m *mockStore) UpdateInstanceAdminSessionLastSeen(ctx context.Context, sessionID string, seenAt time.Time) error {
+	if m.updateInstanceAdminSessionLastSeenFn != nil {
+		return m.updateInstanceAdminSessionLastSeenFn(ctx, sessionID, seenAt)
+	}
+	return nil
+}
+
+func (m *mockStore) GetInstanceServiceIdentity(ctx context.Context) (*models.InstanceServiceIdentity, error) {
+	if m.getInstanceServiceIdentityFn != nil {
+		return m.getInstanceServiceIdentityFn(ctx)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) UpsertInstanceServiceIdentity(ctx context.Context, username string, publicKey, wrappedPrivateKey []byte, wrappingKeyVersion string) (*models.InstanceServiceIdentity, error) {
+	if m.upsertInstanceServiceIdentityFn != nil {
+		return m.upsertInstanceServiceIdentityFn(ctx, username, publicKey, wrappedPrivateKey, wrappingKeyVersion)
+	}
+	return &models.InstanceServiceIdentity{
+		ID:                 uuid.NewString(),
+		Username:           username,
+		PublicKey:          publicKey,
+		WrappedPrivateKey:  wrappedPrivateKey,
+		WrappingKeyVersion: wrappingKeyVersion,
+		CreatedAt:          time.Now().UTC(),
+		UpdatedAt:          time.Now().UTC(),
+	}, nil
 }
 
 // ---------- MLS credentials ----------
@@ -775,6 +922,13 @@ func (m *mockStore) InsertInstanceBan(ctx context.Context, userID, actorID, reas
 	return nil, nil
 }
 
+func (m *mockStore) InsertInstanceBanByAdmin(ctx context.Context, userID, actorAdminID, reason string, expiresAt *time.Time) (*models.InstanceBan, error) {
+	if m.insertInstanceBanByAdminFn != nil {
+		return m.insertInstanceBanByAdminFn(ctx, userID, actorAdminID, reason, expiresAt)
+	}
+	return nil, nil
+}
+
 func (m *mockStore) GetActiveInstanceBan(ctx context.Context, userID string) (*models.InstanceBan, error) {
 	if m.getActiveInstanceBanFn != nil {
 		return m.getActiveInstanceBanFn(ctx, userID)
@@ -785,6 +939,13 @@ func (m *mockStore) GetActiveInstanceBan(ctx context.Context, userID string) (*m
 func (m *mockStore) LiftInstanceBan(ctx context.Context, banID, liftedByID string) error {
 	if m.liftInstanceBanFn != nil {
 		return m.liftInstanceBanFn(ctx, banID, liftedByID)
+	}
+	return nil
+}
+
+func (m *mockStore) LiftInstanceBanByAdmin(ctx context.Context, banID, liftedByAdminID string) error {
+	if m.liftInstanceBanByAdminFn != nil {
+		return m.liftInstanceBanByAdminFn(ctx, banID, liftedByAdminID)
 	}
 	return nil
 }
