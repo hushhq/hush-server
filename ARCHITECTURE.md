@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes the Go server's internal architecture, database schema, WebSocket hub, MLS key storage, transparency log, and instance configuration.
+This document describes the Go server's internal architecture, database schema, WebSocket hub, MLS key storage, admin control plane, service identity, transparency log, and instance configuration.
 
 ---
 
@@ -43,7 +43,9 @@ server/
     │   ├── mls.go           # KeyPackage upload/fetch, commit delivery
     │   ├── transparency.go  # Append and verify transparency log entries
     │   ├── livekit.go       # LiveKit access token generation
-    │   └── admin.go         # Admin dashboard endpoints (X-Admin-Key auth)
+    │   ├── admin.go         # Shared admin wiring and helpers
+    │   ├── admin_auth.go    # Bootstrap, login, logout, session restore
+    │   └── admin_management.go # Owner/admin management and admin-only resources
     ├── auth/
     │   ├── jwt.go           # JWT sign and verify (HS256, configurable secret)
     │   └── challenge.go     # Ed25519 nonce challenge-response
@@ -98,6 +100,9 @@ All tables are created by migrations in `migrations/`. Schema is managed by `gol
 | `device_certificates` | `user_id` UUID, `device_public_key` BYTEA, `certificate` BYTEA | Multi-device trust. Certificate = Sign(existing_priv, new_pub). |
 | `transparency_log` | `id` BIGINT, `entry_type`, `user_id`, `payload` BYTEA, `leaf_hash` BYTEA, `created_at` | Key operation log. Never modified after insert. |
 | `instance_config` | `key` TEXT, `value` TEXT | Single-row config: registration_mode, server_creation_policy. |
+| `instance_admins` | `id` UUID, `username` TEXT, `email` TEXT, `password_hash` TEXT, `role` TEXT, `is_active` BOOL | Local admin control-plane accounts (`owner` or `admin`). |
+| `instance_admin_sessions` | `id` UUID, `admin_id` UUID, `expires_at` TIMESTAMPTZ, `last_seen_at` TIMESTAMPTZ | Secure server-issued admin sessions. |
+| `instance_service_identity` | `id` UUID, `public_key` BYTEA, `wrapped_private_key` BYTEA | Non-discoverable technical Hush identity for instance-owned crypto flows. |
 | `auth_challenges` | `nonce` TEXT, `expires_at` TIMESTAMPTZ | Short-lived nonces for challenge-response. Cleaned up after use. |
 
 ### Indexes
@@ -171,7 +176,15 @@ JWTs are HS256-signed with `JWT_SECRET`. Standard claims: `sub` (user UUID), `ex
 
 ### Admin access
 
-Admin endpoints use local instance-admin accounts plus secure session cookies. The first owner account is created through a one-time `ADMIN_BOOTSTRAP_SECRET`; normal dashboard access then uses `/api/admin/session/login` and an `HttpOnly` session cookie. Admin auth is separate from Hush user auth.
+Admin endpoints use a separate local control plane:
+
+1. `POST /api/admin/bootstrap/status` reports whether the instance still has no local admins.
+2. `POST /api/admin/bootstrap/claim` consumes `ADMIN_BOOTSTRAP_SECRET` to create the first `owner`.
+3. `POST /api/admin/session/login` verifies the local admin password hash and returns an `HttpOnly` session cookie.
+4. `GET /api/admin/session/me` restores the dashboard session after refresh.
+5. `POST /api/admin/session/logout` invalidates the server-side session record.
+
+Human admins are not Hush users by default. They are local control-plane accounts. Instance service identity material is stored separately and is not usable for dashboard login.
 
 ---
 
@@ -188,7 +201,21 @@ Configured via the admin dashboard (`GET/PUT /api/admin/config`). Changes take e
 
 ---
 
-## 9. Infrastructure (Docker Compose)
+## 9. Instance Service Identity
+
+The instance provisions one non-discoverable service identity. Its purpose is to support future instance-owned cryptographic flows without giving human operators direct access to user private material.
+
+- Provisioned once during admin control-plane bootstrap
+- Public identity is stored in Postgres
+- Private material is wrapped at rest with `SERVICE_IDENTITY_MASTER_KEY`
+- Not usable as a dashboard login identity
+- Not exposed in normal guild/member UI
+
+This keeps human admin auth and cryptographic service ownership separate.
+
+---
+
+## 10. Infrastructure (Docker Compose)
 
 The stack is defined in `docker-compose.yml` (dev) and `docker-compose.prod.yml` (production).
 

@@ -57,7 +57,7 @@ After setup, visit `https://YOUR_SERVER_IP`, accept the browser certificate warn
 ### What `setup.sh` does
 
 1. Checks for Docker and docker-compose
-2. Generates all secrets: JWT signing key, admin API key, PostgreSQL password, LiveKit credentials, key transparency seed
+2. Generates all required secrets: JWT signing key, admin bootstrap secret, PostgreSQL password, LiveKit credentials, key transparency seed, and a wrapping key for the instance service identity
 3. Writes `.env` and Caddy config from `--domain` or `--ip`
 4. Builds the Go API image, pulls Postgres/Redis/LiveKit
 5. Runs database migrations and starts the stack
@@ -110,21 +110,15 @@ The server reads configuration from environment variables (or `.env` in the proj
 | `DATABASE_URL` | PostgreSQL connection string |
 | `JWT_SECRET` | Random secret for JWT signing (min 32 bytes) |
 | `JWT_EXPIRY_HOURS` | Session token lifetime in hours |
-| `ADMIN_API_KEY` | API key for admin dashboard access |
 | `ADMIN_BOOTSTRAP_SECRET` | One-time secret used only to create the first local admin owner |
+| `ADMIN_SESSION_TTL_HOURS` | Dashboard session lifetime in hours |
 | `DOMAIN` | Public instance hostname; also used to derive `CORS_ORIGIN` when omitted |
 | `CORS_ORIGIN` | Allowed frontend origin (do not use `*` in production) |
+| `SERVICE_IDENTITY_MASTER_KEY` | 32-byte hex/base64 key used to wrap the instance service identity private key at rest |
 | `LIVEKIT_API_KEY` | LiveKit API key |
 | `LIVEKIT_API_SECRET` | LiveKit API secret |
 | `LIVEKIT_URL` | LiveKit signaling URL |
 | `TRANSPARENCY_LOG_PRIVATE_KEY` | Hex-encoded 32-byte Ed25519 seed for key transparency log signing; never change after first log entry |
-
-Optional:
-
-| Variable | Default | Description |
-|-|-|-|
-| `ADMIN_SESSION_TTL_HOURS` | `24` | Dashboard session lifetime in hours |
-| `SERVICE_IDENTITY_MASTER_KEY` | unset | 32-byte hex/base64 key used to wrap the instance service identity private key at rest |
 
 See `.env.example` for the full list with defaults and descriptions.
 
@@ -162,11 +156,25 @@ All endpoints are prefixed with `/api`. Authentication uses `Authorization: Bear
 | `POST /api/mls/commit` | Deliver MLS commit to group members |
 | `POST /api/transparency/append` | Append entry to key transparency log |
 | `GET /api/transparency/verify` | Verify inclusion proof |
+| `POST /api/admin/bootstrap/status` | Report whether first-owner bootstrap is still available |
 | `POST /api/admin/bootstrap/claim` | Create the first local admin owner using the bootstrap secret |
 | `POST /api/admin/session/login` | Log in to the admin dashboard and receive a secure session cookie |
+| `POST /api/admin/session/logout` | Invalidate the current admin session |
+| `GET /api/admin/session/me` | Return the authenticated local admin session identity |
 | `GET /api/admin/*` | Admin dashboard endpoints (requires local admin session cookie) |
 
 WebSocket endpoint: `GET /ws` - real-time message delivery, presence, MLS group operations.
+
+### Admin control plane
+
+Instance administration is now a separate local control plane:
+
+- Hush users authenticate with cryptographic challenge-response and JWT sessions
+- Instance admins authenticate with local username/password accounts plus `HttpOnly` session cookies
+- The first `owner` account is created once through `ADMIN_BOOTSTRAP_SECRET`
+- A non-discoverable instance service identity is provisioned and stored separately from human admin accounts
+
+Normal admin traffic no longer uses `X-Admin-Key`.
 
 For full API documentation including request/response schemas, see `ARCHITECTURE.md`.
 
@@ -259,7 +267,7 @@ nginx/                       # nginx config template
 
 ## Security
 
-The server is designed so a compromised server cannot read messages, guild names, or media. See [SECURITY.md](SECURITY.md) for:
+The server is designed so a compromised database or backup cannot read messages or private guild metadata without client-held keys. See [SECURITY.md](SECURITY.md) for:
 
 - Threat model (blind relay model, what the server stores vs. never sees)
 - Key Transparency guarantees
