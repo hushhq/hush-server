@@ -3,6 +3,20 @@
 # Usage: docker-compose -f docker-compose.prod.yml up -d
 
 services:
+  hush-web:
+    build:
+      context: ../hush-web
+      dockerfile: Dockerfile
+      args:
+        VITE_DEBUG_TOOLBAR: ${VITE_DEBUG_TOOLBAR:-true}
+    image: hush-web:local
+    container_name: hush-web
+    ports:
+      - "127.0.0.1:8090:80"
+    restart: unless-stopped
+    networks:
+      - hush-network
+
   postgres:
     image: postgres:16-alpine
     container_name: hush-postgres
