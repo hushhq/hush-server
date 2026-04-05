@@ -92,7 +92,6 @@ go run github.com/golang-migrate/migrate/v4/cmd/migrate@latest \
   -path ./migrations up
 
 # 4. Build and run
-cd server
 go build -o hush ./cmd/hush
 ./hush
 ```
@@ -101,28 +100,39 @@ go build -o hush ./cmd/hush
 
 ## Configuration
 
-The server reads configuration from environment variables (or `.env` in the project root). Required variables:
+The server reads configuration from environment variables (or `.env` in the project root). Core variables:
 
 | Variable | Description |
 |-|-|
+| `PRODUCTION` | Set to `true`/`1` in production; requires a persistent transparency key |
+| `HOST` | HTTP bind host |
+| `PORT` | HTTP listen port |
 | `DATABASE_URL` | PostgreSQL connection string |
-| `REDIS_URL` | Redis connection string |
 | `JWT_SECRET` | Random secret for JWT signing (min 32 bytes) |
+| `JWT_EXPIRY_HOURS` | Session token lifetime in hours |
 | `ADMIN_API_KEY` | API key for admin dashboard access |
-| `LIVEKIT_HOST` | LiveKit server address |
+| `DOMAIN` | Public instance hostname; also used to derive `CORS_ORIGIN` when omitted |
+| `CORS_ORIGIN` | Allowed frontend origin (do not use `*` in production) |
 | `LIVEKIT_API_KEY` | LiveKit API key |
 | `LIVEKIT_API_SECRET` | LiveKit API secret |
-| `TRANSPARENCY_LOG_PRIVATE_KEY` | Ed25519 seed for key transparency log signing (never change after first log entry) |
-| `CORS_ORIGIN` | Allowed frontend origin (do not use `*` in production) |
-
-Optional:
-
-| Variable | Default | Description |
-|-|-|-|
-| `PORT` | `8080` | HTTP listen port |
-| `REGISTRATION_MODE` | `open` | `open` or `invite-only` |
+| `LIVEKIT_URL` | LiveKit signaling URL |
+| `TRANSPARENCY_LOG_PRIVATE_KEY` | Hex-encoded 32-byte Ed25519 seed for key transparency log signing; never change after first log entry |
 
 See `.env.example` for the full list with defaults and descriptions.
+
+### Key transparency operational note
+
+When `TRANSPARENCY_LOG_PRIVATE_KEY` is configured, the server:
+
+- enables `/api/transparency/*`
+- publishes `transparency_url` and `log_public_key` via `GET /api/handshake`
+- signs the append-only Merkle log used for key-operation verification
+
+Treat `TRANSPARENCY_LOG_PRIVATE_KEY` like a long-lived signing secret:
+
+- generate it once
+- back it up securely
+- never rotate it after the log has entries unless you intentionally want to break historical verification
 
 ---
 
@@ -199,14 +209,12 @@ See the Self-Hosting Guide in `ARCHITECTURE.md` for full instructions.
 docker-compose up -d postgres redis livekit
 
 # Run server in development mode
-cd server
 go run ./cmd/hush
 ```
 
 ### Running tests
 
 ```bash
-cd server
 go test ./...
 
 # With race detector
@@ -219,16 +227,15 @@ go test ./internal/api/...
 ### Project structure
 
 ```
-server/
-├── cmd/hush/main.go         # Entry point, Chi router, graceful shutdown
-└── internal/
-    ├── api/                 # HTTP handlers (auth, guilds, channels, MLS, admin)
-    ├── auth/                # JWT sign/verify, Ed25519 challenge-response
-    ├── config/              # Environment-based configuration
-    ├── db/                  # PostgreSQL queries (store interface for DI)
-    ├── livekit/             # LiveKit access token generation
-    ├── models/              # Shared data types
-    └── ws/                  # WebSocket hub, client relay, message routing
+cmd/
+└── hush/main.go             # Entry point, Chi router, graceful shutdown
+internal/
+├── api/                     # HTTP handlers (auth, guilds, channels, MLS, admin)
+├── config/                  # Environment-based configuration
+├── db/                      # PostgreSQL queries (store interface for DI)
+├── models/                  # Shared data types
+├── transparency/            # Key transparency service and Merkle tree
+└── ws/                      # WebSocket hub, client relay, message routing
 
 migrations/                  # Sequential SQL migration files (golang-migrate)
 scripts/
