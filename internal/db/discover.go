@@ -86,11 +86,11 @@ func (p *Pool) CreateDMGuild(ctx context.Context, userAID, userBID string) (*mod
 	channelRow := tx.QueryRow(ctx, `
 		INSERT INTO channels (server_id, type, position)
 		VALUES ($1, 'text', 0)
-		RETURNING id, server_id, encrypted_metadata, type, voice_mode, parent_id, position`,
+		RETURNING id, server_id, encrypted_metadata, type, parent_id, position`,
 		server.ID,
 	)
 	if err := channelRow.Scan(
-		&ch.ID, &ch.ServerID, &ch.EncryptedMetadata, &ch.Type, &ch.VoiceMode, &ch.ParentID, &ch.Position,
+		&ch.ID, &ch.ServerID, &ch.EncryptedMetadata, &ch.Type, &ch.ParentID, &ch.Position,
 	); err != nil {
 		return nil, nil, fmt.Errorf("create dm channel: %w", err)
 	}

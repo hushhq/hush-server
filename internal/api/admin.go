@@ -282,16 +282,6 @@ func validateAdminTemplateChannels(channels []models.TemplateChannel) string {
 		if !validChannelTypesAdmin[tc.Type] {
 			return "invalid channel type: " + tc.Type
 		}
-		if tc.Type == "voice" {
-			if tc.VoiceMode == nil {
-				return "voice channel must have voiceMode"
-			}
-			if *tc.VoiceMode != "quality" && *tc.VoiceMode != "low-latency" {
-				return "voiceMode must be quality or low-latency"
-			}
-		} else if tc.VoiceMode != nil {
-			return "only voice channels may have voiceMode"
-		}
 		if tc.Type == "category" && tc.ParentRef != nil {
 			return "categories cannot have parentRef"
 		}

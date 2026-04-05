@@ -205,7 +205,7 @@ func TestCreateServer_CreatesSystemChannel(t *testing.T) {
 			return &models.Server{ID: serverID, EncryptedMetadata: metadata}, nil
 		},
 		addServerMemberFn: func(_ context.Context, _, _ string, _ int) error { return nil },
-		createChannelFn: func(_ context.Context, srvID string, meta []byte, channelType string, _ *string, _ *string, position int) (*models.Channel, error) {
+		createChannelFn: func(_ context.Context, srvID string, meta []byte, channelType string, _ *string, position int) (*models.Channel, error) {
 			if channelType == "system" {
 				assert.Equal(t, serverID, srvID)
 				assert.Equal(t, -1, position)

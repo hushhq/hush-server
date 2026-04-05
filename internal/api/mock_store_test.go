@@ -76,7 +76,7 @@ type mockStore struct {
 	listMembersFn          func(ctx context.Context) ([]models.Member, error)
 
 	// Channels (guild-scoped - serverID param)
-	createChannelFn               func(ctx context.Context, serverID string, encryptedMetadata []byte, channelType string, voiceMode *string, parentID *string, position int) (*models.Channel, error)
+	createChannelFn               func(ctx context.Context, serverID string, encryptedMetadata []byte, channelType string, parentID *string, position int) (*models.Channel, error)
 	listChannelsFn                func(ctx context.Context, serverID string) ([]models.Channel, error)
 	getChannelByIDFn              func(ctx context.Context, channelID string) (*models.Channel, error)
 	getChannelByTypeAndPositionFn func(ctx context.Context, serverID, channelType string, position int) (*models.Channel, error)
@@ -453,9 +453,9 @@ func (m *mockStore) ListMembers(ctx context.Context) ([]models.Member, error) {
 
 // ---------- Channels ----------
 
-func (m *mockStore) CreateChannel(ctx context.Context, serverID string, encryptedMetadata []byte, channelType string, voiceMode *string, parentID *string, position int) (*models.Channel, error) {
+func (m *mockStore) CreateChannel(ctx context.Context, serverID string, encryptedMetadata []byte, channelType string, parentID *string, position int) (*models.Channel, error) {
 	if m.createChannelFn != nil {
-		return m.createChannelFn(ctx, serverID, encryptedMetadata, channelType, voiceMode, parentID, position)
+		return m.createChannelFn(ctx, serverID, encryptedMetadata, channelType, parentID, position)
 	}
 	return nil, nil
 }

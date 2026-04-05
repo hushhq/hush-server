@@ -97,7 +97,7 @@ type Store interface {
 
 	// Channel operations
 	// CreateChannel uses encryptedMetadata instead of a plaintext name.
-	CreateChannel(ctx context.Context, serverID string, encryptedMetadata []byte, channelType string, voiceMode *string, parentID *string, position int) (*models.Channel, error)
+	CreateChannel(ctx context.Context, serverID string, encryptedMetadata []byte, channelType string, parentID *string, position int) (*models.Channel, error)
 	ListChannels(ctx context.Context, serverID string) ([]models.Channel, error)
 	GetChannelByID(ctx context.Context, channelID string) (*models.Channel, error)
 	// GetChannelByTypeAndPosition replaces GetChannelByNameAndType (no name column).

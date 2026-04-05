@@ -14,11 +14,10 @@ import (
 // fallbackTemplate returns the built-in default channel set used when no
 // server template exists in the database.
 func fallbackTemplate() []models.TemplateChannel {
-	quality := "quality"
 	return []models.TemplateChannel{
 		{Name: "system", Type: "system", Position: -1},
 		{Name: "general", Type: "text", Position: 0},
-		{Name: "General", Type: "voice", VoiceMode: &quality, Position: 1},
+		{Name: "General", Type: "voice", Position: 1},
 	}
 }
 
@@ -188,7 +187,7 @@ func (h *serversHandler) createServer(w http.ResponseWriter, r *http.Request) {
 		if tc.Name != "" {
 			meta = []byte(`{"n":"` + tc.Name + `","d":""}`)
 		}
-		ch, err := h.store.CreateChannel(ctx, server.ID, meta, tc.Type, tc.VoiceMode, nil, tc.Position)
+		ch, err := h.store.CreateChannel(ctx, server.ID, meta, tc.Type, nil, tc.Position)
 		if err != nil {
 			slog.Error("createServer: create template channel", "err", err, "position", tc.Position)
 			failures++
@@ -233,7 +232,7 @@ func (h *serversHandler) createServer(w http.ResponseWriter, r *http.Request) {
 		if tc.Name != "" {
 			meta = []byte(`{"n":"` + tc.Name + `","d":""}`)
 		}
-		ch, err := h.store.CreateChannel(ctx, server.ID, meta, tc.Type, tc.VoiceMode, &parentID, tc.Position)
+		ch, err := h.store.CreateChannel(ctx, server.ID, meta, tc.Type, &parentID, tc.Position)
 		if err != nil {
 			slog.Error("createServer: create template channel", "err", err, "position", tc.Position)
 			failures++

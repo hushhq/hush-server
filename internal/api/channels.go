@@ -80,29 +80,13 @@ func (h *channelsHandler) createChannel(w http.ResponseWriter, r *http.Request) 
 	if req.Position != nil {
 		position = *req.Position
 	}
-	var voiceMode *string
 	if req.Type == "category" {
-		if req.VoiceMode != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "voice_mode is not allowed for category channels"})
-			return
-		}
 		if req.ParentID != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "categories cannot be nested"})
 			return
 		}
-	} else if req.Type == "voice" {
-		if req.VoiceMode == nil || (*req.VoiceMode != "low-latency" && *req.VoiceMode != "quality") {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "voice_mode is required for voice channels and must be low-latency or quality"})
-			return
-		}
-		voiceMode = req.VoiceMode
-	} else {
-		if req.VoiceMode != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "voice_mode is only allowed for voice channels"})
-			return
-		}
 	}
-	ch, err := h.store.CreateChannel(r.Context(), serverID, req.EncryptedMetadata, req.Type, voiceMode, req.ParentID, position)
+	ch, err := h.store.CreateChannel(r.Context(), serverID, req.EncryptedMetadata, req.Type, req.ParentID, position)
 	if err != nil {
 		slog.Error("create channel", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create channel"})

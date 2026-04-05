@@ -131,7 +131,7 @@ func (m *messageStoreMock) ListMembers(context.Context) ([]models.Member, error)
 
 // Channel stubs (guild-scoped - serverID param).
 // CreateChannel now takes encryptedMetadata []byte instead of a plaintext name.
-func (m *messageStoreMock) CreateChannel(context.Context, string, []byte, string, *string, *string, int) (*models.Channel, error) {
+func (m *messageStoreMock) CreateChannel(context.Context, string, []byte, string, *string, int) (*models.Channel, error) {
 	return nil, nil
 }
 func (m *messageStoreMock) ListChannels(context.Context, string) ([]models.Channel, error) {

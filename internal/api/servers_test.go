@@ -432,7 +432,6 @@ type channelCreation struct {
 	ServerID          string
 	EncryptedMetadata []byte
 	Type              string
-	VoiceMode         *string
 	ParentID          *string
 	Position          int
 }
@@ -442,7 +441,6 @@ type channelCreation struct {
 func TestCreateServer_Template(t *testing.T) {
 	userID := uuid.New().String()
 	serverID := uuid.New().String()
-	quality := "quality"
 
 	var mu sync.Mutex
 	var createdChannels []channelCreation
@@ -458,7 +456,7 @@ func TestCreateServer_Template(t *testing.T) {
 				Channels: []models.TemplateChannel{
 					{Name: "system", Type: "system", Position: -1},
 					{Name: "general", Type: "text", Position: 0},
-					{Name: "General", Type: "voice", VoiceMode: &quality, Position: 1},
+					{Name: "General", Type: "voice", Position: 1},
 				},
 			}, nil
 		},
@@ -469,18 +467,18 @@ func TestCreateServer_Template(t *testing.T) {
 		getChannelByTypeAndPositionFn: func(_ context.Context, _, _ string, _ int) (*models.Channel, error) {
 			return nil, nil // no existing channels
 		},
-		createChannelFn: func(_ context.Context, srvID string, metadata []byte, chType string, voiceMode *string, parentID *string, position int) (*models.Channel, error) {
+		createChannelFn: func(_ context.Context, srvID string, metadata []byte, chType string, parentID *string, position int) (*models.Channel, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			channelCounter++
 			createdChannels = append(createdChannels, channelCreation{
 				ServerID: srvID, EncryptedMetadata: metadata, Type: chType,
-				VoiceMode: voiceMode, ParentID: parentID, Position: position,
+				ParentID: parentID, Position: position,
 			})
 			sid := srvID
 			return &models.Channel{
 				ID: "ch-" + chType, ServerID: &sid,
-				EncryptedMetadata: metadata, Type: chType, VoiceMode: voiceMode, Position: position,
+				EncryptedMetadata: metadata, Type: chType, Position: position,
 			}, nil
 		},
 		insertSystemMessageFn: func(_ context.Context, _, eventType, _ string, _ *string, _ string, _ map[string]interface{}) (*models.SystemMessage, error) {
@@ -519,8 +517,6 @@ func TestCreateServer_Template(t *testing.T) {
 	assert.Equal(t, "text", createdChannels[1].Type)
 	assert.Equal(t, 0, createdChannels[1].Position)
 	assert.Equal(t, "voice", createdChannels[2].Type)
-	require.NotNil(t, createdChannels[2].VoiceMode)
-	assert.Equal(t, "quality", *createdChannels[2].VoiceMode)
 	assert.Equal(t, 1, createdChannels[2].Position)
 
 	// server_created system message should be emitted
@@ -545,14 +541,13 @@ func TestCreateServer_FallbackTemplateSeedsDefaultChannels(t *testing.T) {
 		getChannelByTypeAndPositionFn: func(_ context.Context, _, _ string, _ int) (*models.Channel, error) {
 			return nil, nil
 		},
-		createChannelFn: func(_ context.Context, srvID string, metadata []byte, chType string, voiceMode *string, parentID *string, position int) (*models.Channel, error) {
+		createChannelFn: func(_ context.Context, srvID string, metadata []byte, chType string, parentID *string, position int) (*models.Channel, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			createdChannels = append(createdChannels, channelCreation{
 				ServerID:          srvID,
 				EncryptedMetadata: metadata,
 				Type:              chType,
-				VoiceMode:         voiceMode,
 				ParentID:          parentID,
 				Position:          position,
 			})
@@ -562,7 +557,6 @@ func TestCreateServer_FallbackTemplateSeedsDefaultChannels(t *testing.T) {
 				ServerID:          &sid,
 				EncryptedMetadata: metadata,
 				Type:              chType,
-				VoiceMode:         voiceMode,
 				Position:          position,
 			}, nil
 		},
@@ -597,8 +591,6 @@ func TestCreateServer_FallbackTemplateSeedsDefaultChannels(t *testing.T) {
 	assert.Equal(t, 0, createdChannels[1].Position)
 	assert.Equal(t, "voice", createdChannels[2].Type)
 	assert.Equal(t, 1, createdChannels[2].Position)
-	require.NotNil(t, createdChannels[2].VoiceMode)
-	assert.Equal(t, "quality", *createdChannels[2].VoiceMode)
 }
 
 // TestCreateServer_PartialFail verifies that when one CreateChannel call fails,
@@ -628,7 +620,7 @@ func TestCreateServer_PartialFail(t *testing.T) {
 		getChannelByTypeAndPositionFn: func(_ context.Context, _, _ string, _ int) (*models.Channel, error) {
 			return nil, nil
 		},
-		createChannelFn: func(_ context.Context, _ string, metadata []byte, chType string, _ *string, _ *string, position int) (*models.Channel, error) {
+		createChannelFn: func(_ context.Context, _ string, metadata []byte, chType string, _ *string, position int) (*models.Channel, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			callCount++

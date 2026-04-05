@@ -57,9 +57,8 @@ func TestCreateChannel_ValidTextChannel_ReturnsChannel(t *testing.T) {
 	}
 	chID := uuid.New().String()
 	encMeta := []byte(`{"name":"general"}`)
-	store.createChannelFn = func(_ context.Context, serverID string, metadata []byte, chType string, voiceMode *string, parentID *string, pos int) (*models.Channel, error) {
+	store.createChannelFn = func(_ context.Context, serverID string, metadata []byte, chType string, parentID *string, pos int) (*models.Channel, error) {
 		assert.Equal(t, "text", chType)
-		assert.Nil(t, voiceMode)
 		assert.Equal(t, 0, pos)
 		return &models.Channel{ID: chID, EncryptedMetadata: metadata, Type: chType, Position: pos}, nil
 	}
@@ -77,48 +76,19 @@ func TestCreateChannel_ValidVoiceChannel_ReturnsChannel(t *testing.T) {
 	store.getServerMemberLevelFn = func(_ context.Context, _, _ string) (int, error) {
 		return models.PermissionLevelAdmin, nil
 	}
-	perf := "low-latency"
 	chID := uuid.New().String()
-	store.createChannelFn = func(_ context.Context, _ string, metadata []byte, chType string, voiceMode *string, _ *string, pos int) (*models.Channel, error) {
+	store.createChannelFn = func(_ context.Context, _ string, metadata []byte, chType string, _ *string, pos int) (*models.Channel, error) {
 		assert.Equal(t, "voice", chType)
-		require.NotNil(t, voiceMode)
-		assert.Equal(t, "low-latency", *voiceMode)
-		return &models.Channel{ID: chID, EncryptedMetadata: metadata, Type: chType, VoiceMode: voiceMode, Position: pos}, nil
+		return &models.Channel{ID: chID, EncryptedMetadata: metadata, Type: chType, Position: pos}, nil
 	}
 	router := channelsCrudRouter(store)
 	rr := postServerJSON(router, "/", models.CreateChannelRequest{
-		EncryptedMetadata: []byte(`{"name":"voice-1"}`), Type: "voice", VoiceMode: &perf,
+		EncryptedMetadata: []byte(`{"name":"voice-1"}`), Type: "voice",
 	}, "")
 	assert.Equal(t, http.StatusCreated, rr.Code)
 	var ch models.Channel
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&ch))
 	assert.Equal(t, "voice", ch.Type)
-	assert.Equal(t, "low-latency", *ch.VoiceMode)
-}
-
-func TestCreateChannel_VoiceModeOnTextChannel_Returns400(t *testing.T) {
-	store := &mockStore{}
-	store.getServerMemberLevelFn = func(_ context.Context, _, _ string) (int, error) { return models.PermissionLevelAdmin, nil }
-	perf := "low-latency"
-	router := channelsCrudRouter(store)
-	rr := postServerJSON(router, "/", models.CreateChannelRequest{
-		EncryptedMetadata: []byte(`{"name":"general"}`), Type: "text", VoiceMode: &perf,
-	}, "")
-	assert.Equal(t, http.StatusBadRequest, rr.Code)
-	err := decodeError(t, rr)
-	assert.Contains(t, err["error"], "voice_mode")
-}
-
-func TestCreateChannel_MissingVoiceModeOnVoice_Returns400(t *testing.T) {
-	store := &mockStore{}
-	store.getServerMemberLevelFn = func(_ context.Context, _, _ string) (int, error) { return models.PermissionLevelAdmin, nil }
-	router := channelsCrudRouter(store)
-	rr := postServerJSON(router, "/", models.CreateChannelRequest{
-		EncryptedMetadata: []byte(`{"name":"voice-1"}`), Type: "voice",
-	}, "")
-	assert.Equal(t, http.StatusBadRequest, rr.Code)
-	err := decodeError(t, rr)
-	assert.Contains(t, err["error"], "voice_mode")
 }
 
 func TestCreateChannel_InvalidType_Returns400(t *testing.T) {
@@ -194,9 +164,8 @@ func TestCreateChannel_ValidCategory_ReturnsChannel(t *testing.T) {
 	store := &mockStore{}
 	store.getServerMemberLevelFn = func(_ context.Context, _, _ string) (int, error) { return models.PermissionLevelAdmin, nil }
 	chID := uuid.New().String()
-	store.createChannelFn = func(_ context.Context, _ string, metadata []byte, chType string, voiceMode *string, parentID *string, pos int) (*models.Channel, error) {
+	store.createChannelFn = func(_ context.Context, _ string, metadata []byte, chType string, parentID *string, pos int) (*models.Channel, error) {
 		assert.Equal(t, "category", chType)
-		assert.Nil(t, voiceMode)
 		assert.Nil(t, parentID)
 		return &models.Channel{ID: chID, EncryptedMetadata: metadata, Type: chType, Position: pos}, nil
 	}
@@ -206,15 +175,6 @@ func TestCreateChannel_ValidCategory_ReturnsChannel(t *testing.T) {
 	var ch models.Channel
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &ch))
 	assert.Equal(t, "category", ch.Type)
-}
-
-func TestCreateChannel_CategoryWithVoiceMode_Returns400(t *testing.T) {
-	store := &mockStore{}
-	store.getServerMemberLevelFn = func(_ context.Context, _, _ string) (int, error) { return models.PermissionLevelAdmin, nil }
-	vm := "quality"
-	router := channelsCrudRouter(store)
-	rr := postServerJSON(router, "/", models.CreateChannelRequest{EncryptedMetadata: []byte(`{}`), Type: "category", VoiceMode: &vm}, "")
-	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
 
 func TestCreateChannel_CategoryWithParentID_Returns400(t *testing.T) {
