@@ -307,6 +307,8 @@ type InstanceConfig struct {
 	RegistrationMode     string    `json:"registrationMode"`
 	GuildDiscovery       string    `json:"guildDiscovery"`
 	ServerCreationPolicy string    `json:"serverCreationPolicy"`
+	MaxServersPerUser    *int      `json:"maxServersPerUser,omitempty"`
+	MaxMembersPerServer  *int      `json:"maxMembersPerServer,omitempty"`
 	CreatedAt            time.Time `json:"createdAt"`
 }
 

@@ -224,7 +224,7 @@ func TestAdminUpdateConfig_GuildDiscoveryReturns204(t *testing.T) {
 		GuildDiscovery: func() *string { value := "required"; return &value }(),
 	}, "owner")
 	var updatedGuildDiscovery *string
-	store.updateInstanceConfigFn = func(_ context.Context, _, _, _, guildDiscovery, _ *string) error {
+	store.updateInstanceConfigFn = func(_ context.Context, _, _, _, guildDiscovery, _ *string, _ *int, _ *int) error {
 		updatedGuildDiscovery = guildDiscovery
 		return nil
 	}

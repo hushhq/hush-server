@@ -84,7 +84,7 @@ type mockStore struct {
 
 	// Instance
 	getInstanceConfigFn    func(ctx context.Context) (*models.InstanceConfig, error)
-	updateInstanceConfigFn func(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string, serverCreationPolicy *string) error
+	updateInstanceConfigFn func(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string, serverCreationPolicy *string, maxServersPerUser *int, maxMembersPerServer *int) error
 	getUserRoleFn          func(ctx context.Context, userID string) (string, error)
 	updateUserRoleFn       func(ctx context.Context, userID, role string) error
 	listMembersFn          func(ctx context.Context) ([]models.Member, error)
@@ -111,6 +111,7 @@ type mockStore struct {
 	claimInviteUseFn  func(ctx context.Context, code string) (bool, error)
 
 	// Server / guild operations
+	countOwnedServersFn             func(ctx context.Context, userID string) (int, error)
 	createServerFn                  func(ctx context.Context, encryptedMetadata []byte) (*models.Server, error)
 	updateServerEncryptedMetadataFn func(ctx context.Context, serverID string, encryptedMetadata []byte) error
 	getServerByIDFn                 func(ctx context.Context, serverID string) (*models.Server, error)
@@ -570,9 +571,9 @@ func (m *mockStore) GetInstanceConfig(ctx context.Context) (*models.InstanceConf
 	}, nil
 }
 
-func (m *mockStore) UpdateInstanceConfig(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string, serverCreationPolicy *string) error {
+func (m *mockStore) UpdateInstanceConfig(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string, serverCreationPolicy *string, maxServersPerUser *int, maxMembersPerServer *int) error {
 	if m.updateInstanceConfigFn != nil {
-		return m.updateInstanceConfigFn(ctx, name, iconURL, registrationMode, guildDiscovery, serverCreationPolicy)
+		return m.updateInstanceConfigFn(ctx, name, iconURL, registrationMode, guildDiscovery, serverCreationPolicy, maxServersPerUser, maxMembersPerServer)
 	}
 	return nil
 }
@@ -708,6 +709,13 @@ func (m *mockStore) ClaimInviteUse(ctx context.Context, code string) (bool, erro
 }
 
 // ---------- Server / guild operations ----------
+
+func (m *mockStore) CountOwnedServers(ctx context.Context, userID string) (int, error) {
+	if m.countOwnedServersFn != nil {
+		return m.countOwnedServersFn(ctx, userID)
+	}
+	return 0, nil
+}
 
 func (m *mockStore) CreateServer(ctx context.Context, encryptedMetadata []byte) (*models.Server, error) {
 	if m.createServerFn != nil {

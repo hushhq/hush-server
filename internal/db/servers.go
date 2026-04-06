@@ -151,6 +151,18 @@ func (p *Pool) UpdateGuildChannelCounts(ctx context.Context, serverID string) er
 	return err
 }
 
+// CountOwnedServers returns the number of non-DM servers where the user is the owner.
+func (p *Pool) CountOwnedServers(ctx context.Context, userID string) (int, error) {
+	var count int
+	err := p.QueryRow(ctx, `
+		SELECT COUNT(*) FROM server_members sm
+		JOIN servers s ON s.id = sm.server_id
+		WHERE sm.user_id = $1 AND sm.permission_level = $2 AND s.is_dm = false`,
+		userID, models.PermissionLevelOwner,
+	).Scan(&count)
+	return count, err
+}
+
 func scanServer(row pgx.Row) (*models.Server, error) {
 	var s models.Server
 	err := row.Scan(

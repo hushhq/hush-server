@@ -96,6 +96,19 @@ func (h *serversHandler) createServer(w http.ResponseWriter, r *http.Request) {
 		return
 		// "open": fall through - any authenticated user can create.
 	}
+	// Check per-user server creation limit.
+	if cfg.MaxServersPerUser != nil {
+		owned, err := h.store.CountOwnedServers(r.Context(), userID)
+		if err != nil {
+			slog.Error("createServer: count owned servers", "err", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to check server limits"})
+			return
+		}
+		if owned >= *cfg.MaxServersPerUser {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "you have reached the maximum number of servers you can create"})
+			return
+		}
+	}
 	var req models.CreateServerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
@@ -480,6 +493,15 @@ func (h *serversHandler) joinServer(w http.ResponseWriter, r *http.Request) {
 	if server == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "guild not found"})
 		return
+	}
+
+	// Check per-server member cap.
+	cfg, _ := h.store.GetInstanceConfig(r.Context())
+	if cfg != nil && cfg.MaxMembersPerServer != nil {
+		if server.MemberCount >= *cfg.MaxMembersPerServer {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "this server has reached its member limit"})
+			return
+		}
 	}
 
 	// Only open, discoverable guilds can be joined without an invite.

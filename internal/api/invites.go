@@ -209,6 +209,20 @@ func (h *inviteHandler) claimInvite(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Check per-server member cap before consuming the invite use.
+	srv, srvErr := h.store.GetServerByID(r.Context(), serverID)
+	if srvErr != nil || srv == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "server not found"})
+		return
+	}
+	cfg, _ := h.store.GetInstanceConfig(r.Context())
+	if cfg != nil && cfg.MaxMembersPerServer != nil {
+		if srv.MemberCount >= *cfg.MaxMembersPerServer {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "this server has reached its member limit"})
+			return
+		}
+	}
+
 	claimed, err := h.store.ClaimInviteUse(r.Context(), req.Code)
 	if err != nil {
 		slog.Error("claimInvite: claim invite use", "err", err)
@@ -233,6 +247,12 @@ func (h *inviteHandler) claimInvite(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to join guild"})
 			return
 		}
+	}
+
+	// Increment member count to match joinServer behavior.
+	if err := h.store.IncrementGuildMemberCount(r.Context(), serverID, 1); err != nil {
+		slog.Error("claimInvite: increment member count", "err", err)
+		// Non-fatal: membership was added. Log and continue.
 	}
 
 	// Broadcast member_joined so other connected users see the new member.

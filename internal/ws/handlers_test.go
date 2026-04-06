@@ -160,7 +160,7 @@ func (m *messageStoreMock) IsChannelMember(ctx context.Context, channelID, userI
 func (m *messageStoreMock) GetInstanceConfig(context.Context) (*models.InstanceConfig, error) {
 	return nil, nil
 }
-func (m *messageStoreMock) UpdateInstanceConfig(context.Context, *string, *string, *string, *string, *string) error {
+func (m *messageStoreMock) UpdateInstanceConfig(context.Context, *string, *string, *string, *string, *string, *int, *int) error {
 	return nil
 }
 func (m *messageStoreMock) GetUserRole(context.Context, string) (string, error)  { return "member", nil }
@@ -210,6 +210,8 @@ func (m *messageStoreMock) GetInviteByCode(context.Context, string) (*models.Inv
 func (m *messageStoreMock) ClaimInviteUse(context.Context, string) (bool, error) { return true, nil }
 
 // Server / guild operation stubs.
+func (m *messageStoreMock) CountOwnedServers(context.Context, string) (int, error) { return 0, nil }
+
 // CreateServer now takes encryptedMetadata []byte only (no plaintext name).
 func (m *messageStoreMock) CreateServer(context.Context, []byte) (*models.Server, error) {
 	return nil, nil

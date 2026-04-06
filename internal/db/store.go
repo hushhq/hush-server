@@ -90,7 +90,7 @@ type Store interface {
 	GetInstanceConfig(ctx context.Context) (*models.InstanceConfig, error)
 	// UpdateInstanceConfig updates only the non-nil fields. serverCreationPolicy must be
 	// one of "open", "paid", or "disabled" when non-nil.
-	UpdateInstanceConfig(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string, serverCreationPolicy *string) error
+	UpdateInstanceConfig(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string, serverCreationPolicy *string, maxServersPerUser *int, maxMembersPerServer *int) error
 	GetUserRole(ctx context.Context, userID string) (string, error)
 	UpdateUserRole(ctx context.Context, userID, role string) error
 	ListMembers(ctx context.Context) ([]models.Member, error)
@@ -117,6 +117,9 @@ type Store interface {
 	CreateInvite(ctx context.Context, serverID, code, createdBy string, maxUses int, expiresAt time.Time) (*models.InviteCode, error)
 	GetInviteByCode(ctx context.Context, code string) (*models.InviteCode, error)
 	ClaimInviteUse(ctx context.Context, code string) (bool, error)
+
+	// CountOwnedServers returns the number of non-DM servers where the user is the owner.
+	CountOwnedServers(ctx context.Context, userID string) (int, error)
 
 	// Server operations
 	// CreateServer accepts encryptedMetadata (may be nil for two-step creation flow).

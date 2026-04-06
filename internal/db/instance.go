@@ -16,10 +16,12 @@ import (
 // GetInstanceConfig returns the single instance configuration row.
 func (p *Pool) GetInstanceConfig(ctx context.Context) (*models.InstanceConfig, error) {
 	row := p.QueryRow(ctx, `
-		SELECT id, name, icon_url, registration_mode, guild_discovery, server_creation_policy, created_at
+		SELECT id, name, icon_url, registration_mode, guild_discovery, server_creation_policy,
+		       max_servers_per_user, max_members_per_server, created_at
 		FROM instance_config LIMIT 1`)
 	var c models.InstanceConfig
-	if err := row.Scan(&c.ID, &c.Name, &c.IconURL, &c.RegistrationMode, &c.GuildDiscovery, &c.ServerCreationPolicy, &c.CreatedAt); err != nil {
+	if err := row.Scan(&c.ID, &c.Name, &c.IconURL, &c.RegistrationMode, &c.GuildDiscovery, &c.ServerCreationPolicy,
+		&c.MaxServersPerUser, &c.MaxMembersPerServer, &c.CreatedAt); err != nil {
 		return nil, err
 	}
 	return &c, nil
@@ -147,12 +149,12 @@ func (p *Pool) DeleteServerTemplate(ctx context.Context, id string) error {
 
 // UpdateInstanceConfig updates only the non-nil fields of instance_config.
 // serverCreationPolicy must be one of "open", "paid", or "disabled" when non-nil.
-func (p *Pool) UpdateInstanceConfig(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string, serverCreationPolicy *string) error {
-	if name == nil && iconURL == nil && registrationMode == nil && guildDiscovery == nil && serverCreationPolicy == nil {
+func (p *Pool) UpdateInstanceConfig(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string, serverCreationPolicy *string, maxServersPerUser *int, maxMembersPerServer *int) error {
+	if name == nil && iconURL == nil && registrationMode == nil && guildDiscovery == nil && serverCreationPolicy == nil && maxServersPerUser == nil && maxMembersPerServer == nil {
 		return nil
 	}
-	setClauses := make([]string, 0, 5)
-	args := make([]any, 0, 5)
+	setClauses := make([]string, 0, 7)
+	args := make([]any, 0, 7)
 	idx := 1
 	if name != nil {
 		setClauses = append(setClauses, fmt.Sprintf("name = $%d", idx))
@@ -178,6 +180,25 @@ func (p *Pool) UpdateInstanceConfig(ctx context.Context, name *string, iconURL *
 		setClauses = append(setClauses, fmt.Sprintf("server_creation_policy = $%d", idx))
 		args = append(args, *serverCreationPolicy)
 		idx++
+	}
+	if maxServersPerUser != nil {
+		if *maxServersPerUser == 0 {
+			// 0 means "remove limit" → set to NULL
+			setClauses = append(setClauses, "max_servers_per_user = NULL")
+		} else {
+			setClauses = append(setClauses, fmt.Sprintf("max_servers_per_user = $%d", idx))
+			args = append(args, *maxServersPerUser)
+			idx++
+		}
+	}
+	if maxMembersPerServer != nil {
+		if *maxMembersPerServer == 0 {
+			setClauses = append(setClauses, "max_members_per_server = NULL")
+		} else {
+			setClauses = append(setClauses, fmt.Sprintf("max_members_per_server = $%d", idx))
+			args = append(args, *maxMembersPerServer)
+			idx++
+		}
 	}
 	query := "UPDATE instance_config SET " + strings.Join(setClauses, ", ")
 	_, err := p.Exec(ctx, query, args...)

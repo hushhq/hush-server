@@ -39,7 +39,7 @@ type adminStore interface {
 	ListGuildBillingStats(ctx context.Context) ([]models.GuildBillingStats, error)
 	ListMembers(ctx context.Context) ([]models.Member, error)
 	GetInstanceConfig(ctx context.Context) (*models.InstanceConfig, error)
-	UpdateInstanceConfig(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string, serverCreationPolicy *string) error
+	UpdateInstanceConfig(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string, serverCreationPolicy *string, maxServersPerUser *int, maxMembersPerServer *int) error
 	GetVoiceKeyRotationHours(ctx context.Context) (int, error)
 	ListServerTemplates(ctx context.Context) ([]models.ServerTemplate, error)
 	GetServerTemplateByID(ctx context.Context, id string) (*models.ServerTemplate, error)
@@ -172,6 +172,8 @@ type adminConfigResponse struct {
 	RegistrationMode     string  `json:"registrationMode"`
 	GuildDiscovery       string  `json:"guildDiscovery"`
 	ServerCreationPolicy string  `json:"serverCreationPolicy"`
+	MaxServersPerUser    *int    `json:"maxServersPerUser,omitempty"`
+	MaxMembersPerServer  *int    `json:"maxMembersPerServer,omitempty"`
 }
 
 // getConfig handles GET /api/admin/config.
@@ -189,6 +191,8 @@ func (h *adminHandler) getConfig(w http.ResponseWriter, r *http.Request) {
 		RegistrationMode:     cfg.RegistrationMode,
 		GuildDiscovery:       cfg.GuildDiscovery,
 		ServerCreationPolicy: cfg.ServerCreationPolicy,
+		MaxServersPerUser:    cfg.MaxServersPerUser,
+		MaxMembersPerServer:  cfg.MaxMembersPerServer,
 	})
 }
 
@@ -199,6 +203,8 @@ type adminUpdateConfigRequest struct {
 	RegistrationMode     *string `json:"registrationMode"`
 	GuildDiscovery       *string `json:"guildDiscovery"`
 	ServerCreationPolicy *string `json:"serverCreationPolicy"`
+	MaxServersPerUser    *int    `json:"maxServersPerUser,omitempty"`
+	MaxMembersPerServer  *int    `json:"maxMembersPerServer,omitempty"`
 }
 
 // updateConfig handles PUT /api/admin/config.
@@ -241,8 +247,17 @@ func (h *adminHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Capability limits: 0 = remove limit (set to NULL), >= 1 = enforce limit, < 0 = invalid.
+	if req.MaxServersPerUser != nil && *req.MaxServersPerUser < 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "maxServersPerUser must be 0 (no limit) or at least 1"})
+		return
+	}
+	if req.MaxMembersPerServer != nil && *req.MaxMembersPerServer < 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "maxMembersPerServer must be 0 (no limit) or at least 1"})
+		return
+	}
 
-	if err := h.store.UpdateInstanceConfig(r.Context(), req.Name, req.IconURL, req.RegistrationMode, req.GuildDiscovery, req.ServerCreationPolicy); err != nil {
+	if err := h.store.UpdateInstanceConfig(r.Context(), req.Name, req.IconURL, req.RegistrationMode, req.GuildDiscovery, req.ServerCreationPolicy, req.MaxServersPerUser, req.MaxMembersPerServer); err != nil {
 		slog.Error("admin updateConfig", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update config"})
 		return
