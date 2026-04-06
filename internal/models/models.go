@@ -226,6 +226,7 @@ type Server struct {
 	AdminLabelEncrypted []byte     `json:"adminLabelEncrypted,omitempty"`
 	CreatedAt           time.Time  `json:"createdAt"`
 	// DM and discovery fields (migration 000021).
+	MemberCapOverride *int    `json:"memberCapOverride,omitempty"`
 	IsDm              bool    `json:"isDm"`
 	Category          *string `json:"category,omitempty"`
 	PublicName        *string `json:"publicName,omitempty"`
@@ -259,13 +260,14 @@ type ServerMemberWithUser struct {
 // GuildBillingStats exposes guild infrastructure metrics to the instance operator.
 // No guild name, channel list, or member details - privacy boundary is preserved.
 type GuildBillingStats struct {
-	ID               string     `json:"id"`
-	MemberCount      int        `json:"memberCount"`
-	StorageBytes     int64      `json:"storageBytes"`
-	MessageCount     int64      `json:"messageCount"`
-	ActiveMembers30d int        `json:"activeMembers30d"`
-	LastActiveAt     *time.Time `json:"lastActiveAt,omitempty"`
-	CreatedAt        time.Time  `json:"createdAt"`
+	ID                string     `json:"id"`
+	MemberCount       int        `json:"memberCount"`
+	StorageBytes      int64      `json:"storageBytes"`
+	MessageCount      int64      `json:"messageCount"`
+	ActiveMembers30d  int        `json:"activeMembers30d"`
+	LastActiveAt      *time.Time `json:"lastActiveAt,omitempty"`
+	CreatedAt         time.Time  `json:"createdAt"`
+	MemberCapOverride *int       `json:"memberCapOverride,omitempty"`
 }
 
 // CreateServerRequest is the body for POST /api/servers.

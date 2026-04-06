@@ -18,7 +18,7 @@ func (p *Pool) CreateServer(ctx context.Context, encryptedMetadata []byte) (*mod
 		RETURNING id, encrypted_metadata, member_count, text_channel_count, voice_channel_count,
 		          storage_bytes, message_count, active_members_30d, last_active_at,
 		          access_policy, discoverable, admin_label_encrypted, created_at,
-		          is_dm, category, public_name, public_description`,
+		          member_cap_override, is_dm, category, public_name, public_description`,
 		encryptedMetadata,
 	)
 	return scanServer(row)
@@ -46,7 +46,7 @@ func (p *Pool) GetServerByID(ctx context.Context, serverID string) (*models.Serv
 		SELECT id, encrypted_metadata, member_count, text_channel_count, voice_channel_count,
 		       storage_bytes, message_count, active_members_30d, last_active_at,
 		       access_policy, discoverable, admin_label_encrypted, created_at,
-		       is_dm, category, public_name, public_description
+		       member_cap_override, is_dm, category, public_name, public_description
 		FROM servers WHERE id = $1`, serverID)
 	s, err := scanServer(row)
 	if err != nil {
@@ -64,7 +64,7 @@ func (p *Pool) ListServersForUser(ctx context.Context, userID string) ([]models.
 		SELECT s.id, s.encrypted_metadata, s.member_count, s.text_channel_count, s.voice_channel_count,
 		       s.storage_bytes, s.message_count, s.active_members_30d, s.last_active_at,
 		       s.access_policy, s.discoverable, s.admin_label_encrypted, s.created_at,
-		       s.is_dm, s.category, s.public_name, s.public_description
+		       s.member_cap_override, s.is_dm, s.category, s.public_name, s.public_description
 		FROM servers s
 		JOIN server_members sm ON sm.server_id = s.id
 		WHERE sm.user_id = $1
@@ -95,7 +95,7 @@ func (p *Pool) DeleteServer(ctx context.Context, serverID string) error {
 func (p *Pool) ListGuildBillingStats(ctx context.Context) ([]models.GuildBillingStats, error) {
 	rows, err := p.Query(ctx, `
 		SELECT id, member_count, storage_bytes, message_count, active_members_30d,
-		       last_active_at, created_at
+		       last_active_at, created_at, member_cap_override
 		FROM servers
 		ORDER BY created_at`)
 	if err != nil {
@@ -107,7 +107,7 @@ func (p *Pool) ListGuildBillingStats(ctx context.Context) ([]models.GuildBilling
 		var g models.GuildBillingStats
 		if err := rows.Scan(
 			&g.ID, &g.MemberCount, &g.StorageBytes, &g.MessageCount,
-			&g.ActiveMembers30d, &g.LastActiveAt, &g.CreatedAt,
+			&g.ActiveMembers30d, &g.LastActiveAt, &g.CreatedAt, &g.MemberCapOverride,
 		); err != nil {
 			return nil, err
 		}
@@ -163,13 +163,20 @@ func (p *Pool) CountOwnedServers(ctx context.Context, userID string) (int, error
 	return count, err
 }
 
+// UpdateServerMemberCapOverride sets or clears the per-server member cap override.
+// Pass nil to clear (inherit instance default).
+func (p *Pool) UpdateServerMemberCapOverride(ctx context.Context, serverID string, cap *int) error {
+	_, err := p.Exec(ctx, `UPDATE servers SET member_cap_override = $1 WHERE id = $2`, cap, serverID)
+	return err
+}
+
 func scanServer(row pgx.Row) (*models.Server, error) {
 	var s models.Server
 	err := row.Scan(
 		&s.ID, &s.EncryptedMetadata, &s.MemberCount, &s.TextChannelCount, &s.VoiceChannelCount,
 		&s.StorageBytes, &s.MessageCount, &s.ActiveMembers30d, &s.LastActiveAt,
 		&s.AccessPolicy, &s.Discoverable, &s.AdminLabelEncrypted, &s.CreatedAt,
-		&s.IsDm, &s.Category, &s.PublicName, &s.PublicDescription,
+		&s.MemberCapOverride, &s.IsDm, &s.Category, &s.PublicName, &s.PublicDescription,
 	)
 	if err != nil {
 		return nil, err

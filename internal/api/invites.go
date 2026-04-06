@@ -215,9 +215,10 @@ func (h *inviteHandler) claimInvite(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "server not found"})
 		return
 	}
+	// Check effective member cap: server override > instance default > unlimited.
 	cfg, _ := h.store.GetInstanceConfig(r.Context())
-	if cfg != nil && cfg.MaxMembersPerServer != nil {
-		if srv.MemberCount >= *cfg.MaxMembersPerServer {
+	if cap := effectiveMemberCap(srv, cfg); cap != nil {
+		if srv.MemberCount >= *cap {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "this server has reached its member limit"})
 			return
 		}

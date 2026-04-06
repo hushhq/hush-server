@@ -717,6 +717,10 @@ func (m *mockStore) CountOwnedServers(ctx context.Context, userID string) (int, 
 	return 0, nil
 }
 
+func (m *mockStore) UpdateServerMemberCapOverride(context.Context, string, *int) error {
+	return nil
+}
+
 func (m *mockStore) CreateServer(ctx context.Context, encryptedMetadata []byte) (*models.Server, error) {
 	if m.createServerFn != nil {
 		return m.createServerFn(ctx, encryptedMetadata)

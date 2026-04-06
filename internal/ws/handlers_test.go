@@ -211,6 +211,7 @@ func (m *messageStoreMock) ClaimInviteUse(context.Context, string) (bool, error)
 
 // Server / guild operation stubs.
 func (m *messageStoreMock) CountOwnedServers(context.Context, string) (int, error) { return 0, nil }
+func (m *messageStoreMock) UpdateServerMemberCapOverride(context.Context, string, *int) error { return nil }
 
 // CreateServer now takes encryptedMetadata []byte only (no plaintext name).
 func (m *messageStoreMock) CreateServer(context.Context, []byte) (*models.Server, error) {

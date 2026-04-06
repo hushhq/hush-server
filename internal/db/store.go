@@ -120,6 +120,8 @@ type Store interface {
 
 	// CountOwnedServers returns the number of non-DM servers where the user is the owner.
 	CountOwnedServers(ctx context.Context, userID string) (int, error)
+	// UpdateServerMemberCapOverride sets or clears the per-server member cap override.
+	UpdateServerMemberCapOverride(ctx context.Context, serverID string, cap *int) error
 
 	// Server operations
 	// CreateServer accepts encryptedMetadata (may be nil for two-step creation flow).

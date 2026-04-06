@@ -11,6 +11,18 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// effectiveMemberCap returns the active member cap for a server:
+// server-specific override if set, otherwise instance default, otherwise nil (unlimited).
+func effectiveMemberCap(server *models.Server, cfg *models.InstanceConfig) *int {
+	if server != nil && server.MemberCapOverride != nil {
+		return server.MemberCapOverride
+	}
+	if cfg != nil && cfg.MaxMembersPerServer != nil {
+		return cfg.MaxMembersPerServer
+	}
+	return nil
+}
+
 // fallbackTemplate returns the built-in default channel set used when no
 // server template exists in the database.
 func fallbackTemplate() []models.TemplateChannel {
@@ -495,10 +507,10 @@ func (h *serversHandler) joinServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check per-server member cap.
+	// Check effective member cap: server override > instance default > unlimited.
 	cfg, _ := h.store.GetInstanceConfig(r.Context())
-	if cfg != nil && cfg.MaxMembersPerServer != nil {
-		if server.MemberCount >= *cfg.MaxMembersPerServer {
+	if cap := effectiveMemberCap(server, cfg); cap != nil {
+		if server.MemberCount >= *cap {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "this server has reached its member limit"})
 			return
 		}

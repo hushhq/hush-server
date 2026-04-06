@@ -53,6 +53,8 @@ type adminStore interface {
 	RemoveServerMember(ctx context.Context, serverID, userID string) error
 	DeleteSessionsByUserID(ctx context.Context, userID string) error
 	ListInstanceAuditLog(ctx context.Context, limit, offset int, filter *db.InstanceAuditLogFilter) ([]models.InstanceAuditLogEntry, error)
+	GetServerByID(ctx context.Context, serverID string) (*models.Server, error)
+	UpdateServerMemberCapOverride(ctx context.Context, serverID string, cap *int) error
 }
 
 // AdminAPIRoutes returns the chi router for /api/admin.
@@ -98,6 +100,7 @@ func AdminAPIRoutes(
 		protected.Post("/bans", h.instanceBan)
 		protected.Delete("/bans/{userId}", h.instanceUnban)
 		protected.Get("/audit-log", h.instanceAuditLog)
+		protected.Put("/guilds/{serverId}/member-cap", h.setServerMemberCap)
 		protected.Get("/service-identity", h.getServiceIdentity)
 		protected.With(RequireAdminRole("owner")).Get("/admins", h.listAdmins)
 		protected.With(RequireAdminRole("owner")).Post("/admins", h.createAdminAccount)
@@ -555,4 +558,51 @@ func (h *adminHandler) instanceAuditLog(w http.ResponseWriter, r *http.Request) 
 		entries = []models.InstanceAuditLogEntry{}
 	}
 	writeJSON(w, http.StatusOK, entries)
+}
+
+// setServerMemberCap handles PUT /api/admin/guilds/{serverId}/member-cap.
+// Sets or clears the per-server member cap override.
+// Body: { "memberCapOverride": 100 } to set, { "memberCapOverride": 0 } to clear (inherit instance default).
+func (h *adminHandler) setServerMemberCap(w http.ResponseWriter, r *http.Request) {
+	serverID := chi.URLParam(r, "serverId")
+	var req struct {
+		MemberCapOverride *int `json:"memberCapOverride"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+	if req.MemberCapOverride == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "memberCapOverride is required (0 to clear, >= 1 to set)"})
+		return
+	}
+	if *req.MemberCapOverride < 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "memberCapOverride must be 0 (clear) or >= 1"})
+		return
+	}
+	srv, err := h.store.GetServerByID(r.Context(), serverID)
+	if err != nil || srv == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "server not found"})
+		return
+	}
+	var capValue *int
+	if *req.MemberCapOverride > 0 {
+		capValue = req.MemberCapOverride
+	}
+	// capValue is nil when 0 → clears the override
+	if err := h.store.UpdateServerMemberCapOverride(r.Context(), serverID, capValue); err != nil {
+		slog.Error("admin setServerMemberCap", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update member cap"})
+		return
+	}
+	cfg, _ := h.store.GetInstanceConfig(r.Context())
+	effectiveCap := effectiveMemberCap(srv, cfg)
+	if capValue != nil {
+		effectiveCap = capValue
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"serverId":          serverID,
+		"memberCapOverride": capValue,
+		"effectiveCap":      effectiveCap,
+	})
 }
