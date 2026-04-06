@@ -8,7 +8,7 @@ services:
       context: ../hush-web
       dockerfile: Dockerfile
       args:
-        VITE_DEBUG_TOOLBAR: ${VITE_DEBUG_TOOLBAR:-true}
+        VITE_DEBUG_TOOLBAR: ${VITE_DEBUG_TOOLBAR:-false}
     image: hush-web:local
     container_name: hush-web
     ports:
