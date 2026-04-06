@@ -67,7 +67,6 @@ services:
       - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
       - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
       - LIVEKIT_URL=wss://${DOMAIN}/livekit
-      - ADMIN_API_KEY=${ADMIN_API_KEY}
       - TRANSPARENCY_LOG_PRIVATE_KEY=${TRANSPARENCY_LOG_PRIVATE_KEY}
     depends_on:
       postgres:

@@ -204,8 +204,14 @@ JWT_SECRET="$(_existing_env JWT_SECRET)"
 POSTGRES_PASSWORD="$(_existing_env POSTGRES_PASSWORD)"
 [ -z "$POSTGRES_PASSWORD" ] && POSTGRES_PASSWORD="$(openssl rand -hex 16)"
 
-ADMIN_API_KEY="$(_existing_env ADMIN_API_KEY)"
-[ -z "$ADMIN_API_KEY" ] && ADMIN_API_KEY="$(openssl rand -hex 16)"
+ADMIN_BOOTSTRAP_SECRET="$(_existing_env ADMIN_BOOTSTRAP_SECRET)"
+[ -z "$ADMIN_BOOTSTRAP_SECRET" ] && ADMIN_BOOTSTRAP_SECRET="$(openssl rand -hex 24)"
+
+ADMIN_SESSION_TTL_HOURS="$(_existing_env ADMIN_SESSION_TTL_HOURS)"
+[ -z "$ADMIN_SESSION_TTL_HOURS" ] && ADMIN_SESSION_TTL_HOURS="24"
+
+SERVICE_IDENTITY_MASTER_KEY="$(_existing_env SERVICE_IDENTITY_MASTER_KEY)"
+[ -z "$SERVICE_IDENTITY_MASTER_KEY" ] && SERVICE_IDENTITY_MASTER_KEY="$(openssl rand -hex 32)"
 
 LIVEKIT_API_KEY="$(_existing_env LIVEKIT_API_KEY)"
 [ -z "$LIVEKIT_API_KEY" ] && LIVEKIT_API_KEY="$(openssl rand -hex 16)"
@@ -247,9 +253,13 @@ POSTGRES_PASSWORD=$POSTGRES_PASSWORD
 # JWT signing secret - changing this invalidates all active sessions
 JWT_SECRET=$JWT_SECRET
 
-# --- Admin API ------------------------------------------------------------
-# Bearer token for admin endpoints - keep private
-ADMIN_API_KEY=$ADMIN_API_KEY
+# --- Instance admin -------------------------------------------------------
+# One-time bootstrap secret for creating the first local owner account
+ADMIN_BOOTSTRAP_SECRET=$ADMIN_BOOTSTRAP_SECRET
+# Dashboard session lifetime in hours
+ADMIN_SESSION_TTL_HOURS=$ADMIN_SESSION_TTL_HOURS
+# 32-byte wrapping key used to protect the service identity private key at rest
+SERVICE_IDENTITY_MASTER_KEY=$SERVICE_IDENTITY_MASTER_KEY
 
 # --- LiveKit (self-hosted) ------------------------------------------------
 LIVEKIT_API_KEY=$LIVEKIT_API_KEY
@@ -422,7 +432,7 @@ if [ "$mode" = "ip" ]; then
   log "Accept the warning to proceed. E2EE is unaffected."
   printf '\n'
 fi
-log "Admin API key:  $ADMIN_API_KEY"
+log "Admin bootstrap secret:  $ADMIN_BOOTSTRAP_SECRET"
 log "(Secrets are saved in .env - keep that file private.)"
 printf '\n'
 log "To update Hush in the future, run: ./scripts/update.sh"
