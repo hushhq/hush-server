@@ -1,6 +1,6 @@
-# docker-compose.yml - SELF-HOSTED deployment (includes LiveKit + Redis)
-# For gethush.live hosted: use docker-compose.prod.yml override
-# Usage: docker-compose up -d
+# docker-compose.yml - local full-stack development compose
+# Requires the sibling ../hush-web repository to exist.
+# Self-host production uses docker-compose.prod.yml (+ docker-compose.caddy.yml by default).
 
 services:
   hush-web:

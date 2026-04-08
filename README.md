@@ -15,6 +15,8 @@ Go backend for [Hush](https://gethush.live) - an end-to-end encrypted communicat
 - [Docker](https://docs.docker.com/engine/install/) and docker-compose installed
 - Ports 80, 443, 7880-7881/tcp, and 50020-50100/udp open
 
+`hush-server` self-hosting provisions the backend/media plane only: API, PostgreSQL, Redis, LiveKit, and the default Caddy reverse proxy. It does **not** clone or build `hush-web`.
+
 ### With a domain (recommended)
 
 A domain gives you a real TLS certificate from Let's Encrypt - no browser warnings, and no friction when users from other instances connect to yours.
@@ -33,7 +35,19 @@ cd hush-server
 ./scripts/setup.sh --domain chat.example.com --email you@example.com
 ```
 
-**3.** Open `https://chat.example.com`. Register and you're live.
+**3. Connect with a Hush web client**
+
+The default setup is designed to work with the official hosted client:
+
+1. Open `https://app.gethush.live`
+2. Add your instance URL: `https://chat.example.com`
+3. Register or sign in against that instance
+
+If you later self-host `hush-web`, update `CORS_ORIGIN` in `.env` to your own web-client origin.
+
+### Admin dashboard note
+
+`hush-server` exposes the admin API and prints `ADMIN_BOOTSTRAP_SECRET` during setup, but the browser admin UI lives in `hush-web/admin` and is not bundled by this repository. If you need the browser dashboard on your own domain, deploy `hush-web` separately and serve `/admin/` from the same origin as the instance API.
 
 ### With just an IP (development / LAN only)
 
@@ -43,7 +57,7 @@ cd hush-server
 ./scripts/setup.sh --ip 203.0.113.42
 ```
 
-After setup, visit `https://YOUR_SERVER_IP`, accept the browser certificate warning, and register.
+After setup, visit `https://YOUR_SERVER_IP` once to accept the browser certificate warning. IP-only mode is for development / LAN testing; for normal use, prefer a domain with real TLS.
 
 ### Setup flags
 
@@ -58,9 +72,9 @@ After setup, visit `https://YOUR_SERVER_IP`, accept the browser certificate warn
 
 1. Checks for Docker and docker-compose
 2. Generates all required secrets: JWT signing key, admin bootstrap secret, PostgreSQL password, LiveKit credentials, key transparency seed, and a wrapping key for the instance service identity
-3. Writes `.env` and Caddy config from `--domain` or `--ip`
-4. Builds the Go API image, pulls Postgres/Redis/LiveKit
-5. Runs database migrations and starts the stack
+3. Writes `.env` and the Caddy config from `--domain` or `--ip`
+4. Builds `hush-api` and pulls the runtime images
+5. Starts the backend/media stack: Go API, PostgreSQL, Redis, LiveKit, and Caddy
 6. Health-checks the running instance and prints your live URL
 
 ### Updating
@@ -113,7 +127,7 @@ The server reads configuration from environment variables (or `.env` in the proj
 | `ADMIN_BOOTSTRAP_SECRET` | One-time secret used only to create the first local admin owner |
 | `ADMIN_SESSION_TTL_HOURS` | Dashboard session lifetime in hours |
 | `DOMAIN` | Public instance hostname; also used to derive `CORS_ORIGIN` when omitted |
-| `CORS_ORIGIN` | Allowed frontend origin (do not use `*` in production) |
+| `CORS_ORIGIN` | Allowed frontend origin. For backend-only self-hosting with the official client, use `https://app.gethush.live`. Do not use `*` in production. |
 | `SERVICE_IDENTITY_MASTER_KEY` | 32-byte hex/base64 key used to wrap the instance service identity private key at rest |
 | `LIVEKIT_API_KEY` | LiveKit API key |
 | `LIVEKIT_API_SECRET` | LiveKit API secret |
@@ -188,11 +202,13 @@ Pre-built images are published to GitHub Container Registry:
 docker pull ghcr.io/hushhq/hush-server:latest
 ```
 
-For production deployment, use `docker-compose.prod.yml`:
+For the backend/media stack, use `docker-compose.prod.yml`:
 
 ```bash
 docker-compose -f docker-compose.prod.yml up -d
 ```
+
+The default self-host scripts add `docker-compose.caddy.yml` on top so the instance is reachable on ports 80/443 with TLS.
 
 ---
 
@@ -200,13 +216,17 @@ docker-compose -f docker-compose.prod.yml up -d
 
 ### Caddy (default)
 
-The `caddy/` directory contains ready-to-use Caddyfiles:
+`scripts/setup.sh` uses `docker-compose.prod.yml` plus `docker-compose.caddy.yml` and writes the active config to `caddy/Caddyfile.self-hoster`.
+
+The `caddy/` directory contains the templates used for that path:
 - `caddy/Caddyfile` - development/local
 - `caddy/Caddyfile.self-hoster.tmpl` - production template (replace `__DOMAIN__` and `__EMAIL__`)
 
 ### nginx
 
-If you already run nginx, copy `nginx/hush.conf` to `/etc/nginx/sites-available/`, replace `YOUR_DOMAIN`, and reload. The config proxies API, WebSocket, LiveKit signaling, and serves the SPA fallback with security headers.
+If you already run nginx, use `docker-compose.prod.yml` for the backend/media services and copy `nginx/hush.conf` to `/etc/nginx/sites-available/`, replace `YOUR_DOMAIN`, and reload. The config proxies API, WebSocket, and LiveKit signaling.
+
+Neither the default Caddy path nor the nginx template bundles `hush-web`. If you want the browser client or admin dashboard on your own domain, deploy `hush-web` separately.
 
 See the Self-Hosting Guide in `ARCHITECTURE.md` for full instructions.
 

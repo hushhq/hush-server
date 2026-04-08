@@ -1,0 +1,23 @@
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: hush-caddy
+    depends_on:
+      hush-api:
+        condition: service_started
+      livekit:
+        condition: service_started
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile.self-hoster:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+    networks:
+      - hush-network
+
+volumes:
+  caddy_data:
+  caddy_config:

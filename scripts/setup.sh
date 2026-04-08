@@ -1,6 +1,6 @@
 #!/bin/sh
 # Hush self-hoster onboarding script.
-# Deploys a production Hush instance with TLS in under 10 minutes.
+# Deploys a production Hush backend/media instance with TLS in under 10 minutes.
 #
 # Usage:
 #   ./scripts/setup.sh                          # interactive mode
@@ -15,9 +15,11 @@
 #   --force           Overwrite existing .env without prompting
 #
 # Modes:
-#   Domain mode (--domain): Caddy obtains a real TLS cert from Let's Encrypt.
-#                           Requires DNS pointing to this server on ports 80/443.
-#   IP mode (--ip):         Caddy generates a self-signed cert from its internal CA.
+#   Domain mode (--domain): Docker Compose starts Caddy, which obtains a real
+#                           TLS cert from Let's Encrypt. Requires DNS pointing
+#                           to this server on ports 80/443.
+#   IP mode (--ip):         Docker Compose starts Caddy with a self-signed cert
+#                           from its internal CA.
 #                           Browsers show a certificate warning - E2EE is unaffected.
 #
 # Exit codes:
@@ -30,7 +32,8 @@ set -eu
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-COMPOSE_FILE="docker-compose.prod.yml"
+COMPOSE_BASE_FILE="docker-compose.prod.yml"
+COMPOSE_PROXY_FILE="docker-compose.caddy.yml"
 CADDY_DOMAIN_TMPL="caddy/Caddyfile.self-hoster.tmpl"
 CADDY_IP_TMPL="caddy/Caddyfile.ip.tmpl"
 CADDY_OUT="caddy/Caddyfile.self-hoster"
@@ -45,6 +48,7 @@ LOG_PREFIX="[hush]"
 log() { printf '%s %s\n' "$LOG_PREFIX" "$1"; }
 err() { printf '%s ERROR: %s\n' "$LOG_PREFIX" "$1" >&2; }
 die() { err "$1"; exit "${2:-1}"; }
+compose_cmd() { $DOCKER_COMPOSE -f "$COMPOSE_BASE_FILE" -f "$COMPOSE_PROXY_FILE" "$@"; }
 
 # ---------------------------------------------------------------------------
 # Parse arguments
@@ -223,6 +227,9 @@ LIVEKIT_API_SECRET="$(_existing_env LIVEKIT_API_SECRET)"
 TRANSPARENCY_LOG_PRIVATE_KEY="$(_existing_env TRANSPARENCY_LOG_PRIVATE_KEY)"
 [ -z "$TRANSPARENCY_LOG_PRIVATE_KEY" ] && TRANSPARENCY_LOG_PRIVATE_KEY="$(openssl rand -hex 32)"
 
+CORS_ORIGIN="$(_existing_env CORS_ORIGIN)"
+[ -z "$CORS_ORIGIN" ] && CORS_ORIGIN="https://app.gethush.live"
+
 # ---------------------------------------------------------------------------
 # Step 5: Write .env
 # ---------------------------------------------------------------------------
@@ -242,6 +249,12 @@ cat > .env <<ENVEOF
 # --- Host -----------------------------------------------------------------
 # The public hostname or IP address of this server.
 DOMAIN=$host
+# Enable production-only safeguards (e.g. persistent transparency signer).
+PRODUCTION=true
+
+# Browser client origin allowed to open WebSocket/API connections to this instance.
+# Default points at the official hosted web client. Change this if you self-host hush-web.
+CORS_ORIGIN=$CORS_ORIGIN
 
 # --- PostgreSQL -----------------------------------------------------------
 POSTGRES_USER=hush
@@ -349,35 +362,34 @@ log "LiveKit config OK (using $LIVEKIT_TMPL template; keys injected at container
 # If a previous setup failed mid-init, Postgres may have a volume with the
 # wrong password baked in. Stop everything and remove data volumes so the
 # new credentials take effect cleanly.
-if $DOCKER_COMPOSE -f "$COMPOSE_FILE" ps -q 2>/dev/null | grep -q .; then
+if compose_cmd ps -q 2>/dev/null | grep -q .; then
   log "Stopping existing Hush stack..."
   # Use down without -v to preserve data volumes. Only remove volumes if
   # no postgres data exists yet (fresh/failed first setup).
-  if docker volume inspect hush-app_postgres_data >/dev/null 2>&1 && \
-     $DOCKER_COMPOSE -f "$COMPOSE_FILE" exec -T postgres pg_isready -U "${POSTGRES_USER:-hush}" >/dev/null 2>&1; then
+  if compose_cmd exec -T postgres pg_isready -U "${POSTGRES_USER:-hush}" >/dev/null 2>&1; then
     log "Existing database detected - preserving data volumes."
-    $DOCKER_COMPOSE -f "$COMPOSE_FILE" down 2>/dev/null || true
+    compose_cmd down 2>/dev/null || true
   else
     log "No healthy database found - removing stale volumes."
-    $DOCKER_COMPOSE -f "$COMPOSE_FILE" down -v 2>/dev/null || true
+    compose_cmd down -v 2>/dev/null || true
   fi
 elif [ "$force" -eq 1 ]; then
   # No containers running. Remove stale volumes from a prior failed setup.
-  $DOCKER_COMPOSE -f "$COMPOSE_FILE" down -v 2>/dev/null || true
+  compose_cmd down -v 2>/dev/null || true
 fi
 
 # ---------------------------------------------------------------------------
 # Step 9: Build and pull Docker images
 # ---------------------------------------------------------------------------
-log "Building Hush images and pulling dependencies (this may take several minutes on first run)..."
-$DOCKER_COMPOSE -f "$COMPOSE_FILE" build
-$DOCKER_COMPOSE -f "$COMPOSE_FILE" pull --ignore-buildable
+log "Building hush-api and pulling runtime dependencies (this may take several minutes on first run)..."
+compose_cmd build hush-api
+compose_cmd pull --ignore-buildable
 
 # ---------------------------------------------------------------------------
 # Step 9: Start stack
 # ---------------------------------------------------------------------------
 log "Starting Hush stack..."
-$DOCKER_COMPOSE -f "$COMPOSE_FILE" up -d
+compose_cmd up -d
 
 # ---------------------------------------------------------------------------
 # Step 10: Health check with retry
@@ -411,7 +423,7 @@ wait_for_health() {
   done
 
   err "API did not become healthy after $_max attempts."
-  err "Check logs with: $DOCKER_COMPOSE -f $COMPOSE_FILE logs hush-api"
+  err "Check logs with: $DOCKER_COMPOSE -f $COMPOSE_BASE_FILE -f $COMPOSE_PROXY_FILE logs hush-api"
   return 1
 }
 
@@ -427,12 +439,19 @@ log "================================================================"
 log " Hush is live at https://$host"
 log "================================================================"
 printf '\n'
+if [ "$mode" = "domain" ]; then
+  log "Open https://app.gethush.live and add this instance URL:"
+  log "  https://$host"
+  log "If you self-host hush-web later, update CORS_ORIGIN in .env to that origin."
+  printf '\n'
+fi
 if [ "$mode" = "ip" ]; then
   log "Self-signed TLS: your browser will show a certificate warning."
   log "Accept the warning to proceed. E2EE is unaffected."
   printf '\n'
 fi
 log "Admin bootstrap secret:  $ADMIN_BOOTSTRAP_SECRET"
+log "Browser admin UI is not bundled by hush-server; keep this secret for a same-origin hush-web/admin deployment if you add one later."
 log "(Secrets are saved in .env - keep that file private.)"
 printf '\n'
 log "To update Hush in the future, run: ./scripts/update.sh"

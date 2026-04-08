@@ -74,7 +74,7 @@ Chat messages are stored as MLS ciphertext blobs. The server never processes pla
 
 ## 4. Security Headers
 
-The Caddy reverse proxy sets the following headers on all responses:
+The default Caddy self-host proxy sets the following headers on all responses:
 
 | Header | Value | Purpose |
 |-|-|-|
@@ -112,7 +112,7 @@ Hush implements a signed Merkle tree of key operations per instance.
 | Item | Action |
 |-|-|
 | **CORS** | Set `CORS_ORIGIN` to your frontend origin. Never use `*` in production. |
-| **HSTS** | Use `--domain` with `setup.sh`; Caddy sets HSTS automatically. |
+| **HSTS** | Use `--domain` with `setup.sh`; the default Caddy path sets HSTS automatically. If you use nginx, configure equivalent HSTS there. |
 | **Secrets** | Do not use default values. `setup.sh` generates all secrets. |
 | **Transparency key** | Never rotate `TRANSPARENCY_LOG_PRIVATE_KEY` after first log entry. Back it up. |
 | **Database access** | PostgreSQL should not be exposed to the public internet. Use Docker networking or firewall rules. |

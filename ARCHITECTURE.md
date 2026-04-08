@@ -8,18 +8,18 @@ This document describes the Go server's internal architecture, database schema, 
 
 ```mermaid
 graph LR
-    Client["Client\n(React + WASM)"]
-    Admin["Admin Dashboard"]
-    Caddy["Caddy\n(TLS + Reverse Proxy)"]
+    Client["Compatible Hush Client\n(hosted app.gethush.live or self-hosted hush-web)"]
+    Admin["Optional Admin UI\n(hush-web/admin, same-origin)"]
+    Proxy["Caddy or nginx\n(TLS + Reverse Proxy)"]
     API["Go API\n(Chi + WebSocket Hub)"]
     PG["PostgreSQL"]
     Redis["Redis"]
     LK["LiveKit\n(WebRTC SFU)"]
 
-    Client -->|HTTPS / WSS| Caddy
-    Admin -->|HTTPS| Caddy
-    Caddy -->|HTTP| API
-    Caddy -->|HTTP| LK
+    Client -->|HTTPS / WSS| Proxy
+    Admin -->|HTTPS| Proxy
+    Proxy -->|HTTP| API
+    Proxy -->|HTTP| LK
     API --> PG
     API --> Redis
     API -->|Token endpoint| LK
@@ -74,7 +74,7 @@ scripts/
 └── update.sh                # Upgrade (backup, pull, rebuild, restart)
 caddy/
 ├── Caddyfile                # Development reverse proxy
-└── Caddyfile.self-hoster.tmpl  # Production template
+└── Caddyfile.self-hoster.tmpl  # Self-host production template
 nginx/
 └── hush.conf                # nginx config template for existing nginx setups
 livekit/
@@ -217,14 +217,14 @@ This keeps human admin auth and cryptographic service ownership separate.
 
 ## 10. Infrastructure (Docker Compose)
 
-The stack is defined in `docker-compose.yml` (dev) and `docker-compose.prod.yml` (production).
+The self-host backend/media stack is defined in `docker-compose.prod.yml`. The default self-host proxy layer lives in `docker-compose.caddy.yml`. `hush-web` is a separate repository and is not bundled into the server self-host setup.
 
 | Service | Image | Purpose |
 |-|-|-|
-| `api` | `ghcr.io/hushhq/hush-server` | Go backend |
+| `hush-api` | Local build from this repo | Go backend |
 | `postgres` | `postgres:16-alpine` | Primary database |
 | `redis` | `redis:7-alpine` | Session cache, rate limiting |
 | `livekit` | `livekit/livekit-server:latest` | WebRTC SFU |
-| `caddy` | `caddy:2-alpine` | TLS termination, reverse proxy |
+| `caddy` | `caddy:2-alpine` | Optional default TLS termination / reverse proxy |
 
-All services communicate on an internal Docker network. PostgreSQL and Redis are not exposed to the host on production.
+All services communicate on an internal Docker network. PostgreSQL and Redis are not exposed to the public internet. Browser clients connect through either the default Caddy layer or an operator-managed nginx reverse proxy.

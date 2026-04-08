@@ -32,23 +32,14 @@ __DOMAIN__ {
     }
   }
 
-  # Admin dashboard SPA
-  handle /admin* {
-    uri strip_prefix /admin
-    root * /srv/admin
-    try_files {path} /index.html
-    file_server
-  }
-
-  # Client SPA - serve built files, fall back to index.html for client-side routing
+  # Informational fallback for browser visits. hush-server does not bundle the
+  # browser client or admin UI; connect with a compatible Hush web client.
   handle {
     header X-Content-Type-Options "nosniff"
     header X-Frame-Options "DENY"
     header Cross-Origin-Opener-Policy "same-origin"
     header Strict-Transport-Security "max-age=31536000; includeSubDomains"
-    root * /srv
-    try_files {path} /index.html
-    file_server
+    respond "Hush instance backend is live. Use a compatible Hush web client and connect to this instance URL. The browser admin UI is not bundled by hush-server." 200
   }
 
   log {

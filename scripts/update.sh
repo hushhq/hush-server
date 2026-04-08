@@ -1,5 +1,5 @@
 #!/bin/sh
-# Hush upgrade script - pulls new images and restarts the stack.
+# Hush upgrade script - updates the self-host backend/media stack and Caddy proxy.
 # NEVER overwrites secrets (.env is preserved as-is).
 #
 # Usage:
@@ -19,7 +19,8 @@ set -eu
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-COMPOSE_FILE="docker-compose.prod.yml"
+COMPOSE_BASE_FILE="docker-compose.prod.yml"
+COMPOSE_PROXY_FILE="docker-compose.caddy.yml"
 HEALTH_URL="http://localhost:8080/api/health"
 HANDSHAKE_URL="http://localhost:8080/api/handshake"
 LOG_PREFIX="[hush]"
@@ -30,6 +31,7 @@ LOG_PREFIX="[hush]"
 log() { printf '%s %s\n' "$LOG_PREFIX" "$1"; }
 err() { printf '%s ERROR: %s\n' "$LOG_PREFIX" "$1" >&2; }
 die() { err "$1"; exit "${2:-1}"; }
+compose_cmd() { $DOCKER_COMPOSE -f "$COMPOSE_BASE_FILE" -f "$COMPOSE_PROXY_FILE" "$@"; }
 
 # ---------------------------------------------------------------------------
 # Resolve project root
@@ -88,17 +90,17 @@ if [ -f .env ]; then
   PG_DB="$(grep -m1 '^POSTGRES_DB=' .env | cut -d= -f2 || echo "$PG_DB")"
 fi
 
-if $DOCKER_COMPOSE -f "$COMPOSE_FILE" ps postgres 2>/dev/null | grep -q "Up\|running"; then
-  $DOCKER_COMPOSE -f "$COMPOSE_FILE" exec -T postgres \
+if compose_cmd ps postgres 2>/dev/null | grep -q "Up\|running"; then
+  compose_cmd exec -T postgres \
     pg_dump -U "$PG_USER" "$PG_DB" > "$BACKUP_FILE" 2>/dev/null || {
     err "Database backup failed. Aborting update to protect your data."
-    err "If postgres is not running, start it first: $DOCKER_COMPOSE -f $COMPOSE_FILE up -d postgres"
+    err "If postgres is not running, start it first: $DOCKER_COMPOSE -f $COMPOSE_BASE_FILE -f $COMPOSE_PROXY_FILE up -d postgres"
     exit 1
   }
   log "Database backup saved: $BACKUP_FILE"
 else
   err "Postgres container is not running. Cannot create backup."
-  err "Start the stack first: $DOCKER_COMPOSE -f $COMPOSE_FILE up -d"
+  err "Start the stack first: $DOCKER_COMPOSE -f $COMPOSE_BASE_FILE -f $COMPOSE_PROXY_FILE up -d"
   exit 1
 fi
 
@@ -108,15 +110,15 @@ fi
 log "Pulling latest code..."
 git pull --ff-only || log "WARNING: git pull failed - building from current local code."
 
-log "Rebuilding Hush images..."
-$DOCKER_COMPOSE -f "$COMPOSE_FILE" build
-$DOCKER_COMPOSE -f "$COMPOSE_FILE" pull --ignore-buildable
+log "Rebuilding hush-api and pulling runtime dependencies..."
+compose_cmd build hush-api
+compose_cmd pull --ignore-buildable
 
 # ---------------------------------------------------------------------------
 # Step 4: Restart services
 # ---------------------------------------------------------------------------
 log "Restarting Hush stack..."
-$DOCKER_COMPOSE -f "$COMPOSE_FILE" up -d
+compose_cmd up -d
 
 # ---------------------------------------------------------------------------
 # Step 5: Health check with retry
@@ -149,7 +151,7 @@ wait_for_health() {
   done
 
   err "API did not become healthy after $_max attempts."
-  err "Check logs with: $DOCKER_COMPOSE -f $COMPOSE_FILE logs hush-api"
+  err "Check logs with: $DOCKER_COMPOSE -f $COMPOSE_BASE_FILE -f $COMPOSE_PROXY_FILE logs hush-api"
   return 1
 }
 
