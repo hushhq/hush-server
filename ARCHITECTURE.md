@@ -222,7 +222,7 @@ The self-host backend/media stack is defined in `docker-compose.prod.yml`. The d
 | `hush-api` | Local build from this repo | Go backend |
 | `postgres` | `postgres:16-alpine` | Primary database |
 | `redis` | `redis:7-alpine` | Session cache, rate limiting |
-| `livekit` | `livekit/livekit-server:latest` | WebRTC SFU |
+| `livekit` | `livekit/livekit-server:v1.10.1` | WebRTC SFU |
 | `caddy` | `caddy:2-alpine` | Optional default TLS termination / reverse proxy |
 
 All services communicate on an internal Docker network. PostgreSQL and Redis are not exposed to the public internet. Browser clients connect through either the default Caddy layer or an operator-managed nginx reverse proxy.

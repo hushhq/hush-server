@@ -77,7 +77,7 @@ services:
       - hush-network
 
   livekit:
-    image: livekit/livekit-server:latest
+    image: livekit/livekit-server:v1.10.1
     container_name: hush-livekit
     entrypoint: /bin/sh
     command:
