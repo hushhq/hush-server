@@ -357,25 +357,26 @@ fi
 log "LiveKit config OK (using $LIVEKIT_TMPL template; keys injected at container startup)."
 
 # ---------------------------------------------------------------------------
-# Step 8: Stop existing stack and clean stale volumes
+# Step 8: Stop existing stack
 # ---------------------------------------------------------------------------
 # If a previous setup failed mid-init, Postgres may have a volume with the
-# wrong password baked in. Stop everything and remove data volumes so the
-# new credentials take effect cleanly.
+# wrong password baked in. _existing_env() above already handles this by
+# reusing the existing .env credentials. Never auto-remove volumes when
+# containers are stopped - the operator may have stopped them for maintenance.
+#
+# If you need a completely fresh start after a failed first setup (no data to
+# preserve), manually run: docker compose -f docker-compose.prod.yml down -v
 if compose_cmd ps -q 2>/dev/null | grep -q .; then
   log "Stopping existing Hush stack..."
   # Use down without -v to preserve data volumes. Only remove volumes if
-  # no postgres data exists yet (fresh/failed first setup).
+  # no postgres data exists yet (fresh/failed first setup with no DB yet).
   if compose_cmd exec -T postgres pg_isready -U "${POSTGRES_USER:-hush}" >/dev/null 2>&1; then
     log "Existing database detected - preserving data volumes."
     compose_cmd down 2>/dev/null || true
   else
-    log "No healthy database found - removing stale volumes."
+    log "No healthy database found - removing stale volumes from failed first setup."
     compose_cmd down -v 2>/dev/null || true
   fi
-elif [ "$force" -eq 1 ]; then
-  # No containers running. Remove stale volumes from a prior failed setup.
-  compose_cmd down -v 2>/dev/null || true
 fi
 
 # ---------------------------------------------------------------------------
@@ -452,6 +453,15 @@ if [ "$mode" = "ip" ]; then
 fi
 log "Admin dashboard:          https://$host/admin/"
 log "Admin bootstrap secret:   $ADMIN_BOOTSTRAP_SECRET"
-log "(Secrets are saved in .env - keep that file private.)"
 printf '\n'
-log "To update Hush in the future, run: ./scripts/update.sh"
+log "--- Preserve your secrets ---"
+log "All secrets are saved in .env. Back it up to a secure location NOW."
+log ""
+log "CRITICAL: TRANSPARENCY_LOG_PRIVATE_KEY in .env is not rotatable."
+log "Once the transparency log has entries, changing this key permanently"
+log "invalidates all historical key-operation proofs for your users."
+log "Store it separately from other secrets (e.g. offline or in a secrets manager)."
+printf '\n'
+log "To update Hush in the future, run:  ./scripts/update.sh"
+log "To take a manual backup, run:       ./scripts/backup.sh"
+log "To restore from backup, run:        ./scripts/restore.sh <file>"

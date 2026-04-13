@@ -95,7 +95,50 @@ The default Caddy self-host proxy sets the following headers on all responses:
 
 ---
 
-## 6. Key Transparency
+## 6. Secrets Lifecycle
+
+Not all secrets in `.env` have the same rotation safety. This table defines the operational classification:
+
+| Secret | Rotation safety | Effect of rotation | Backup priority |
+|-|-|-|-|
+| `TRANSPARENCY_LOG_PRIVATE_KEY` | **Never rotate** after first log entry | Permanently invalidates all existing key-operation proofs for all users | CRITICAL — store separately from other secrets |
+| `POSTGRES_PASSWORD` | **Cannot rotate** without coordinated DB password change | Breaks all DB connections until postgres user password is updated to match | CRITICAL |
+| `SERVICE_IDENTITY_MASTER_KEY` | **Cannot rotate** without re-issuing service identity | Existing wrapped private key is unreadable; instance service identity is lost | CRITICAL |
+| `JWT_SECRET` | Rotatable — invalidates active sessions | All users are logged out on next request; re-authentication works normally | Important |
+| `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | Rotatable — requires coordinated restart | In-progress voice rooms are terminated; new rooms work immediately after restart | Important |
+| `ADMIN_BOOTSTRAP_SECRET` | Rotatable after first owner account is created | Once bootstrap is claimed, this secret is no longer used | Low (one-time use) |
+
+### Rules
+
+1. **Back up `.env` immediately after `setup.sh`** and after any rotation. Store it in a location separate from the database backup. A database backup without its corresponding `.env` is inoperable.
+
+2. **`TRANSPARENCY_LOG_PRIVATE_KEY` is a cryptographic commitment.** The server signs every Merkle leaf with the Ed25519 key derived from this seed. Once users have verified proofs against the public key published via `/api/handshake`, changing the seed breaks all existing proofs. Treat it like a long-lived signing certificate: generate once, preserve forever, back up offline.
+
+3. **`SERVICE_IDENTITY_MASTER_KEY` protects the instance's Ed25519 private key at rest.** The wrapped private key is stored in the `instance_service_identity` table. If this key is rotated without also re-wrapping the stored private key, the instance service identity is permanently lost.
+
+4. **`POSTGRES_PASSWORD` cannot be changed by editing `.env` alone.** The password is baked into the postgres data volume at initialization. Changing `.env` without also running `ALTER USER hush PASSWORD '...'` in postgres will break database connectivity on next restart.
+
+### Secret rotation procedure
+
+If a rotatable secret (`JWT_SECRET`, LiveKit credentials) needs to change:
+
+```bash
+# 1. Take a backup before any change
+./scripts/backup.sh
+
+# 2. Edit .env with the new value
+$EDITOR .env
+
+# 3. Restart the affected service
+docker compose -f docker-compose.prod.yml -f docker-compose.caddy.yml up -d hush-api
+
+# 4. Verify health
+curl http://localhost:8080/api/health
+```
+
+---
+
+## 8. Key Transparency
 
 Hush implements a signed Merkle tree of key operations per instance.
 
@@ -103,25 +146,27 @@ Hush implements a signed Merkle tree of key operations per instance.
 - Leaf nodes are signed with an Ed25519 key seeded from `TRANSPARENCY_LOG_PRIVATE_KEY`.
 - Clients verify inclusion proofs at login and on key changes via `GET /api/transparency/verify`.
 
-**Operational note:** `TRANSPARENCY_LOG_PRIVATE_KEY` must never change after the first log entry. Rotating it invalidates all existing proofs. Back it up separately from other `.env` values.
+**Operational note:** `TRANSPARENCY_LOG_PRIVATE_KEY` must never change after the first log entry. Rotating it invalidates all existing proofs. Back it up separately from other `.env` values. See §6 (Secrets Lifecycle) for the full rotation classification.
 
 ---
 
-## 7. Production Hardening Checklist
+## 9. Production Hardening Checklist
 
 | Item | Action |
 |-|-|
 | **CORS** | Set `CORS_ORIGIN` to your frontend origin. Never use `*` in production. |
 | **HSTS** | Use `--domain` with `setup.sh`; the default Caddy path sets HSTS automatically. If you use nginx, configure equivalent HSTS there. |
-| **Secrets** | Do not use default values. `setup.sh` generates all secrets. |
-| **Transparency key** | Never rotate `TRANSPARENCY_LOG_PRIVATE_KEY` after first log entry. Back it up. |
+| **Secrets** | Do not use default values. `setup.sh` generates all secrets. See §6 for rotation classification. |
+| **Transparency key** | Never rotate `TRANSPARENCY_LOG_PRIVATE_KEY` after first log entry. Back it up offline and separately from the database backup. |
+| **`.env` backup** | Back up `.env` immediately after `setup.sh`. A database backup without its matching `.env` is inoperable. |
 | **Database access** | PostgreSQL should not be exposed to the public internet. Use Docker networking or firewall rules. |
-| **Redis access** | Same as PostgreSQL - internal network only. |
+| **Redis access** | Same as PostgreSQL — internal network only. |
 | **Dependencies** | Run `go mod verify` and check for CVEs before production deployment. |
+| **Restore tested** | Verify restore procedure on a non-production copy before you need it. See `docs/RUNBOOK.md`. |
 
 ---
 
-## 8. Responsible Disclosure
+## 10. Responsible Disclosure
 
 If you discover a security vulnerability in Hush Server, please report it responsibly.
 

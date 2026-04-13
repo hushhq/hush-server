@@ -90,14 +90,18 @@ if [ -f .env ]; then
   PG_DB="$(grep -m1 '^POSTGRES_DB=' .env | cut -d= -f2 || echo "$PG_DB")"
 fi
 
-if compose_cmd ps postgres 2>/dev/null | grep -q "Up\|running"; then
+if compose_cmd ps postgres 2>/dev/null | grep -qE "Up|running"; then
+  # --clean --if-exists: dump includes DROP statements so restore is idempotent
+  # against a non-empty database (required by scripts/restore.sh).
   compose_cmd exec -T postgres \
-    pg_dump -U "$PG_USER" "$PG_DB" > "$BACKUP_FILE" 2>/dev/null || {
+    pg_dump -U "$PG_USER" --clean --if-exists "$PG_DB" > "$BACKUP_FILE" 2>/dev/null || {
     err "Database backup failed. Aborting update to protect your data."
     err "If postgres is not running, start it first: $DOCKER_COMPOSE -f $COMPOSE_BASE_FILE -f $COMPOSE_PROXY_FILE up -d postgres"
     exit 1
   }
   log "Database backup saved: $BACKUP_FILE"
+  log "NOTE: Backup covers the database only. .env is NOT included."
+  log "      Keep a separate secure copy of .env alongside your backups."
 else
   err "Postgres container is not running. Cannot create backup."
   err "Start the stack first: $DOCKER_COMPOSE -f $COMPOSE_BASE_FILE -f $COMPOSE_PROXY_FILE up -d"

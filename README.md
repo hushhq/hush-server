@@ -85,6 +85,21 @@ After setup, visit `https://YOUR_SERVER_IP` once to accept the browser certifica
 
 Backs up the database, pulls the latest code, rebuilds images, and restarts.
 
+### Manual backup
+
+```bash
+./scripts/backup.sh
+```
+
+Creates a timestamped snapshot in `backups/`. The database backup is incomplete without a matching `.env` — back up `.env` separately to a secure location.
+
+### Restore and rollback
+
+See [docs/RUNBOOK.md](docs/RUNBOOK.md) for:
+- Restore procedure (with preconditions and ordering)
+- Rollback procedure (Path A source-build and Path B GHCR image)
+- Secrets lifecycle and rotation classification
+
 ---
 
 ## Manual Setup (Without Docker)

@@ -83,28 +83,117 @@ Always substitute an exact version tag (e.g. `v1.1.0`). There is no `:latest` ta
 
 ## Rollback
 
-If an upgrade produces a broken instance:
+### Path A: Source-build rollback
 
-1. Restore the database backup created by `update.sh`:
+If an upgrade produces a broken instance, roll back in this exact order. Reversing the order risks running old code against a schema it does not understand.
+
+**Step 1 — Check out the previous code before touching the database:**
 
 ```bash
 cd ~/hush-server
-# Identify the backup file created before the broken upgrade
-ls backups/
-docker compose -f docker-compose.prod.yml -f docker-compose.caddy.yml exec -T postgres \
-  psql -U hush hush < backups/hush-YYYYMMDD-HHMMSS.sql
-```
-
-2. Check out the previous release tag and rebuild:
-
-```bash
 git fetch --tags
 git checkout v<previous-version>
+```
+
+**Step 2 — Restore the pre-upgrade database backup:**
+
+Use the restore script, which stops the API before restoring and handles both old and new dump formats:
+
+```bash
+# List available backups (update.sh creates one before each upgrade)
+ls backups/
+
+./scripts/restore.sh backups/hush-YYYYMMDD-HHMMSS.sql
+```
+
+The restore script will:
+- Stop `hush-api` to prevent concurrent writes
+- Drop and recreate the database from the backup
+- Leave `hush-api` stopped for operator verification
+
+**Step 3 — Rebuild and restart at the previous version:**
+
+```bash
 docker compose -f docker-compose.prod.yml -f docker-compose.caddy.yml build hush-api
 docker compose -f docker-compose.prod.yml -f docker-compose.caddy.yml up -d
 ```
 
-**Migration note:** Migrations run at server startup (`golang-migrate`). There is no automatic down-migration. If the new release added migrations, rolling back after applying them requires restoring the database backup from step 1 first.
+**Step 4 — Verify:**
+
+```bash
+curl http://localhost:8080/api/health
+curl http://localhost:8080/api/handshake
+```
+
+#### Migration note
+
+`golang-migrate` applies migrations forward at server startup and does not support automatic down-migrations.
+
+| Scenario | Database restore required? |
+|-|-|
+| New version added no migrations | No — restart old code directly |
+| New version added migrations AND they were applied | Yes — restore pre-upgrade backup first (Step 2) |
+| Upgrade failed before migrations ran | No — database schema unchanged |
+
+If migrations were applied and you skip the database restore, the old code will start against a schema it does not understand and will likely crash or corrupt data.
+
+---
+
+### Path B: Pre-built GHCR image rollback
+
+**Step 1 — Identify the previous working image tag.**
+
+The current pinned version is in `docker-compose.override.yml` (or the compose file you used). Check git history or the running container:
+
+```bash
+docker inspect hush-api --format '{{.Config.Image}}'
+```
+
+**Step 2 — Check whether migrations were applied** (same rule as Path A above).
+
+If the broken version applied migrations, restore the database first:
+
+```bash
+./scripts/restore.sh backups/hush-YYYYMMDD-HHMMSS.sql
+```
+
+**Step 3 — Update your override file to the previous tag:**
+
+```yaml
+# docker-compose.override.yml
+services:
+  hush-api:
+    image: ghcr.io/hushhq/hush-server:v<previous-version>
+    build: !reset null
+```
+
+**Step 4 — Pull and restart:**
+
+```bash
+docker compose -f docker-compose.prod.yml -f docker-compose.caddy.yml \
+  -f docker-compose.override.yml pull hush-api
+docker compose -f docker-compose.prod.yml -f docker-compose.caddy.yml \
+  -f docker-compose.override.yml up -d
+```
+
+**Step 5 — Verify** as in Path A.
+
+---
+
+### When restore-from-backup is mandatory
+
+You must restore the pre-upgrade database backup if **all** of the following are true:
+1. The broken upgrade applied at least one new migration to the database.
+2. You intend to roll back to code that does not include that migration.
+
+If you are unsure whether migrations ran, check the `schema_migrations` table:
+
+```bash
+docker compose -f docker-compose.prod.yml -f docker-compose.caddy.yml exec -T postgres \
+  psql -U hush hush -c "SELECT version, applied_at FROM schema_migrations ORDER BY applied_at DESC LIMIT 10;"
+```
+
+Compare the latest entry with the migration files in `migrations/` at the target rollback tag.
 
 ---
 
