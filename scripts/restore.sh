@@ -111,6 +111,19 @@ PG_USER="$(grep -m1 '^POSTGRES_USER=' .env | cut -d= -f2 || echo "hush")"
 PG_DB="$(grep -m1 '^POSTGRES_DB=' .env | cut -d= -f2 || echo "hush")"
 
 if ! compose_cmd ps postgres 2>/dev/null | grep -qE "Up|running"; then
+  # If a container named hush-postgres exists but isn't visible to this compose
+  # project, the stack was likely started with a custom -p flag or from a
+  # different directory, making the project name mismatch.
+  if docker ps --filter "name=hush-postgres" --format "{{.Names}}" 2>/dev/null | grep -q "^hush-postgres$"; then
+    err "Postgres is running but not visible to compose project '$(basename "$PROJECT_ROOT")'."
+    err ""
+    err "The stack was probably started with a different project name. Check:"
+    err "  docker inspect hush-postgres --format '{{index .Config.Labels \"com.docker.compose.project\"}}'"
+    err ""
+    err "To fix: restart the stack from this directory without a custom -p flag:"
+    err "  $DOCKER_COMPOSE -f $COMPOSE_BASE_FILE -f $COMPOSE_PROXY_FILE up -d"
+    exit 1
+  fi
   die "Postgres container is not running.
 Start it first:
   $DOCKER_COMPOSE -f $COMPOSE_BASE_FILE -f $COMPOSE_PROXY_FILE up -d postgres" 1
@@ -146,8 +159,16 @@ esac
 # ---------------------------------------------------------------------------
 # Step 1: Stop hush-api
 # ---------------------------------------------------------------------------
-log "Stopping hush-api..."
-compose_cmd stop hush-api 2>/dev/null || true
+if compose_cmd ps hush-api 2>/dev/null | grep -qE "Up|running"; then
+  log "Stopping hush-api..."
+  compose_cmd stop hush-api 2>/dev/null || true
+  if compose_cmd ps hush-api 2>/dev/null | grep -qE "Up|running"; then
+    die "hush-api did not stop. Aborting to prevent concurrent writes during restore." 1
+  fi
+  log "hush-api stopped."
+else
+  log "hush-api is not running."
+fi
 
 # ---------------------------------------------------------------------------
 # Step 2: Drop and recreate database
@@ -173,18 +194,23 @@ compose_cmd exec -T postgres \
 # ---------------------------------------------------------------------------
 # Step 3: Restore
 # ---------------------------------------------------------------------------
+RESTORE_LOG="${BACKUP_FILE%.sql}.restore.log"
 log "Restoring $BACKUP_FILE into '$PG_DB'..."
+log "(Detailed output → $RESTORE_LOG)"
 
-compose_cmd exec -T postgres \
-  psql -U "$PG_USER" "$PG_DB" < "$BACKUP_FILE" || {
+if ! compose_cmd exec -T postgres \
+  psql -U "$PG_USER" "$PG_DB" < "$BACKUP_FILE" > "$RESTORE_LOG" 2>&1; then
   err "Restore failed. Database may be in a partial state."
   err "hush-api remains stopped."
+  err ""
+  err "Last lines of restore log ($RESTORE_LOG):"
+  tail -20 "$RESTORE_LOG" >&2
   err ""
   err "Options:"
   err "  - Re-run this script with a known-good backup"
   err "  - Restart the stack and investigate: $DOCKER_COMPOSE -f $COMPOSE_BASE_FILE -f $COMPOSE_PROXY_FILE up -d"
   exit 1
-}
+fi
 
 # ---------------------------------------------------------------------------
 # Done

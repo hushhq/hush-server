@@ -79,6 +79,19 @@ PG_USER="$(grep -m1 '^POSTGRES_USER=' .env | cut -d= -f2 || echo "hush")"
 PG_DB="$(grep -m1 '^POSTGRES_DB=' .env | cut -d= -f2 || echo "hush")"
 
 if ! compose_cmd ps postgres 2>/dev/null | grep -qE "Up|running"; then
+  # If a container named hush-postgres exists but isn't visible to this compose
+  # project, the stack was likely started with a custom -p flag or from a
+  # different directory, making the project name mismatch.
+  if docker ps --filter "name=hush-postgres" --format "{{.Names}}" 2>/dev/null | grep -q "^hush-postgres$"; then
+    err "Postgres is running but not visible to compose project '$(basename "$PROJECT_ROOT")'."
+    err ""
+    err "The stack was probably started with a different project name. Check:"
+    err "  docker inspect hush-postgres --format '{{index .Config.Labels \"com.docker.compose.project\"}}'"
+    err ""
+    err "To fix: restart the stack from this directory without a custom -p flag:"
+    err "  $DOCKER_COMPOSE -f $COMPOSE_BASE_FILE -f $COMPOSE_PROXY_FILE up -d"
+    exit 1
+  fi
   die "Postgres container is not running. Start the stack first:
     $DOCKER_COMPOSE -f $COMPOSE_BASE_FILE -f $COMPOSE_PROXY_FILE up -d postgres" 1
 fi
