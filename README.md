@@ -45,9 +45,9 @@ The default setup is designed to work with the official hosted client:
 
 If you later self-host `hush-web`, update `CORS_ORIGIN` in `.env` to your own web-client origin.
 
-### Admin dashboard note
+### Admin dashboard
 
-`hush-server` exposes the admin API and prints `ADMIN_BOOTSTRAP_SECRET` during setup, but the browser admin UI lives in `hush-web/admin` and is not bundled by this repository. If you need the browser dashboard on your own domain, deploy `hush-web` separately and serve `/admin/` from the same origin as the instance API.
+The admin dashboard is embedded in the Go binary and served at `/admin/`. After setup, visit `https://YOUR_DOMAIN/admin/` to bootstrap the first admin account using the secret printed during setup.
 
 ### With just an IP (development / LAN only)
 
@@ -89,7 +89,7 @@ Backs up the database, pulls the latest code, rebuilds images, and restarts.
 
 ## Manual Setup (Without Docker)
 
-**Prerequisites:** Go 1.25+, PostgreSQL 16+, Redis 7+
+**Prerequisites:** Go 1.25+, Node.js 22+ (for admin dashboard build), PostgreSQL 16+, Redis 7+
 
 ```bash
 # 1. Clone
@@ -100,12 +100,15 @@ cd hush-server
 cp .env.example .env
 $EDITOR .env
 
-# 3. Run database migrations
+# 3. Build admin dashboard (embedded in Go binary)
+cd admin && npm ci && npm run build && cd ..
+
+# 4. Run database migrations
 go run github.com/golang-migrate/migrate/v4/cmd/migrate@latest \
   -database "$DATABASE_URL" \
   -path ./migrations up
 
-# 4. Build and run
+# 5. Build and run
 go build -o hush ./cmd/hush
 ./hush
 ```
@@ -226,7 +229,7 @@ The `caddy/` directory contains the templates used for that path:
 
 If you already run nginx, use `docker-compose.prod.yml` for the backend/media services and copy `nginx/hush.conf` to `/etc/nginx/sites-available/`, replace `YOUR_DOMAIN`, and reload. The config proxies API, WebSocket, and LiveKit signaling.
 
-Neither the default Caddy path nor the nginx template bundles `hush-web`. If you want the browser client or admin dashboard on your own domain, deploy `hush-web` separately.
+The admin dashboard is embedded in the Go binary and proxied at `/admin/` by both Caddy and nginx configs. Neither bundles `hush-web`; if you want the browser client on your own domain, deploy `hush-web` separately.
 
 See the Self-Hosting Guide in `ARCHITECTURE.md` for full instructions.
 
@@ -265,22 +268,23 @@ go test ./internal/api/...
 ### Project structure
 
 ```
+admin/                           # Admin dashboard SPA (React/Vite, embedded via go:embed)
 cmd/
-└── hush/main.go             # Entry point, Chi router, graceful shutdown
+└── hush/main.go                 # Entry point, Chi router, graceful shutdown
 internal/
-├── api/                     # HTTP handlers (auth, guilds, channels, MLS, admin)
-├── config/                  # Environment-based configuration
-├── db/                      # PostgreSQL queries (store interface for DI)
-├── models/                  # Shared data types
-├── transparency/            # Key transparency service and Merkle tree
-└── ws/                      # WebSocket hub, client relay, message routing
+├── api/                         # HTTP handlers (auth, guilds, channels, MLS, admin)
+├── config/                      # Environment-based configuration
+├── db/                          # PostgreSQL queries (store interface for DI)
+├── models/                      # Shared data types
+├── transparency/                # Key transparency service and Merkle tree
+└── ws/                          # WebSocket hub, client relay, message routing
 
-migrations/                  # Sequential SQL migration files (golang-migrate)
+migrations/                      # Sequential SQL migration files (golang-migrate)
 scripts/
-├── setup.sh                 # First-run self-hoster setup
-└── update.sh                # Upgrade script
-caddy/                       # Reverse proxy configs
-nginx/                       # nginx config template
+├── setup.sh                     # First-run self-hoster setup
+└── update.sh                    # Upgrade script
+caddy/                           # Reverse proxy configs
+nginx/                           # nginx config template
 ```
 
 ---

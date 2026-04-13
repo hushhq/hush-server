@@ -26,6 +26,12 @@ jobs:
       DATABASE_URL: postgres://hush:hush@localhost:5432/hush_test?sslmode=disable
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: admin/package-lock.json
+      - run: cd admin && npm ci && npm run build
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod

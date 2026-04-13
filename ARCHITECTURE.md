@@ -9,15 +9,13 @@ This document describes the Go server's internal architecture, database schema, 
 ```mermaid
 graph LR
     Client["Compatible Hush Client\n(hosted app.gethush.live or self-hosted hush-web)"]
-    Admin["Optional Admin UI\n(hush-web/admin, same-origin)"]
     Proxy["Caddy or nginx\n(TLS + Reverse Proxy)"]
-    API["Go API\n(Chi + WebSocket Hub)"]
+    API["Go API\n(Chi + WebSocket Hub\n+ embedded Admin UI at /admin/)"]
     PG["PostgreSQL"]
     Redis["Redis"]
     LK["LiveKit\n(WebRTC SFU)"]
 
     Client -->|HTTPS / WSS| Proxy
-    Admin -->|HTTPS| Proxy
     Proxy -->|HTTP| API
     Proxy -->|HTTP| LK
     API --> PG

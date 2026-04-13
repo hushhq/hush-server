@@ -450,8 +450,8 @@ if [ "$mode" = "ip" ]; then
   log "Accept the warning to proceed. E2EE is unaffected."
   printf '\n'
 fi
-log "Admin bootstrap secret:  $ADMIN_BOOTSTRAP_SECRET"
-log "Browser admin UI is not bundled by hush-server; keep this secret for a same-origin hush-web/admin deployment if you add one later."
+log "Admin dashboard:          https://$host/admin/"
+log "Admin bootstrap secret:   $ADMIN_BOOTSTRAP_SECRET"
 log "(Secrets are saved in .env - keep that file private.)"
 printf '\n'
 log "To update Hush in the future, run: ./scripts/update.sh"

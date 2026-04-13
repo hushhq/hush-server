@@ -38,13 +38,17 @@ https://__IP__ {
     }
   }
 
-  # Informational fallback for browser visits. hush-server does not bundle the
-  # browser client or admin UI; connect with a compatible Hush web client.
+  # Admin dashboard (embedded in Go binary)
+  handle /admin* {
+    reverse_proxy hush-api:8080
+  }
+
+  # Informational fallback for browser visits.
   handle {
     header X-Content-Type-Options "nosniff"
     header X-Frame-Options "DENY"
     header Cross-Origin-Opener-Policy "same-origin"
-    respond "Hush instance backend is live. Use a compatible Hush web client and connect to this instance URL. The browser admin UI is not bundled by hush-server." 200
+    respond "Hush instance backend is live. Use a compatible Hush web client and connect to this instance URL, or visit /admin/ for the instance admin dashboard." 200
   }
 
   log {

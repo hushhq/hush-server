@@ -1,3 +1,8 @@
 # Build binary
 hush
 .env
+
+# Admin SPA build output (dev-only placeholder committed; CI/Docker always build real assets)
+admin/dist/*
+!admin/dist/index.html
+admin/node_modules/

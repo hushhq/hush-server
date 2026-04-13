@@ -29,6 +29,11 @@
     }
   }
 
+  # Admin dashboard (embedded in Go binary)
+  handle /admin* {
+    reverse_proxy hush-api:8080
+  }
+
   # Client SPA - serve built files, fall back to index.html for client-side routing
   handle /* {
     header Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' https: http: wss: ws:; img-src 'self' data:; style-src 'self' 'unsafe-inline'"

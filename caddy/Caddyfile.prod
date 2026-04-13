@@ -24,6 +24,11 @@
     }
   }
 
+  # Admin dashboard (embedded in Go binary)
+  handle /admin* {
+    reverse_proxy hush-api:8080
+  }
+
   # Client SPA
   handle /* {
     header Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' https: http: wss: ws:; img-src 'self' data:; style-src 'self' 'unsafe-inline'"

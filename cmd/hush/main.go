@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"encoding/hex"
+	"io/fs"
 
+	adminui "github.com/hushhq/hush-server/admin"
 	"github.com/hushhq/hush-server/internal/api"
 	"github.com/hushhq/hush-server/internal/config"
 	"github.com/hushhq/hush-server/internal/db"
@@ -281,6 +283,17 @@ func main() {
 		r.Get("/ws", ws.Handler(wsHub, cfg.JWTSecret, pool, cfg.CORSOrigin))
 		r.Mount("/api/livekit", api.LiveKitRoutes(pool, cfg.JWTSecret, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret))
 		r.Post("/api/livekit/webhook", api.LiveKitWebhookHandler(wsHub, pool, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret))
+	}
+
+	// Admin dashboard SPA — embedded static files served at /admin/.
+	// Mounted unconditionally so the bootstrap screen is accessible on
+	// a fresh instance before the database is configured.
+	adminDist, err := fs.Sub(adminui.DistFS, "dist")
+	if err != nil {
+		slog.Error("admin ui: failed to create sub filesystem", "err", err)
+	} else {
+		r.Handle("/admin", http.RedirectHandler("/admin/", http.StatusMovedPermanently))
+		r.Handle("/admin/*", api.AdminUIHandler("/admin/", adminDist))
 	}
 
 	host := os.Getenv("HOST")
