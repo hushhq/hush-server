@@ -275,6 +275,150 @@ func TestAdminListAdmins_OwnerReturnsAdmins(t *testing.T) {
 	assert.Equal(t, "owner", admins[0].Role)
 }
 
+func TestAdminChangePassword_RequiresSession(t *testing.T) {
+	router := adminRouter(&mockStore{})
+
+	req := adminRequest(http.MethodPost, "/session/change-password", adminChangePasswordRequest{
+		CurrentPassword: "current-password-abc",
+		NewPassword:     "new-password-xyz-123",
+	})
+	req.Header.Set("Origin", requestOrigin(req))
+	rr := doAdmin(router, req)
+
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+}
+
+func TestAdminChangePassword_MissingFields_Returns400(t *testing.T) {
+	req, store := authenticatedAdminRequest(http.MethodPost, "/session/change-password", map[string]string{
+		"currentPassword": "",
+		"newPassword":     "",
+	}, "admin")
+	router := adminRouter(store)
+
+	rr := doAdmin(router, req)
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestAdminChangePassword_WrongCurrentPassword_Returns401(t *testing.T) {
+	correctHash, err := auth.HashAdminPassword("correct-password-123")
+	require.NoError(t, err)
+
+	req, store := authenticatedAdminRequest(http.MethodPost, "/session/change-password", adminChangePasswordRequest{
+		CurrentPassword: "wrong-password-xyz",
+		NewPassword:     "brand-new-password-abc",
+	}, "admin")
+	store.getInstanceAdminByIDFn = func(_ context.Context, id string) (*models.InstanceAdmin, error) {
+		return &models.InstanceAdmin{
+			ID:           id,
+			Username:     "testadmin",
+			PasswordHash: correctHash,
+			Role:         "admin",
+			IsActive:     true,
+		}, nil
+	}
+	router := adminRouter(store)
+
+	rr := doAdmin(router, req)
+
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+}
+
+func TestAdminChangePassword_SameAsCurrent_Returns400(t *testing.T) {
+	const password = "same-password-12345"
+	correctHash, err := auth.HashAdminPassword(password)
+	require.NoError(t, err)
+
+	req, store := authenticatedAdminRequest(http.MethodPost, "/session/change-password", adminChangePasswordRequest{
+		CurrentPassword: password,
+		NewPassword:     password,
+	}, "admin")
+	store.getInstanceAdminByIDFn = func(_ context.Context, id string) (*models.InstanceAdmin, error) {
+		return &models.InstanceAdmin{
+			ID:           id,
+			Username:     "testadmin",
+			PasswordHash: correctHash,
+			Role:         "admin",
+			IsActive:     true,
+		}, nil
+	}
+	router := adminRouter(store)
+
+	rr := doAdmin(router, req)
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	var body map[string]string
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&body))
+	assert.Contains(t, body["error"], "differ")
+}
+
+func TestAdminChangePassword_WeakNewPassword_Returns400(t *testing.T) {
+	correctHash, err := auth.HashAdminPassword("correct-password-123")
+	require.NoError(t, err)
+
+	req, store := authenticatedAdminRequest(http.MethodPost, "/session/change-password", adminChangePasswordRequest{
+		CurrentPassword: "correct-password-123",
+		NewPassword:     "short",
+	}, "admin")
+	store.getInstanceAdminByIDFn = func(_ context.Context, id string) (*models.InstanceAdmin, error) {
+		return &models.InstanceAdmin{
+			ID:           id,
+			Username:     "testadmin",
+			PasswordHash: correctHash,
+			Role:         "admin",
+			IsActive:     true,
+		}, nil
+	}
+	router := adminRouter(store)
+
+	rr := doAdmin(router, req)
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestAdminChangePassword_Success_Returns204(t *testing.T) {
+	const currentPassword = "current-password-abc"
+	const newPassword = "new-password-xyz-9999"
+
+	correctHash, err := auth.HashAdminPassword(currentPassword)
+	require.NoError(t, err)
+
+	var capturedHash string
+	req, store := authenticatedAdminRequest(http.MethodPost, "/session/change-password", adminChangePasswordRequest{
+		CurrentPassword: currentPassword,
+		NewPassword:     newPassword,
+	}, "admin")
+	store.getInstanceAdminByIDFn = func(_ context.Context, id string) (*models.InstanceAdmin, error) {
+		return &models.InstanceAdmin{
+			ID:           id,
+			Username:     "testadmin",
+			PasswordHash: correctHash,
+			Role:         "admin",
+			IsActive:     true,
+		}, nil
+	}
+	store.updateInstanceAdminPasswordFn = func(_ context.Context, id, passwordHash string) error {
+		capturedHash = passwordHash
+		return nil
+	}
+	router := adminRouter(store)
+
+	rr := doAdmin(router, req)
+
+	require.Equal(t, http.StatusNoContent, rr.Code)
+	require.NotEmpty(t, capturedHash, "store must have been called with a new hash")
+
+	// Verify the stored hash matches the new password using the canonical function.
+	ok, err := auth.VerifyAdminPassword(newPassword, capturedHash)
+	require.NoError(t, err)
+	assert.True(t, ok, "stored hash must verify against newPassword")
+
+	// Verify the stored hash does NOT match the old password.
+	oldOk, err := auth.VerifyAdminPassword(currentPassword, capturedHash)
+	require.NoError(t, err)
+	assert.False(t, oldOk, "stored hash must not verify against currentPassword")
+}
+
 func TestAdminAuditLog_ReturnsEntries(t *testing.T) {
 	req, store := authenticatedAdminRequest(http.MethodGet, "/audit-log", nil, "owner")
 	store.listInstanceAuditLogFn = func(_ context.Context, limit, offset int, _ *db.InstanceAuditLogFilter) ([]models.InstanceAuditLogEntry, error) {

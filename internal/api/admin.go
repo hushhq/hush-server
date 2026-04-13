@@ -84,6 +84,7 @@ func AdminAPIRoutes(
 	r.Post("/session/login", h.login)
 	r.With(RequireAdminSession(store), RequireAdminOrigin()).Post("/session/logout", h.logout)
 	r.With(RequireAdminSession(store)).Get("/session/me", h.me)
+	r.With(RequireAdminSession(store), RequireAdminOrigin()).Post("/session/change-password", h.changePassword)
 
 	r.Group(func(protected chi.Router) {
 		protected.Use(RequireAdminSession(store))

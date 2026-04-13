@@ -4,6 +4,7 @@ import GuildListPage from './pages/GuildListPage.jsx';
 import UserListPage from './pages/UserListPage.jsx';
 import ConfigPage from './pages/ConfigPage.jsx';
 import HealthPage from './pages/HealthPage.jsx';
+import ChangePasswordModal from './ChangePasswordModal.jsx';
 import {
   claimBootstrap,
   getBootstrapStatus,
@@ -225,6 +226,8 @@ function LoadingGate({ note }) {
 }
 
 function AdminShell({ admin, onLogout }) {
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+
   const navActive = ({ isActive }) => ({
     ...styles.navLink,
     ...(isActive ? { color: 'var(--text)', background: 'var(--elevated)', fontWeight: 500 } : {}),
@@ -245,6 +248,9 @@ function AdminShell({ admin, onLogout }) {
             <span className="admin-username">{admin.username}</span>
             <span style={styles.badge}>{admin.role}</span>
           </div>
+          <button type="button" style={styles.logoutBtn} onClick={() => setIsChangingPassword(true)}>
+            Change password
+          </button>
           <button className="admin-logout" type="button" style={styles.logoutBtn} onClick={onLogout}>
             Logout
           </button>
@@ -259,6 +265,10 @@ function AdminShell({ admin, onLogout }) {
           <Route path="/health" element={<HealthPage />} />
         </Routes>
       </div>
+      <ChangePasswordModal
+        isOpen={isChangingPassword}
+        onClose={() => setIsChangingPassword(false)}
+      />
     </div>
   );
 }

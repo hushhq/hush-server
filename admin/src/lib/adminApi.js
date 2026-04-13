@@ -156,3 +156,10 @@ export async function setGuildMemberCap(serverId, memberCapOverride) {
   });
   return response.json();
 }
+
+export async function changePassword({ currentPassword, newPassword }) {
+  await request('/session/change-password', {
+    method: 'POST',
+    body: JSON.stringify({ currentPassword, newPassword }),
+  });
+}

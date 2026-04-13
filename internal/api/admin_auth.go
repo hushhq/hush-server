@@ -36,6 +36,11 @@ type adminLoginRequest struct {
 	Password string `json:"password"`
 }
 
+type adminChangePasswordRequest struct {
+	CurrentPassword string `json:"currentPassword"`
+	NewPassword     string `json:"newPassword"`
+}
+
 type adminSessionResponse struct {
 	Admin models.InstanceAdmin `json:"admin"`
 }
@@ -207,6 +212,56 @@ func (h *adminHandler) me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, adminSessionResponse{Admin: *admin})
+}
+
+// changePassword handles POST /api/admin/session/change-password.
+// Requires a valid session. Verifies the current password before accepting the new one.
+// The caller's existing session remains valid; only future logins are affected.
+func (h *adminHandler) changePassword(w http.ResponseWriter, r *http.Request) {
+	var req adminChangePasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+	if req.CurrentPassword == "" || req.NewPassword == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "currentPassword and newPassword are required"})
+		return
+	}
+	admin, err := h.store.GetInstanceAdminByID(r.Context(), adminIDFromContext(r.Context()))
+	if err != nil || admin == nil || !admin.IsActive {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
+		return
+	}
+	valid, err := auth.VerifyAdminPassword(req.CurrentPassword, admin.PasswordHash)
+	if err != nil {
+		slog.Error("admin changePassword verify", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "password verification failed"})
+		return
+	}
+	if !valid {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "current password is incorrect"})
+		return
+	}
+	if req.NewPassword == req.CurrentPassword {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "new password must differ from current password"})
+		return
+	}
+	if len(req.NewPassword) < 12 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "password must be at least 12 characters"})
+		return
+	}
+	newHash, err := auth.HashAdminPassword(req.NewPassword)
+	if err != nil {
+		slog.Error("admin changePassword hash", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to hash password"})
+		return
+	}
+	if err := h.store.UpdateInstanceAdminPassword(r.Context(), admin.ID, newHash); err != nil {
+		slog.Error("admin changePassword update", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update password"})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func readAdminSessionCookie(r *http.Request) (string, error) {
