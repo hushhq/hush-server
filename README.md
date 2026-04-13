@@ -199,19 +199,15 @@ For full API documentation including request/response schemas, see `ARCHITECTURE
 
 ## Docker Image
 
-Pre-built images are published to GitHub Container Registry:
+Versioned images are published to GitHub Container Registry on every tagged release:
 
 ```bash
-docker pull ghcr.io/hushhq/hush-server:latest
+docker pull ghcr.io/hushhq/hush-server:v1.0.0
 ```
 
-For the backend/media stack, use `docker-compose.prod.yml`:
+There is no `:latest` tag. Pin the exact version you intend to run.
 
-```bash
-docker-compose -f docker-compose.prod.yml up -d
-```
-
-The default self-host scripts add `docker-compose.caddy.yml` on top so the instance is reachable on ports 80/443 with TLS.
+**Note:** `docker-compose.prod.yml` builds the image locally from source (`build: context: .`). The pre-built GHCR images are for custom deployment setups that prefer a pre-built artifact and are not used by the default `setup.sh` / `update.sh` self-host path.
 
 ---
 
