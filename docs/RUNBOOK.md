@@ -67,7 +67,30 @@ cd ~/hush-server
 ./scripts/backup.sh
 ```
 
-Output: `backups/hush-YYYYMMDD-HHMMSS.sql`
+Output: `backups/hush-YYYYMMDD-HHMMSS.sql` and `backups/hush-YYYYMMDD-HHMMSS.meta`
+
+### Backup metadata file
+
+Every backup produces a `.meta` file alongside the `.sql` file with the same stem:
+
+```
+backups/hush-20260413-222209.sql
+backups/hush-20260413-222209.meta
+```
+
+The `.meta` file records the state at backup time:
+
+```
+timestamp=2026-04-13T22:22:09Z
+backup_file=hush-20260413-222209.sql
+hush_server_git_sha=abc123...
+hush_server_version=v1.2.0
+livekit_version=v1.10.1
+compose_files=docker-compose.prod.yml docker-compose.caddy.yml
+env_continuity_required=POSTGRES_PASSWORD,TRANSPARENCY_LOG_PRIVATE_KEY,SERVICE_IDENTITY_MASTER_KEY
+```
+
+**Treat `.meta` files as read-only.** When identifying which backup to restore, read its `.meta` to confirm the version and check the `env_continuity_required` fields against your current `.env`. Do not delete `.meta` files independently — they are only useful paired with their `.sql`.
 
 ### What is backed up
 
@@ -81,10 +104,25 @@ Output: `backups/hush-YYYYMMDD-HHMMSS.sql`
 
 ### Backup retention
 
-No automatic rotation is implemented. Monitor disk usage in `backups/` and remove old backups when disk space is constrained. Recommended minimum retention:
+Use `scripts/prune-backups.sh` to apply the retention policy:
 
+```bash
+# Dry-run: show what would be removed (no deletions)
+./scripts/prune-backups.sh
+
+# Apply deletions
+./scripts/prune-backups.sh --apply
+
+# Override keep count (default: 5)
+./scripts/prune-backups.sh --keep 10 --apply
+```
+
+**Policy enforced by the script:**
 - Keep the last 5 backups unconditionally
-- Keep one backup per month for historical reference
+- Keep the most recent backup per calendar month for all older entries
+- Remove `.sql` and `.meta` together
+
+Run this manually when disk space is constrained, or after completing a stable upgrade. There is no automatic scheduled pruning.
 
 ### Verifying a backup (dev-machine safe)
 
