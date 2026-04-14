@@ -53,10 +53,16 @@ func TestListServersForUser_RegularGuild_Integration(t *testing.T) {
 	assert.Nil(t, g.ChannelID, "regular guild must not carry ChannelID")
 }
 
-// TestListServersForUser_DMGuild_Integration is the regression test for the
-// uuid/text type mismatch (SQLSTATE 42883) that occurred when user IDs were
-// compared against uuid columns inside a CASE expression without an explicit cast.
-// It also verifies the DM-enrichment fields (OtherUser, ChannelID) are populated.
+// TestListServersForUser_DMGuild_Integration is the regression test for the uuid/text
+// type mismatch (SQLSTATE 42883).
+//
+// Schema reality: dm_pairs.user_a_id and dm_pairs.user_b_id are TEXT, not uuid.
+// server_members.user_id and users.id are uuid. The query therefore must:
+//   - compare $1 (sent as text by pgx) against dm_pairs columns without a cast
+//   - cast the text CASE result to uuid before joining against users.id
+//
+// Applying $1::uuid to the dm_pairs comparisons triggers "text = uuid" (42883).
+// Omitting the (CASE ...)::uuid when joining users.id triggers "uuid = text" (42883).
 func TestListServersForUser_DMGuild_Integration(t *testing.T) {
 	pool, cleanup := SetupTestDB(t)
 	defer cleanup()
@@ -89,6 +95,34 @@ func TestListServersForUser_DMGuild_Integration(t *testing.T) {
 	// ChannelID must point to the DM channel.
 	require.NotNil(t, g.ChannelID, "DM guild must have ChannelID populated")
 	assert.Equal(t, dmCh.ID, *g.ChannelID)
+}
+
+// TestDMPairs_UserIDColumns_AreText_Integration pins the schema assumption that
+// dm_pairs.user_a_id and user_b_id are stored as TEXT (not uuid). If a future
+// migration changes these columns to uuid, the ListServersForUser CASE expression
+// comparisons must be updated accordingly (remove the bare $1 comparisons and add
+// $1::uuid, and drop the (CASE ...)::uuid cast on the users join).
+func TestDMPairs_UserIDColumns_AreText_Integration(t *testing.T) {
+	pool, cleanup := SetupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	var userAType, userBType string
+	err := pool.QueryRow(ctx, `
+		SELECT
+		    (SELECT data_type FROM information_schema.columns
+		     WHERE table_name = 'dm_pairs' AND column_name = 'user_a_id'),
+		    (SELECT data_type FROM information_schema.columns
+		     WHERE table_name = 'dm_pairs' AND column_name = 'user_b_id')`).Scan(&userAType, &userBType)
+	require.NoError(t, err)
+
+	// If this assertion fails, dm_pairs columns were migrated to uuid.
+	// Update ListServersForUser: replace bare $1 with $1::uuid in the CASE
+	// conditions and remove the (CASE ...)::uuid cast on the users join.
+	assert.Equal(t, "text", userAType,
+		"dm_pairs.user_a_id expected text; if now uuid, update ListServersForUser casts")
+	assert.Equal(t, "text", userBType,
+		"dm_pairs.user_b_id expected text; if now uuid, update ListServersForUser casts")
 }
 
 // TestListServersForUser_MixedGuilds_Integration verifies that when a user belongs
