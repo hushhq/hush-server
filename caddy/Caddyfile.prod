@@ -1,5 +1,8 @@
-# Production Caddy config for Hush (e.g. gethush.live)
-# Mount as /etc/caddy/Caddyfile. Set CORS_ORIGIN in env.
+# Production Caddy config for the hosted Hush instance (app.gethush.live).
+# Serves the hush-web SPA from /srv AND proxies API/WS/LiveKit to the backend.
+# Listens on :80 — TLS is terminated upstream (e.g. Cloudflare).
+# Mount as /etc/caddy/Caddyfile in the Caddy container.
+# hush-web dist/ must be mounted at /srv (read-only).
 
 :80 {
   # LiveKit WebSocket signaling (no security headers to avoid breaking upgrade)
