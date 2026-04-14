@@ -231,6 +231,9 @@ type Server struct {
 	Category          *string `json:"category,omitempty"`
 	PublicName        *string `json:"publicName,omitempty"`
 	PublicDescription *string `json:"publicDescription,omitempty"`
+	// Populated only for DM guilds (IsDm=true). Nil for regular guilds.
+	OtherUser *UserSearchPublicResult `json:"otherUser,omitempty"`
+	ChannelID *string                 `json:"channelId,omitempty"`
 }
 
 // ServerMember records a user's (or federated identity's) membership and integer

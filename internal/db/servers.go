@@ -59,15 +59,26 @@ func (p *Pool) GetServerByID(ctx context.Context, serverID string) (*models.Serv
 }
 
 // ListServersForUser returns all guilds the user is a member of, ordered by creation time.
+// DM guilds are enriched with OtherUser and ChannelID via JOINs on dm_pairs, users, and channels.
 func (p *Pool) ListServersForUser(ctx context.Context, userID string) ([]models.Server, error) {
 	rows, err := p.Query(ctx, `
 		SELECT s.id, s.encrypted_metadata, s.member_count, s.text_channel_count, s.voice_channel_count,
 		       s.storage_bytes, s.message_count, s.active_members_30d, s.last_active_at,
 		       s.access_policy, s.discoverable, s.admin_label_encrypted, s.created_at,
-		       s.member_cap_override, s.is_dm, s.category, s.public_name, s.public_description
+		       s.member_cap_override, s.is_dm, s.category, s.public_name, s.public_description,
+		       ou.id, ou.username, ou.display_name,
+		       dm_ch.id
 		FROM servers s
-		JOIN server_members sm ON sm.server_id = s.id
-		WHERE sm.user_id = $1
+		JOIN server_members sm ON sm.server_id = s.id AND sm.user_id = $1
+		LEFT JOIN dm_pairs dp ON s.is_dm = true AND dp.server_id = s.id
+		LEFT JOIN users ou ON ou.id = CASE
+		    WHEN dp.user_a_id = $1 THEN dp.user_b_id
+		    WHEN dp.user_b_id = $1 THEN dp.user_a_id
+		    ELSE NULL
+		END
+		LEFT JOIN LATERAL (
+		    SELECT id FROM channels WHERE server_id = s.id ORDER BY position LIMIT 1
+		) dm_ch ON s.is_dm = true
 		ORDER BY s.created_at`, userID)
 	if err != nil {
 		return nil, err
@@ -75,13 +86,35 @@ func (p *Pool) ListServersForUser(ctx context.Context, userID string) ([]models.
 	defer rows.Close()
 	var out []models.Server
 	for rows.Next() {
-		s, err := scanServer(rows)
-		if err != nil {
+		var s models.Server
+		var otherID, otherUsername, otherDisplayName, chID *string
+		if err := rows.Scan(
+			&s.ID, &s.EncryptedMetadata, &s.MemberCount, &s.TextChannelCount, &s.VoiceChannelCount,
+			&s.StorageBytes, &s.MessageCount, &s.ActiveMembers30d, &s.LastActiveAt,
+			&s.AccessPolicy, &s.Discoverable, &s.AdminLabelEncrypted, &s.CreatedAt,
+			&s.MemberCapOverride, &s.IsDm, &s.Category, &s.PublicName, &s.PublicDescription,
+			&otherID, &otherUsername, &otherDisplayName, &chID,
+		); err != nil {
 			return nil, err
 		}
-		out = append(out, *s)
+		if otherID != nil {
+			s.OtherUser = &models.UserSearchPublicResult{
+				ID:          *otherID,
+				Username:    derefString(otherUsername),
+				DisplayName: derefString(otherDisplayName),
+			}
+			s.ChannelID = chID
+		}
+		out = append(out, s)
 	}
 	return out, rows.Err()
+}
+
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // DeleteServer removes the guild by ID.

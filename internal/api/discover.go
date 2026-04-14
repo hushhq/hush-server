@@ -167,14 +167,18 @@ func (h *discoverHandler) createOrFindDM(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Broadcast member_joined to the new DM guild so both clients can discover it.
+	// Notify the recipient directly so their guild list refreshes immediately.
+	// BroadcastToServer would target the new DM guild's subscriber set, which is
+	// empty at creation time (no client has issued subscribe.server for a guild
+	// that didn't exist a moment ago). BroadcastToUser routes by userID and
+	// reaches the recipient's existing WS connection regardless of subscriptions.
 	if h.hub != nil {
 		msg, _ := json.Marshal(map[string]interface{}{
 			"type":      "member_joined",
 			"server_id": server.ID,
 			"user_id":   callerID,
 		})
-		h.hub.BroadcastToServer(server.ID, msg)
+		h.hub.BroadcastToUser(req.OtherUserID, msg)
 	}
 
 	writeJSON(w, http.StatusCreated, models.DMResponse{
