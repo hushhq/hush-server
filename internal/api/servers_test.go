@@ -181,6 +181,77 @@ func TestListMyServers_EmptyList_ReturnsEmptyArray(t *testing.T) {
 	assert.Empty(t, servers)
 }
 
+// TestListMyServers_DMGuild_ResponseCarriesEnrichmentFields verifies that the
+// handler forwards OtherUser and ChannelID from the store for DM guilds.
+// These fields are populated by the DB layer's DM-enrichment JOINs; confirming
+// they pass through the handler prevents accidental stripping.
+func TestListMyServers_DMGuild_ResponseCarriesEnrichmentFields(t *testing.T) {
+	userID := uuid.New().String()
+	peerID := uuid.New().String()
+	dmServerID := uuid.New().String()
+	chID := uuid.New().String()
+
+	store := &mockStore{
+		listServersForUserFn: func(_ context.Context, uid string) ([]models.Server, error) {
+			assert.Equal(t, userID, uid)
+			return []models.Server{
+				{
+					ID:   dmServerID,
+					IsDm: true,
+					OtherUser: &models.UserSearchPublicResult{
+						ID:          peerID,
+						Username:    "peer",
+						DisplayName: "Peer User",
+					},
+					ChannelID: &chID,
+				},
+			}, nil
+		},
+	}
+	token := makeAuth(store, userID)
+	router := serversRouter(store)
+
+	rr := getServer(router, "/", token)
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	var servers []models.Server
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&servers))
+	require.Len(t, servers, 1)
+
+	g := servers[0]
+	assert.True(t, g.IsDm)
+	require.NotNil(t, g.OtherUser)
+	assert.Equal(t, peerID, g.OtherUser.ID)
+	assert.Equal(t, "Peer User", g.OtherUser.DisplayName)
+	require.NotNil(t, g.ChannelID)
+	assert.Equal(t, chID, *g.ChannelID)
+}
+
+// TestListMyServers_RegularGuild_NoEnrichmentFields verifies non-DM guilds do
+// not carry OtherUser or ChannelID in the response.
+func TestListMyServers_RegularGuild_NoEnrichmentFields(t *testing.T) {
+	userID := uuid.New().String()
+
+	store := &mockStore{
+		listServersForUserFn: func(_ context.Context, _ string) ([]models.Server, error) {
+			return []models.Server{
+				{ID: uuid.New().String(), IsDm: false},
+			}, nil
+		},
+	}
+	token := makeAuth(store, userID)
+	router := serversRouter(store)
+
+	rr := getServer(router, "/", token)
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	var servers []models.Server
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&servers))
+	require.Len(t, servers, 1)
+	assert.Nil(t, servers[0].OtherUser)
+	assert.Nil(t, servers[0].ChannelID)
+}
+
 // ---------- GET /{serverId} (getServer) ----------
 
 func TestGetServer(t *testing.T) {
