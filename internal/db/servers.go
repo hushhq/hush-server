@@ -72,8 +72,8 @@ func (p *Pool) ListServersForUser(ctx context.Context, userID string) ([]models.
 		JOIN server_members sm ON sm.server_id = s.id AND sm.user_id = $1::uuid
 		LEFT JOIN dm_pairs dp ON s.is_dm = true AND dp.server_id = s.id
 		LEFT JOIN users ou ON ou.id = (CASE
-		    WHEN dp.user_a_id = $1 THEN dp.user_b_id
-		    WHEN dp.user_b_id = $1 THEN dp.user_a_id
+		    WHEN dp.user_a_id = $1::text THEN dp.user_b_id
+		    WHEN dp.user_b_id = $1::text THEN dp.user_a_id
 		    ELSE NULL
 		END)::uuid
 		LEFT JOIN LATERAL (
