@@ -56,6 +56,10 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_ROOT"
 
+if ! "$SCRIPT_DIR/render-env.sh"; then
+  die "Failed to render .env from SOPS-managed secrets." 1
+fi
+
 # ---------------------------------------------------------------------------
 # Detect docker compose
 # ---------------------------------------------------------------------------

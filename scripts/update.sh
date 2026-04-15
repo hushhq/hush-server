@@ -1,6 +1,7 @@
 #!/bin/sh
 # Hush upgrade script - updates the self-host backend/media stack and Caddy proxy.
-# NEVER overwrites secrets (.env is preserved as-is).
+# By default .env is preserved as-is. If an encrypted secrets source is
+# configured for render-env.sh, this script refreshes .env before continuing.
 #
 # Usage:
 #   ./scripts/update.sh
@@ -51,7 +52,7 @@ for _override in docker-compose.app.*.yml; do
   die "Host-specific compose file detected: $_override
 update.sh is for self-hosted instances only.
 If this is the hushhq hosted deployment, use the hosted backend update
-procedure described in docs/HOSTED-DEPLOY.md." 1
+procedure documented for that host instead of update.sh." 1
 done
 
 # ---------------------------------------------------------------------------
@@ -68,6 +69,10 @@ fi
 # Step 1: Pre-flight checks
 # ---------------------------------------------------------------------------
 log "Running pre-flight checks..."
+
+if ! "$SCRIPT_DIR/render-env.sh"; then
+  die "Failed to render .env from SOPS-managed secrets." 1
+fi
 
 if ! command -v docker >/dev/null 2>&1; then
   die "Docker is not installed. Install from https://docs.docker.com/engine/install/" 1
