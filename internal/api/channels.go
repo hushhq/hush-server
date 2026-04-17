@@ -128,6 +128,7 @@ func (h *channelsHandler) getMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	beforeStr := r.URL.Query().Get("before")
+	afterStr := r.URL.Query().Get("after")
 	limitStr := r.URL.Query().Get("limit")
 	limit := channelMessagesLimitDefault
 	if limitStr != "" {
@@ -141,6 +142,10 @@ func (h *channelsHandler) getMessages(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = n
 	}
+	if beforeStr != "" && afterStr != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "before and after are mutually exclusive"})
+		return
+	}
 	var before time.Time
 	if beforeStr != "" {
 		var err error
@@ -150,6 +155,18 @@ func (h *channelsHandler) getMessages(w http.ResponseWriter, r *http.Request) {
 		}
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid before timestamp"})
+			return
+		}
+	}
+	var after time.Time
+	if afterStr != "" {
+		var err error
+		after, err = time.Parse(time.RFC3339Nano, afterStr)
+		if err != nil {
+			after, err = time.Parse(time.RFC3339, afterStr)
+		}
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid after timestamp"})
 			return
 		}
 	}
@@ -163,7 +180,12 @@ func (h *channelsHandler) getMessages(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "not a channel member"})
 		return
 	}
-	messages, err := h.store.GetMessages(ctx, channelID, userID, before, limit)
+	var messages []models.Message
+	if !after.IsZero() {
+		messages, err = h.store.GetMessagesAfter(ctx, channelID, userID, after, limit)
+	} else {
+		messages, err = h.store.GetMessages(ctx, channelID, userID, before, limit)
+	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load messages"})
 		return

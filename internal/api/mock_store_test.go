@@ -78,9 +78,10 @@ type mockStore struct {
 	upsertDeviceFn         func(ctx context.Context, userID, deviceID, label string) error
 
 	// Messages
-	insertMessageFn   func(ctx context.Context, channelID string, senderID *string, federatedSenderID *string, recipientID *string, ciphertext []byte) (*models.Message, error)
-	getMessagesFn     func(ctx context.Context, channelID, recipientID string, before time.Time, limit int) ([]models.Message, error)
-	isChannelMemberFn func(ctx context.Context, channelID, userID string) (bool, error)
+	insertMessageFn      func(ctx context.Context, channelID string, senderID *string, federatedSenderID *string, recipientID *string, ciphertext []byte) (*models.Message, error)
+	getMessagesFn        func(ctx context.Context, channelID, recipientID string, before time.Time, limit int) ([]models.Message, error)
+	getMessagesAfterFn   func(ctx context.Context, channelID, recipientID string, after time.Time, limit int) ([]models.Message, error)
+	isChannelMemberFn    func(ctx context.Context, channelID, userID string) (bool, error)
 
 	// Instance
 	getInstanceConfigFn    func(ctx context.Context) (*models.InstanceConfig, error)
@@ -550,6 +551,13 @@ func (m *mockStore) InsertMessage(ctx context.Context, channelID string, senderI
 func (m *mockStore) GetMessages(ctx context.Context, channelID, recipientID string, before time.Time, limit int) ([]models.Message, error) {
 	if m.getMessagesFn != nil {
 		return m.getMessagesFn(ctx, channelID, recipientID, before, limit)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) GetMessagesAfter(ctx context.Context, channelID, recipientID string, after time.Time, limit int) ([]models.Message, error) {
+	if m.getMessagesAfterFn != nil {
+		return m.getMessagesAfterFn(ctx, channelID, recipientID, after, limit)
 	}
 	return nil, nil
 }

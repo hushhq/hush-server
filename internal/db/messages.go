@@ -54,6 +54,26 @@ func (p *Pool) GetMessages(ctx context.Context, channelID, recipientID string, b
 	return scanMessages(rows)
 }
 
+// GetMessagesAfter returns messages for the channel newer than the given timestamp, ordered
+// by timestamp ASC. Used for reconnect catch-up: the client sends the timestamp of the last
+// known message and receives any messages created after that point in chronological order.
+func (p *Pool) GetMessagesAfter(ctx context.Context, channelID, recipientID string, after time.Time, limit int) ([]models.Message, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	rows, err := p.Query(ctx, `
+		SELECT id, channel_id, sender_id, federated_sender_id, recipient_id, ciphertext, "timestamp"
+		FROM messages
+		WHERE channel_id = $1 AND (recipient_id IS NULL OR recipient_id = $2) AND "timestamp" > $3
+		ORDER BY "timestamp" ASC
+		LIMIT $4`, channelID, recipientID, after, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanMessages(rows)
+}
+
 // GetMessageByID returns the message with the given ID, or nil if not found.
 func (p *Pool) GetMessageByID(ctx context.Context, messageID string) (*models.Message, error) {
 	row := p.QueryRow(ctx, `

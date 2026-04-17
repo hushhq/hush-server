@@ -84,6 +84,7 @@ type Store interface {
 	// Message methods
 	InsertMessage(ctx context.Context, channelID string, senderID *string, federatedSenderID *string, recipientID *string, ciphertext []byte) (*models.Message, error)
 	GetMessages(ctx context.Context, channelID, recipientID string, before time.Time, limit int) ([]models.Message, error)
+	GetMessagesAfter(ctx context.Context, channelID, recipientID string, after time.Time, limit int) ([]models.Message, error)
 	IsChannelMember(ctx context.Context, channelID, userID string) (bool, error)
 	// GetUnreadCount returns the number of messages in channelID visible to userID
 	// that are newer than the user's read marker and not sent by userID.
