@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/hushhq/hush-server/internal/models"
 	"github.com/stretchr/testify/assert"
@@ -28,7 +29,7 @@ func TestListServersForUser_NoGuilds_Integration(t *testing.T) {
 }
 
 // TestListServersForUser_RegularGuild_Integration verifies a regular (non-DM) guild
-// is returned without OtherUser or ChannelID — those are DM-only fields.
+// is returned without OtherUser or ChannelID; those are DM-only fields.
 func TestListServersForUser_RegularGuild_Integration(t *testing.T) {
 	pool, cleanup := SetupTestDB(t)
 	defer cleanup()
@@ -165,4 +166,38 @@ func TestListServersForUser_MixedGuilds_Integration(t *testing.T) {
 	assert.Equal(t, peerID, dm.OtherUser.ID)
 	require.NotNil(t, dm.ChannelID)
 	assert.Equal(t, dmCh.ID, *dm.ChannelID)
+}
+
+// TestListServersForUser_DMGuild_IncludesUnreadCount_Integration verifies that
+// ListServersForUser populates Channels[0].UnreadCount with the caller's unread
+// message count for the DM channel.
+func TestListServersForUser_DMGuild_IncludesUnreadCount_Integration(t *testing.T) {
+	pool, cleanup := SetupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	_, err := pool.Exec(ctx, `TRUNCATE read_markers, messages, channels, server_members, dm_pairs, servers, sessions, users RESTART IDENTITY CASCADE`)
+	require.NoError(t, err)
+
+	callerID := newTestUser(t, pool, ctx, "Caller")
+	peerID := newTestUser(t, pool, ctx, "Peer")
+
+	_, dmCh, err := pool.CreateDMGuild(ctx, callerID, peerID)
+	require.NoError(t, err)
+
+	// Peer sends 2 broadcast messages to the DM channel.
+	for i := 0; i < 2; i++ {
+		_, err = pool.InsertMessage(ctx, dmCh.ID, &peerID, nil, nil, []byte("hello"))
+		require.NoError(t, err)
+		time.Sleep(2 * time.Millisecond)
+	}
+
+	guilds, err := pool.ListServersForUser(ctx, callerID)
+	require.NoError(t, err)
+	require.Len(t, guilds, 1)
+
+	g := guilds[0]
+	require.Len(t, g.Channels, 1, "DM guild must include one channel summary")
+	assert.Equal(t, dmCh.ID, g.Channels[0].ID)
+	assert.Equal(t, 2, g.Channels[0].UnreadCount)
 }

@@ -207,6 +207,13 @@ const (
 	PermissionLevelOwner  = 3
 )
 
+// DmChannelSummary is a minimal channel representation for DM guild list responses.
+// UnreadCount is the caller's unread message count for this channel.
+type DmChannelSummary struct {
+	ID          string `json:"id"`
+	UnreadCount int    `json:"unreadCount"`
+}
+
 // Server is a guild within this Hush instance.
 // All plaintext name/icon/owner fields are removed - the backend is a blind relay.
 // Exception: PublicName and PublicDescription are plaintext when Discoverable=true -
@@ -234,6 +241,8 @@ type Server struct {
 	// Populated only for DM guilds (IsDm=true). Nil for regular guilds.
 	OtherUser *UserSearchPublicResult `json:"otherUser,omitempty"`
 	ChannelID *string                 `json:"channelId,omitempty"`
+	// Channels is populated for DM guilds only with the single DM channel summary.
+	Channels []DmChannelSummary `json:"channels,omitempty"`
 }
 
 // ServerMember records a user's (or federated identity's) membership and integer
@@ -284,8 +293,8 @@ type CreateServerRequest struct {
 
 // TemplateChannel describes a single channel in a server creation template.
 type TemplateChannel struct {
-	Name      string  `json:"name"`
-	Type      string  `json:"type"`
+	Name string `json:"name"`
+	Type string `json:"type"`
 
 	ParentRef *string `json:"parentRef,omitempty"`
 	Position  int     `json:"position"`
@@ -430,9 +439,9 @@ type ChangePermissionLevelRequest struct {
 // yet bootstrapped, the plaintext Name fallback is accepted and stored as a
 // JSON metadata blob so the channel is still usable.
 type CreateChannelRequest struct {
-	EncryptedMetadata []byte `json:"encryptedMetadata,omitempty"`
-	Name              string `json:"name,omitempty"`
-	Type              string `json:"type"`
+	EncryptedMetadata []byte  `json:"encryptedMetadata,omitempty"`
+	Name              string  `json:"name,omitempty"`
+	Type              string  `json:"type"`
 	ParentID          *string `json:"parentId,omitempty"`
 	Position          *int    `json:"position,omitempty"`
 }

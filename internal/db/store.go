@@ -85,6 +85,12 @@ type Store interface {
 	InsertMessage(ctx context.Context, channelID string, senderID *string, federatedSenderID *string, recipientID *string, ciphertext []byte) (*models.Message, error)
 	GetMessages(ctx context.Context, channelID, recipientID string, before time.Time, limit int) ([]models.Message, error)
 	IsChannelMember(ctx context.Context, channelID, userID string) (bool, error)
+	// GetUnreadCount returns the number of messages in channelID visible to userID
+	// that are newer than the user's read marker and not sent by userID.
+	GetUnreadCount(ctx context.Context, channelID, userID string) (int, error)
+	// MarkChannelRead advances the read marker for (channelID, userID) to the stored
+	// timestamp of messageID. Never moves the marker backward. Rejects invisible messages.
+	MarkChannelRead(ctx context.Context, channelID, userID, messageID string) error
 
 	// Instance config methods
 	GetInstanceConfig(ctx context.Context) (*models.InstanceConfig, error)

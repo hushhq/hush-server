@@ -227,6 +227,47 @@ func TestListMyServers_DMGuild_ResponseCarriesEnrichmentFields(t *testing.T) {
 	assert.Equal(t, chID, *g.ChannelID)
 }
 
+// TestListMyServers_DMGuild_UnreadCountInResponseShape verifies that the handler
+// preserves channels[0].unreadCount in the JSON response without stripping it.
+// This is the shape hush-web reads to display the badge on DM list items.
+func TestListMyServers_DMGuild_UnreadCountInResponseShape(t *testing.T) {
+	userID := uuid.New().String()
+	chID := uuid.New().String()
+	dmServerID := uuid.New().String()
+
+	store := &mockStore{
+		listServersForUserFn: func(_ context.Context, _ string) ([]models.Server, error) {
+			return []models.Server{
+				{
+					ID:   dmServerID,
+					IsDm: true,
+					Channels: []models.DmChannelSummary{
+						{ID: chID, UnreadCount: 3},
+					},
+				},
+			}, nil
+		},
+	}
+	token := makeAuth(store, userID)
+	router := serversRouter(store)
+
+	rr := getServer(router, "/", token)
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	var raw []map[string]interface{}
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&raw))
+	require.Len(t, raw, 1)
+
+	channels, ok := raw[0]["channels"].([]interface{})
+	require.True(t, ok, "channels field must be present and be an array")
+	require.Len(t, channels, 1)
+
+	ch, ok := channels[0].(map[string]interface{})
+	require.True(t, ok, "channels[0] must be a JSON object")
+	assert.Equal(t, chID, ch["id"])
+	assert.Equal(t, float64(3), ch["unreadCount"], "unreadCount must be 3")
+}
+
 // TestListMyServers_RegularGuild_NoEnrichmentFields verifies non-DM guilds do
 // not carry OtherUser or ChannelID in the response.
 func TestListMyServers_RegularGuild_NoEnrichmentFields(t *testing.T) {

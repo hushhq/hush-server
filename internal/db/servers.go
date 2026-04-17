@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/hushhq/hush-server/internal/models"
+	"github.com/jackc/pgx/v5"
 )
 
 // CreateServer inserts a new guild with an optional encrypted metadata blob and returns the created row.
@@ -107,7 +107,22 @@ func (p *Pool) ListServersForUser(ctx context.Context, userID string) ([]models.
 		}
 		out = append(out, s)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Enrich DM guilds with unread count for the calling user.
+	for i, s := range out {
+		if !s.IsDm || s.ChannelID == nil {
+			continue
+		}
+		count, cErr := p.GetUnreadCount(ctx, *s.ChannelID, userID)
+		if cErr != nil {
+			return nil, cErr
+		}
+		out[i].Channels = []models.DmChannelSummary{{ID: *s.ChannelID, UnreadCount: count}}
+	}
+	return out, nil
 }
 
 func derefString(s *string) string {

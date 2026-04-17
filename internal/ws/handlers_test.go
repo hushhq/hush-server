@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -22,6 +23,7 @@ type messageStoreMock struct {
 	insertMessageFn   func(ctx context.Context, channelID string, senderID *string, federatedSenderID *string, recipientID *string, ciphertext []byte) (*models.Message, error)
 	getMessagesFn     func(ctx context.Context, channelID, recipientID string, before time.Time, limit int) ([]models.Message, error)
 	isChannelMemberFn func(ctx context.Context, channelID, userID string) (bool, error)
+	markChannelReadFn func(ctx context.Context, channelID, userID, messageID string) error
 }
 
 // Ping stub.
@@ -211,7 +213,9 @@ func (m *messageStoreMock) ClaimInviteUse(context.Context, string) (bool, error)
 
 // Server / guild operation stubs.
 func (m *messageStoreMock) CountOwnedServers(context.Context, string) (int, error) { return 0, nil }
-func (m *messageStoreMock) UpdateServerMemberCapOverride(context.Context, string, *int) error { return nil }
+func (m *messageStoreMock) UpdateServerMemberCapOverride(context.Context, string, *int) error {
+	return nil
+}
 
 // CreateServer now takes encryptedMetadata []byte only (no plaintext name).
 func (m *messageStoreMock) CreateServer(context.Context, []byte) (*models.Server, error) {
@@ -373,6 +377,17 @@ func (m *messageStoreMock) GetLatestTransparencyTreeHead(context.Context) (*mode
 	return nil, nil
 }
 func (m *messageStoreMock) InsertTransparencyTreeHead(context.Context, uint64, []byte, []byte, []byte) error {
+	return nil
+}
+
+// Read marker stubs (GC.3).
+func (m *messageStoreMock) GetUnreadCount(context.Context, string, string) (int, error) {
+	return 0, nil
+}
+func (m *messageStoreMock) MarkChannelRead(ctx context.Context, channelID, userID, messageID string) error {
+	if m.markChannelReadFn != nil {
+		return m.markChannelReadFn(ctx, channelID, userID, messageID)
+	}
 	return nil
 }
 
@@ -644,6 +659,47 @@ func TestMessageHandler_HandleMessageSend_FanoutStoresAndBroadcastsPerRecipient(
 	assert.Equal(t, "msg-user1", echoOut.ID)
 }
 
+func TestMessageHandler_HandleMessageSend_FanoutDoesNotMarkRead(t *testing.T) {
+	hub := NewHub()
+	store := &messageStoreMock{
+		isChannelMemberFn: func(context.Context, string, string) (bool, error) { return true, nil },
+		insertMessageFn: func(_ context.Context, channelID string, senderID *string, _ *string, recipientID *string, ciphertext []byte) (*models.Message, error) {
+			id := "msg-send"
+			if recipientID != nil {
+				id = "msg-" + *recipientID
+			}
+			return &models.Message{ID: id, ChannelID: channelID, SenderID: senderID, Ciphertext: ciphertext, Timestamp: time.Now()}, nil
+		},
+		markChannelReadFn: func(_ context.Context, channelID, userID, messageID string) error {
+			t.Fatalf("MarkChannelRead must not be called on message.send; got channelID=%q userID=%q messageID=%q", channelID, userID, messageID)
+			return nil
+		},
+	}
+	h := NewMessageHandler(store, hub)
+	sender := NewClient(nil, hub, "user1", "device-1", "", h)
+	hub.Register(sender)
+	recv := NewClient(nil, hub, "user2", "device-2", "", nil)
+	hub.Register(recv)
+	hub.Subscribe(sender, "ch1")
+	hub.Subscribe(recv, "ch1")
+	defer func() {
+		hub.Unregister(sender)
+		hub.Unregister(recv)
+		close(sender.send)
+		close(recv.send)
+	}()
+
+	raw, _ := json.Marshal(map[string]interface{}{
+		"channel_id":              "ch1",
+		"ciphertext_by_recipient": map[string]string{"user2": "YWVz", "user3": "eHl6"},
+	})
+	h.Handle(sender, "message.send", raw)
+
+	// Drain expected broadcasts; t.Fatalf fires immediately if MarkChannelRead is called.
+	drainUntilType(t, recv, "message.new", time.Second)
+	drainUntilType(t, sender, "message.new", time.Second)
+}
+
 func TestMessageHandler_HandleMLSCommit_ForbiddenWhenNotMember(t *testing.T) {
 	hub := NewHub()
 	store := &messageStoreMock{
@@ -869,4 +925,105 @@ func TestMessageHandler_HandleTyping_BroadcastsToChannel(t *testing.T) {
 	assert.Equal(t, "typing.start", out.Type)
 	assert.Equal(t, "ch1", out.ChannelID)
 	assert.Equal(t, "user1", out.UserID)
+}
+
+func TestMessageHandler_HandleMarkRead_ForbiddenWhenNotMember(t *testing.T) {
+	hub := NewHub()
+	store := &messageStoreMock{
+		isChannelMemberFn: func(_ context.Context, _, _ string) (bool, error) {
+			return false, nil
+		},
+	}
+	h := NewMessageHandler(store, hub)
+	c := NewClient(nil, hub, "user1", "device-1", "", h)
+	hub.Register(c)
+	defer func() { hub.Unregister(c); close(c.send) }()
+
+	raw, _ := json.Marshal(map[string]string{"channel_id": "ch1", "message_id": "msg1"})
+	h.Handle(c, "message.mark_read", raw)
+
+	msg := drainUntilType(t, c, "error", time.Second)
+	var out struct {
+		Code string `json:"code"`
+	}
+	require.NoError(t, json.Unmarshal(msg, &out))
+	assert.Equal(t, "forbidden", out.Code)
+}
+
+func TestMessageHandler_HandleMarkRead_CallsMarkChannelRead(t *testing.T) {
+	hub := NewHub()
+	var calledWith [3]string
+	store := &messageStoreMock{
+		isChannelMemberFn: func(_ context.Context, _, _ string) (bool, error) {
+			return true, nil
+		},
+		markChannelReadFn: func(_ context.Context, channelID, userID, messageID string) error {
+			calledWith = [3]string{channelID, userID, messageID}
+			return nil
+		},
+	}
+	h := NewMessageHandler(store, hub)
+	c := NewClient(nil, hub, "user42", "device-1", "", h)
+	hub.Register(c)
+	defer func() { hub.Unregister(c); close(c.send) }()
+
+	raw, _ := json.Marshal(map[string]string{"channel_id": "ch1", "message_id": "msg99"})
+	h.Handle(c, "message.mark_read", raw)
+
+	// No error message should be sent.
+	select {
+	case msg := <-c.send:
+		var out struct{ Type string }
+		_ = json.Unmarshal(msg, &out)
+		assert.NotEqual(t, "error", out.Type, "unexpected error message: %s", string(msg))
+	default:
+		// Nothing sent; correct.
+	}
+	assert.Equal(t, [3]string{"ch1", "user42", "msg99"}, calledWith)
+}
+
+func TestMessageHandler_HandleMarkRead_InternalOnMarkError(t *testing.T) {
+	hub := NewHub()
+	store := &messageStoreMock{
+		isChannelMemberFn: func(_ context.Context, _, _ string) (bool, error) {
+			return true, nil
+		},
+		markChannelReadFn: func(_ context.Context, _, _, _ string) error {
+			return errors.New("db error")
+		},
+	}
+	h := NewMessageHandler(store, hub)
+	c := NewClient(nil, hub, "user1", "device-1", "", h)
+	hub.Register(c)
+	defer func() { hub.Unregister(c); close(c.send) }()
+
+	raw, _ := json.Marshal(map[string]string{"channel_id": "ch1", "message_id": "msg1"})
+	h.Handle(c, "message.mark_read", raw)
+
+	msg := drainUntilType(t, c, "error", time.Second)
+	var out struct {
+		Code string `json:"code"`
+	}
+	require.NoError(t, json.Unmarshal(msg, &out))
+	assert.Equal(t, "internal", out.Code)
+}
+
+func TestMessageHandler_HandleMarkRead_BadRequestMissingFields(t *testing.T) {
+	hub := NewHub()
+	store := &messageStoreMock{}
+	h := NewMessageHandler(store, hub)
+	c := NewClient(nil, hub, "user1", "device-1", "", h)
+	hub.Register(c)
+	defer func() { hub.Unregister(c); close(c.send) }()
+
+	// Payload missing message_id.
+	raw, _ := json.Marshal(map[string]string{"channel_id": "ch1"})
+	h.Handle(c, "message.mark_read", raw)
+
+	msg := drainUntilType(t, c, "error", time.Second)
+	var out struct {
+		Code string `json:"code"`
+	}
+	require.NoError(t, json.Unmarshal(msg, &out))
+	assert.Equal(t, "bad_request", out.Code)
 }

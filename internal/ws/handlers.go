@@ -12,9 +12,9 @@ import (
 )
 
 const (
-	messageHistoryLimitMax  = 50
-	handlerTimeout          = 10 * time.Second
-	maxFanoutRecipients     = 200
+	messageHistoryLimitMax = 50
+	handlerTimeout         = 10 * time.Second
+	maxFanoutRecipients    = 200
 	// 8 KiB total ciphertext budget (MLS framing + encrypted payload).
 	// Effective plaintext: ~4000 bytes after MLS overhead and GCM tag.
 	maxCiphertextBytes = 8 * 1024
@@ -55,8 +55,45 @@ func (h *MessageHandler) Handle(c *Client, msgType string, raw []byte) {
 		h.handleMLSLeaveProposal(c, raw)
 	case "mls.add_request":
 		h.handleMLSAddRequest(c, raw)
+	case "message.mark_read":
+		h.handleMarkRead(c, raw)
 	default:
 		// subscribe/unsubscribe handled in readPump
+		return
+	}
+}
+
+// handleMarkRead processes a message.mark_read WS event. It advances the caller's
+// read marker for the given channel to the stored timestamp of the referenced message.
+// Membership is checked before any write. The marker never moves backward.
+func (h *MessageHandler) handleMarkRead(c *Client, raw []byte) {
+	if h.store == nil {
+		sendError(c, "forbidden", "store unavailable")
+		return
+	}
+	var payload struct {
+		ChannelID string `json:"channel_id"`
+		MessageID string `json:"message_id"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil || payload.ChannelID == "" || payload.MessageID == "" {
+		sendError(c, "bad_request", "channel_id and message_id required")
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
+	defer cancel()
+	ok, err := h.store.IsChannelMember(ctx, payload.ChannelID, c.userID)
+	if err != nil {
+		slog.Warn("ws IsChannelMember failed", "err", err)
+		sendError(c, "internal", "check membership failed")
+		return
+	}
+	if !ok {
+		sendError(c, "forbidden", "not a channel member")
+		return
+	}
+	if err := h.store.MarkChannelRead(ctx, payload.ChannelID, c.userID, payload.MessageID); err != nil {
+		slog.Warn("ws MarkChannelRead failed", "err", err)
+		sendError(c, "internal", "failed to mark channel read")
 		return
 	}
 }
@@ -426,13 +463,13 @@ func (h *MessageHandler) handleMLSCommit(c *Client, raw []byte) {
 
 	// group_type is included so Plan 03's handleVoiceCommit can filter voice vs text commits.
 	out, _ := json.Marshal(map[string]interface{}{
-		"type":         "mls.commit",
-		"channel_id":   payload.ChannelID,
-		"epoch":        payload.Epoch,
-		"commit_bytes": payload.CommitBytes,
-		"sender_id":    c.userID,
+		"type":             "mls.commit",
+		"channel_id":       payload.ChannelID,
+		"epoch":            payload.Epoch,
+		"commit_bytes":     payload.CommitBytes,
+		"sender_id":        c.userID,
 		"sender_device_id": c.deviceID,
-		"group_type":   groupType,
+		"group_type":       groupType,
 	})
 	h.hub.Broadcast(payload.ChannelID, out, "")
 }
@@ -471,11 +508,11 @@ func (h *MessageHandler) handleMLSLeaveProposal(c *Client, raw []byte) {
 
 	// Broadcast mls.add_request to channel so an online member can commit the removal.
 	out, _ := json.Marshal(map[string]interface{}{
-		"type":          "mls.add_request",
-		"channel_id":    payload.ChannelID,
-		"action":        "remove",
+		"type":           "mls.add_request",
+		"channel_id":     payload.ChannelID,
+		"action":         "remove",
 		"proposal_bytes": payload.ProposalBytes,
-		"requester_id":  c.userID,
+		"requester_id":   c.userID,
 	})
 	h.hub.Broadcast(payload.ChannelID, out, "")
 }

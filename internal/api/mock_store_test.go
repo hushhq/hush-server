@@ -202,6 +202,10 @@ type mockStore struct {
 	createDMGuildFn     func(ctx context.Context, userAID, userBID string) (*models.Server, *models.Channel, error)
 	discoverGuildsFn    func(ctx context.Context, category, search, sort string, page, pageSize int) ([]models.DiscoverGuild, int, error)
 	searchUsersPublicFn func(ctx context.Context, query string, limit int) ([]models.UserSearchPublicResult, error)
+
+	// Read markers (GC.3)
+	getUnreadCountFn  func(ctx context.Context, channelID, userID string) (int, error)
+	markChannelReadFn func(ctx context.Context, channelID, userID, messageID string) error
 }
 
 func (m *mockStore) Ping(ctx context.Context) error {
@@ -1202,6 +1206,20 @@ func (m *mockStore) SearchUsersPublic(ctx context.Context, query string, limit i
 		return m.searchUsersPublicFn(ctx, query, limit)
 	}
 	return []models.UserSearchPublicResult{}, nil
+}
+
+func (m *mockStore) GetUnreadCount(ctx context.Context, channelID, userID string) (int, error) {
+	if m.getUnreadCountFn != nil {
+		return m.getUnreadCountFn(ctx, channelID, userID)
+	}
+	return 0, nil
+}
+
+func (m *mockStore) MarkChannelRead(ctx context.Context, channelID, userID, messageID string) error {
+	if m.markChannelReadFn != nil {
+		return m.markChannelReadFn(ctx, channelID, userID, messageID)
+	}
+	return nil
 }
 
 // ---------- Shared test helpers ----------
