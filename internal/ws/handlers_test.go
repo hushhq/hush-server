@@ -20,10 +20,11 @@ var _ db.Store = (*messageStoreMock)(nil)
 
 // messageStoreMock implements db.Store for message handler tests. Only message methods are used.
 type messageStoreMock struct {
-	insertMessageFn   func(ctx context.Context, channelID string, senderID *string, federatedSenderID *string, recipientID *string, ciphertext []byte) (*models.Message, error)
-	getMessagesFn     func(ctx context.Context, channelID, recipientID string, before time.Time, limit int) ([]models.Message, error)
-	isChannelMemberFn func(ctx context.Context, channelID, userID string) (bool, error)
-	markChannelReadFn func(ctx context.Context, channelID, userID, messageID string) error
+	insertMessageFn      func(ctx context.Context, channelID string, senderID *string, federatedSenderID *string, recipientID *string, ciphertext []byte) (*models.Message, error)
+	getMessagesFn        func(ctx context.Context, channelID, recipientID string, before time.Time, limit int) ([]models.Message, error)
+	getMessagesAfterFn   func(ctx context.Context, channelID, recipientID string, after time.Time, limit int) ([]models.Message, error)
+	isChannelMemberFn    func(ctx context.Context, channelID, userID string) (bool, error)
+	markChannelReadFn    func(ctx context.Context, channelID, userID, messageID string) error
 }
 
 // Ping stub.
@@ -148,6 +149,12 @@ func (m *messageStoreMock) InsertMessage(ctx context.Context, channelID string, 
 func (m *messageStoreMock) GetMessages(ctx context.Context, channelID, recipientID string, before time.Time, limit int) ([]models.Message, error) {
 	if m.getMessagesFn != nil {
 		return m.getMessagesFn(ctx, channelID, recipientID, before, limit)
+	}
+	return nil, nil
+}
+func (m *messageStoreMock) GetMessagesAfter(ctx context.Context, channelID, recipientID string, after time.Time, limit int) ([]models.Message, error) {
+	if m.getMessagesAfterFn != nil {
+		return m.getMessagesAfterFn(ctx, channelID, recipientID, after, limit)
 	}
 	return nil, nil
 }
