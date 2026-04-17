@@ -22,8 +22,8 @@ import (
 	"github.com/hushhq/hush-server/internal/transparency"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 const (
@@ -83,7 +83,7 @@ func AuthRoutes(store db.Store, jwtSecret string, jwtExpiry time.Duration, trans
 
 	// Device management and multi-device linking (require auth - mounted inline).
 	// Hub is variadic to maintain backward compatibility with existing call sites
-	// (tests and main.go) that omit the hub parameter. Nil is safe — all device
+	// (tests and main.go) that omit the hub parameter. Nil is safe; all device
 	// handler broadcast calls nil-check before use.
 	var deviceHub GlobalBroadcaster
 	if len(hub) > 0 {
@@ -107,7 +107,7 @@ type authHandler struct {
 // ensureVerifiedDeviceRegistered backfills the current device into the device
 // registry after a successful challenge-response login. This keeps older
 // accounts, created before device-key tracking existed, compatible with flows
-// مثل multi-device linking that need the approving device to have a stored key.
+// such as multi-device linking that need the approving device to have a stored key.
 //
 // The operation is intentionally best-effort: authentication must not fail just
 // because auxiliary device metadata could not be upserted.
@@ -446,67 +446,7 @@ type federatedAuthResponse struct {
 // Authenticates a user from a foreign instance via Ed25519 challenge-response
 // and issues a stateless federated JWT. No DB session record is created.
 func (h *authHandler) federatedVerify(w http.ResponseWriter, r *http.Request) {
-	var req models.FederatedVerifyRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
-		return
-	}
-
-	if strings.TrimSpace(req.HomeInstance) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "homeInstance is required"})
-		return
-	}
-
-	publicKeyBytes, err := base64.StdEncoding.DecodeString(req.PublicKey)
-	if err != nil || len(publicKeyBytes) != ed25519PublicKeyLen {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Authentication failed"})
-		return
-	}
-
-	signatureBytes, err := base64.StdEncoding.DecodeString(req.Signature)
-	if err != nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Authentication failed"})
-		return
-	}
-
-	// Atomically consume the nonce and retrieve the stored public key.
-	storedKey, err := h.store.ConsumeAuthNonce(r.Context(), req.Nonce)
-	if err != nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Challenge expired, please try again"})
-		return
-	}
-
-	// The nonce's stored public key must exactly match the request public key.
-	if subtle.ConstantTimeCompare(storedKey, publicKeyBytes) != 1 {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Authentication failed"})
-		return
-	}
-
-	if err := auth.VerifySignature(publicKeyBytes, req.Nonce, signatureBytes); err != nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Authentication failed"})
-		return
-	}
-
-	fedIdent, err := h.store.GetOrCreateFederatedIdentity(r.Context(), publicKeyBytes, req.HomeInstance, req.Username, req.DisplayName)
-	if err != nil {
-		slog.Error("get or create federated identity", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "authentication failed"})
-		return
-	}
-
-	sessionID := uuid.New().String()
-	expiresAt := time.Now().Add(h.jwtExpiry)
-	tokenString, err := auth.SignFederatedJWT(fedIdent.ID, sessionID, h.jwtSecret, expiresAt)
-	if err != nil {
-		slog.Error("sign federated jwt", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not create session"})
-		return
-	}
-
-	writeJSON(w, http.StatusOK, federatedAuthResponse{
-		Token:             tokenString,
-		FederatedIdentity: fedIdent,
-	})
+	writeJSON(w, http.StatusForbidden, map[string]string{"error": "federation is not supported in this MVP"})
 }
 
 func (h *authHandler) sendAuthResponse(w http.ResponseWriter, r *http.Request, user *models.User, deviceID string) {

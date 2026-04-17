@@ -12,6 +12,8 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+var errFederationUnsupported = errors.New("federation is not supported in this MVP")
+
 // Handler returns an HTTP handler that upgrades to WebSocket and runs the client.
 // Validates JWT (and session if pool is non-nil) from query param or first message.
 // corsOrigin controls the WebSocket origin check: "*" allows all origins,
@@ -41,7 +43,11 @@ func Handler(hub *Hub, jwtSecret string, store db.Store, corsOrigin string) http
 			}
 			userID, deviceID, federatedID, err := authFromFirstMessage(conn, jwtSecret, store, r)
 			if err != nil {
-				_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "auth required"))
+				closeReason := "auth required"
+				if errors.Is(err, errFederationUnsupported) {
+					closeReason = errFederationUnsupported.Error()
+				}
+				_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.ClosePolicyViolation, closeReason))
 				_ = conn.Close()
 				return
 			}
@@ -57,8 +63,10 @@ func Handler(hub *Hub, jwtSecret string, store db.Store, corsOrigin string) http
 			return
 		}
 		if isFederated {
-			// Federated sessions are stateless - skip DB session validation.
-		} else if store != nil && !isGuest {
+			http.Error(w, errFederationUnsupported.Error(), http.StatusForbidden)
+			return
+		}
+		if store != nil && !isGuest {
 			tokenHash := auth.TokenHash(token)
 			sess, err := store.GetSessionByTokenHash(r.Context(), tokenHash)
 			if err != nil || sess == nil || sess.ID != sessionID || sess.UserID != userID {
@@ -96,13 +104,12 @@ func authFromFirstMessage(conn *websocket.Conn, jwtSecret string, store db.Store
 	if msg.Type != "auth" || msg.Token == "" {
 		return "", "", "", errors.New("invalid auth message: expected type 'auth' with non-empty token")
 	}
-	uid, sessionID, did, isGuest, isFederated, fedID, err := auth.ValidateJWT(msg.Token, jwtSecret)
+	uid, sessionID, did, isGuest, isFederated, _, err := auth.ValidateJWT(msg.Token, jwtSecret)
 	if err != nil {
 		return "", "", "", err
 	}
 	if isFederated {
-		// Federated sessions are stateless - skip DB session validation.
-		return uid, did, fedID, nil
+		return "", "", "", errFederationUnsupported
 	}
 	// Guest sessions are ephemeral - no DB session record exists.
 	if store != nil && !isGuest {
