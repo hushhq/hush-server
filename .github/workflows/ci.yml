@@ -36,6 +36,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - run: go vet ./...
       - run: go test ./...
 
   docker:
