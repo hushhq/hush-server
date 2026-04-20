@@ -30,6 +30,9 @@ func SetupTestDB(t *testing.T) (*Pool, func()) {
 	}
 	migrationsDir := filepath.Join(wd, "migrations")
 	if _, err := os.Stat(migrationsDir); os.IsNotExist(err) {
+		migrationsDir = filepath.Join(wd, "..", "..", "migrations")
+	}
+	if _, err := os.Stat(migrationsDir); os.IsNotExist(err) {
 		migrationsDir = filepath.Join(wd, "server", "migrations")
 	}
 	migrationsPath := "file://" + filepath.ToSlash(migrationsDir)

@@ -201,3 +201,44 @@ func TestListServersForUser_DMGuild_IncludesUnreadCount_Integration(t *testing.T
 	assert.Equal(t, dmCh.ID, g.Channels[0].ID)
 	assert.Equal(t, 2, g.Channels[0].UnreadCount)
 }
+
+// TestListServersForUser_DMGuild_FirstMessageRecipientUnread_Integration verifies
+// the same-instance first-message path: after A creates a DM with B and sends
+// the first message, B's ListServersForUser returns the DM with UnreadCount == 1
+// and the message appears in B's channel history.
+func TestListServersForUser_DMGuild_FirstMessageRecipientUnread_Integration(t *testing.T) {
+	pool, cleanup := SetupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	_, err := pool.Exec(ctx, `TRUNCATE read_markers, messages, channels, server_members, dm_pairs, servers, sessions, users RESTART IDENTITY CASCADE`)
+	require.NoError(t, err)
+
+	userA := newTestUser(t, pool, ctx, "Alice")
+	userB := newTestUser(t, pool, ctx, "Bob")
+
+	// A creates DM with B.
+	_, dmCh, err := pool.CreateDMGuild(ctx, userA, userB)
+	require.NoError(t, err)
+
+	// A sends the first message before B opens/subscribes to the channel.
+	_, err = pool.InsertMessage(ctx, dmCh.ID, &userA, nil, nil, []byte("first message from A"))
+	require.NoError(t, err)
+	time.Sleep(2 * time.Millisecond)
+
+	// B lists their guilds and must see the DM with unread count.
+	guilds, err := pool.ListServersForUser(ctx, userB)
+	require.NoError(t, err)
+	require.Len(t, guilds, 1)
+
+	g := guilds[0]
+	assert.True(t, g.IsDm)
+	require.Len(t, g.Channels, 1)
+	assert.Equal(t, 1, g.Channels[0].UnreadCount, "recipient must see unread count from first message")
+
+	// B retrieves message history and must see A's first message.
+	msgs, err := pool.GetMessages(ctx, dmCh.ID, userB, time.Now(), 50)
+	require.NoError(t, err)
+	require.Len(t, msgs, 1)
+	assert.Equal(t, "first message from A", string(msgs[0].Ciphertext))
+}
