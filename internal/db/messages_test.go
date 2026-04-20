@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hushhq/hush-server/internal/models"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -31,17 +33,23 @@ func TestPool_InsertMessage_GetMessages_IsChannelMember_Integration(t *testing.T
 	defer cleanup()
 
 	ctx := context.Background()
-	_, err := pool.Exec(ctx, `TRUNCATE messages, channels, sessions, users CASCADE`)
+	_, err := pool.Exec(ctx, `TRUNCATE read_markers, messages, channels, server_members, dm_pairs, servers, sessions, users RESTART IDENTITY CASCADE`)
 	require.NoError(t, err)
 
 	u1ID := newTestUser(t, pool, ctx, "User 1")
 	u2ID := newTestUser(t, pool, ctx, "User 2")
 
-	var channelID string
-	err = pool.QueryRow(ctx, `INSERT INTO channels (type) VALUES ('text') RETURNING id`).Scan(&channelID)
+	srv, err := pool.CreateServer(ctx, nil)
 	require.NoError(t, err)
+	require.NoError(t, pool.AddServerMember(ctx, srv.ID, u1ID, models.PermissionLevelMember))
+	require.NoError(t, pool.AddServerMember(ctx, srv.ID, u2ID, models.PermissionLevelMember))
 
-	// In single-tenant model, any existing user is a channel member.
+	ch, err := pool.CreateChannel(ctx, srv.ID, nil, "text", nil, 0)
+	require.NoError(t, err)
+	channelID := ch.ID
+
+	// In the multi-guild model, a channel member is any user in the guild
+	// that owns the channel.
 	ok, err := pool.IsChannelMember(ctx, channelID, u1ID)
 	require.NoError(t, err)
 	assert.True(t, ok)
