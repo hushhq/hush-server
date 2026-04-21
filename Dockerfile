@@ -10,6 +10,7 @@ RUN npm run build
 
 # --- Stage 2: Build Go binary ---
 FROM golang:1.25-alpine AS builder
+ARG BUILD_VERSION=dev
 WORKDIR /build
 
 COPY go.mod go.sum ./
@@ -18,7 +19,9 @@ RUN go mod download
 COPY . .
 # Replace dev placeholder with real admin build output
 COPY --from=admin-builder /admin/dist ./admin/dist
-RUN CGO_ENABLED=0 go build -o /hush ./cmd/hush
+RUN CGO_ENABLED=0 go build \
+    -ldflags "-X github.com/hushhq/hush-server/internal/version.ServerVersion=${BUILD_VERSION}" \
+    -o /hush ./cmd/hush
 
 # --- Stage 3: Runtime ---
 FROM alpine:3.19

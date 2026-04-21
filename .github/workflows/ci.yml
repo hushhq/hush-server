@@ -58,3 +58,4 @@ jobs:
           context: .
           push: true
           tags: ghcr.io/hushhq/hush-server:${{ github.ref_name }}
+          build-args: BUILD_VERSION=${{ github.ref_name }}
