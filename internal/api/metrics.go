@@ -1,6 +1,9 @@
 package api
 
 import (
+	"bufio"
+	"errors"
+	"net"
 	"net/http"
 	"sync/atomic"
 )
@@ -120,4 +123,30 @@ func (s *statusRecorder) Write(b []byte) (int, error) {
 		s.wroteHeader = true
 	}
 	return s.ResponseWriter.Write(b)
+}
+
+// Hijack delegates to the wrapped ResponseWriter when it implements
+// http.Hijacker. WebSocket upgrades (gorilla/websocket) type-assert the
+// ResponseWriter to http.Hijacker; without this passthrough the
+// statusRecorder would mask the upgrade and the upgrade fails with a
+// 500 / "response does not implement http.Hijacker", breaking /ws
+// completely. The metrics middleware never observes a status for
+// successful upgrades, but recording 1xx (Switching Protocols) was
+// never the point — counting attempts in requestsTotal already tracks
+// the upgrade as a request.
+func (s *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	h, ok := s.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, errors.New("response writer does not implement http.Hijacker")
+	}
+	return h.Hijack()
+}
+
+// Flush passes through when the wrapped writer supports it. Some chi
+// middlewares (e.g. SSE-style endpoints) rely on Flush; missing
+// passthrough degrades streaming responses silently.
+func (s *statusRecorder) Flush() {
+	if f, ok := s.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
