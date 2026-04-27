@@ -109,10 +109,10 @@ services:
         {
           "CORSRules": [
             {
-              "AllowedOrigin": ["$$STORAGE_BROWSER_ORIGIN"],
-              "AllowedMethod": ["GET", "PUT", "HEAD"],
-              "AllowedHeader": ["Content-Type", "x-amz-checksum-sha256", "x-amz-content-sha256", "x-amz-date", "authorization"],
-              "ExposeHeader": ["ETag", "x-amz-checksum-sha256"],
+              "AllowedOrigins": ["$$STORAGE_BROWSER_ORIGIN"],
+              "AllowedMethods": ["GET", "PUT", "HEAD"],
+              "AllowedHeaders": ["Content-Type", "x-amz-checksum-sha256", "x-amz-content-sha256", "x-amz-date", "authorization"],
+              "ExposeHeaders": ["ETag", "x-amz-checksum-sha256"],
               "MaxAgeSeconds": 3000
             }
           ]
