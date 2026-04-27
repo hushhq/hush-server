@@ -140,12 +140,30 @@ func (p *Pool) DeleteServer(ctx context.Context, serverID string) error {
 
 // ListGuildBillingStats returns guild infrastructure metrics for the instance operator.
 // No guild name, channel list, or member details are exposed.
+//
+// member_count is computed LIVE from server_members rather than read from
+// the cached `servers.member_count` column. The cached counter is
+// incremented only on invite-driven joins (api/servers.go:568,
+// api/invites.go:254) and is NOT incremented at server creation for
+// the owner, NOR decremented on kick/ban/leave/admin-remove, so it
+// drifts arbitrarily — the symptom operators see is "instance admin
+// shows servers with 0 members when they actually have members".
+// Live counting via LEFT JOIN is authoritative; the cached counter
+// stays in the schema for backward compatibility but is no longer
+// trusted by this read path.
 func (p *Pool) ListGuildBillingStats(ctx context.Context) ([]models.GuildBillingStats, error) {
 	rows, err := p.Query(ctx, `
-		SELECT id, member_count, storage_bytes, message_count, active_members_30d,
-		       last_active_at, created_at, member_cap_override
-		FROM servers
-		ORDER BY created_at`)
+		SELECT s.id,
+		       COALESCE(c.cnt, 0) AS member_count,
+		       s.storage_bytes, s.message_count, s.active_members_30d,
+		       s.last_active_at, s.created_at, s.member_cap_override
+		FROM servers s
+		LEFT JOIN (
+		    SELECT server_id, COUNT(*) AS cnt
+		    FROM server_members
+		    GROUP BY server_id
+		) c ON c.server_id = s.id
+		ORDER BY s.created_at`)
 	if err != nil {
 		return nil, err
 	}
