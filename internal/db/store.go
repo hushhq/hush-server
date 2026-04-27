@@ -84,6 +84,11 @@ type Store interface {
 	InsertDeviceKey(ctx context.Context, userID, deviceID, label string, devicePublicKey, certificate []byte) error
 	// ListDeviceKeys returns all device keys belonging to a user.
 	ListDeviceKeys(ctx context.Context, userID string) ([]models.DeviceKey, error)
+	// IsDeviceActive returns true iff a device key row still exists for
+	// (userID, deviceID). Used to enforce revocation: any auth path
+	// that ran beyond key validation must call this before honouring
+	// the bearer.
+	IsDeviceActive(ctx context.Context, userID, deviceID string) (bool, error)
 	// RevokeDeviceKey deletes a specific device key. No-op if not found.
 	RevokeDeviceKey(ctx context.Context, userID, deviceID string) error
 	// RevokeAllDeviceKeys deletes every device key for a user (used on account wipe).

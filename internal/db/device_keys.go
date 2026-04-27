@@ -54,6 +54,26 @@ func (p *Pool) ListDeviceKeys(ctx context.Context, userID string) ([]models.Devi
 	return keys, rows.Err()
 }
 
+// IsDeviceActive reports whether a device key row still exists for the
+// (userID, deviceID) pair. Used by RequireAuth and the WS upgrade path
+// to enforce revocation: a device whose key has been deleted by
+// RevokeDeviceKey loses its ability to make authenticated calls on
+// the next request.
+func (p *Pool) IsDeviceActive(ctx context.Context, userID, deviceID string) (bool, error) {
+	var exists bool
+	err := p.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM device_keys
+			WHERE user_id = $1 AND device_id = $2
+		)`,
+		userID, deviceID,
+	).Scan(&exists)
+	if err != nil {
+		return false, err
+	}
+	return exists, nil
+}
+
 // RevokeDeviceKey deletes the device key for (userID, deviceID). No-op if not found.
 func (p *Pool) RevokeDeviceKey(ctx context.Context, userID, deviceID string) error {
 	_, err := p.Exec(ctx, `

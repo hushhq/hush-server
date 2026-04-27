@@ -324,6 +324,14 @@ func (h *deviceHandler) revokeDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Kick any in-flight WS connection for the just-revoked device so
+	// it cannot keep streaming messages until the next reconnect. The
+	// hub-side disconnect is best-effort: subsequent HTTP requests +
+	// WS reconnects are already gated by IsDeviceActive in middleware.
+	if h.hub != nil {
+		h.hub.DisconnectDevice(userID, deviceID)
+	}
+
 	if h.transparencySvc != nil && revokedPub != nil {
 		entry := &transparency.LogEntry{
 			OperationType: transparency.OpDeviceRevoke,

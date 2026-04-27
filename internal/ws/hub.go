@@ -258,6 +258,30 @@ func (h *Hub) Broadcast(channelID string, message []byte, excludeClientID string
 	}
 }
 
+// DisconnectDevice closes any active WebSocket connection bound to the
+// given (userID, deviceID) pair. Called by the device-revoke handler
+// so the revoked device's currently-open WS session is dropped right
+// after its device key is deleted, instead of waiting for its next
+// reconnect to fail authentication.
+func (h *Hub) DisconnectDevice(userID, deviceID string) {
+	if userID == "" || deviceID == "" {
+		return
+	}
+	h.mu.RLock()
+	targets := make([]*Client, 0)
+	for _, c := range h.clients {
+		if c.userID == userID && c.deviceID == deviceID {
+			targets = append(targets, c)
+		}
+	}
+	h.mu.RUnlock()
+	for _, c := range targets {
+		_ = c.conn.WriteMessage(websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "device revoked"))
+		_ = c.conn.Close()
+	}
+}
+
 // DisconnectUser closes all WebSocket connections for the given user ID.
 // Used by kick/ban handlers to force the user offline.
 func (h *Hub) DisconnectUser(userID string) {

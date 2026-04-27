@@ -62,6 +62,9 @@ func (m *messageStoreMock) ListDeviceKeys(context.Context, string) ([]models.Dev
 	return nil, nil
 }
 func (m *messageStoreMock) RevokeDeviceKey(context.Context, string, string) error      { return nil }
+func (m *messageStoreMock) IsDeviceActive(context.Context, string, string) (bool, error) {
+	return true, nil
+}
 func (m *messageStoreMock) RevokeAllDeviceKeys(context.Context, string) error          { return nil }
 func (m *messageStoreMock) UpdateDeviceLastSeen(context.Context, string, string) error { return nil }
 func (m *messageStoreMock) CreateSession(context.Context, string, string, string, time.Time) (*models.Session, error) {

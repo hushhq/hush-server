@@ -770,6 +770,7 @@ func (m *mockHub) BroadcastToAll(msg []byte)                { /* no-op */ }
 func (m *mockHub) BroadcastToServer(sid string, msg []byte) { m.broadcastCalls = append(m.broadcastCalls, mockBroadcast{sid, msg}) }
 func (m *mockHub) BroadcastToUser(_ string, _ []byte)       { /* no-op */ }
 func (m *mockHub) DisconnectUser(uid string)                 { m.disconnectCalls = append(m.disconnectCalls, uid) }
+func (m *mockHub) DisconnectDevice(_ string, _ string)       { /* no-op */ }
 
 // buildModerationRouterWithHub wires ModerationRoutes with a custom hub for testing broadcast/disconnect.
 // actorRole maps to a permission level integer via guildLevelFromRoleName.

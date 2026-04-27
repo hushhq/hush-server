@@ -73,6 +73,15 @@ func Handler(hub *Hub, jwtSecret string, store db.Store, corsOrigin string) http
 				http.Error(w, "session invalid or expired", http.StatusUnauthorized)
 				return
 			}
+			// Device-revoke enforcement: refuse the upgrade if this
+			// token's device has been revoked.
+			if deviceID != "" {
+				active, err := store.IsDeviceActive(r.Context(), userID, deviceID)
+				if err != nil || !active {
+					http.Error(w, "device revoked", http.StatusUnauthorized)
+					return
+				}
+			}
 		}
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -120,6 +129,13 @@ func authFromFirstMessage(conn *websocket.Conn, jwtSecret string, store db.Store
 		}
 		if sess == nil || sess.ID != sessionID || sess.UserID != uid {
 			return "", "", "", errors.New("session invalid or expired")
+		}
+		// Device-revoke enforcement.
+		if did != "" {
+			active, err := store.IsDeviceActive(r.Context(), uid, did)
+			if err != nil || !active {
+				return "", "", "", errors.New("device revoked")
+			}
 		}
 	}
 	return uid, did, "", nil

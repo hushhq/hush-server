@@ -87,6 +87,23 @@ func RequireAuth(jwtSecret string, store db.Store) func(http.Handler) http.Handl
 					writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "session mismatch"})
 					return
 				}
+				// Device-revoke enforcement. If this token's device key
+				// has been deleted (revokeDevice), the session row may
+				// still exist but the device must no longer authenticate.
+				// Skipped only when the JWT carries no deviceID (legacy
+				// sessions issued before device binding); those tokens
+				// stop being issued going forward.
+				if deviceID != "" {
+					active, err := store.IsDeviceActive(r.Context(), userID, deviceID)
+					if err != nil {
+						writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "device revocation check failed"})
+						return
+					}
+					if !active {
+						writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "device revoked"})
+						return
+					}
+				}
 			}
 			r = r.WithContext(withUserID(r.Context(), userID))
 			r = r.WithContext(withSessionID(r.Context(), sessionID))

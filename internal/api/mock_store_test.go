@@ -42,6 +42,7 @@ type mockStore struct {
 	insertDeviceKeyFn                    func(ctx context.Context, userID, deviceID, label string, devicePublicKey, certificate []byte) error
 	listDeviceKeysFn                     func(ctx context.Context, userID string) ([]models.DeviceKey, error)
 	revokeDeviceKeyFn                    func(ctx context.Context, userID, deviceID string) error
+	isDeviceActiveFn                     func(ctx context.Context, userID, deviceID string) (bool, error)
 	revokeAllDeviceKeysFn                func(ctx context.Context, userID string) error
 	updateDeviceLastSeenFn               func(ctx context.Context, userID, deviceID string) error
 	createSessionFn                      func(ctx context.Context, sessionID, userID, tokenHash string, expiresAt time.Time) (*models.Session, error)
@@ -312,6 +313,14 @@ func (m *mockStore) ListDeviceKeys(ctx context.Context, userID string) ([]models
 		return m.listDeviceKeysFn(ctx, userID)
 	}
 	return nil, nil
+}
+
+func (m *mockStore) IsDeviceActive(ctx context.Context, userID, deviceID string) (bool, error) {
+	if m.isDeviceActiveFn != nil {
+		return m.isDeviceActiveFn(ctx, userID, deviceID)
+	}
+	// Default: active. Tests that exercise revocation set the function.
+	return true, nil
 }
 
 func (m *mockStore) RevokeDeviceKey(ctx context.Context, userID, deviceID string) error {

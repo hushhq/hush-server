@@ -19,6 +19,7 @@ type GlobalBroadcaster interface {
 	BroadcastToServer(serverID string, message []byte)
 	BroadcastToUser(userID string, message []byte)
 	DisconnectUser(userID string)
+	DisconnectDevice(userID, deviceID string)
 }
 
 // InstanceRoutes returns the router for /api/instance.

@@ -31,6 +31,7 @@ func (h *userCapture) BroadcastToAll(_ []byte)                     {}
 func (h *userCapture) BroadcastToServer(_ string, _ []byte)        {}
 func (h *userCapture) BroadcastToUser(uid string, msg []byte)      { h.toUser = append(h.toUser, userBroadcast{uid, msg}) }
 func (h *userCapture) DisconnectUser(_ string)                     {}
+func (h *userCapture) DisconnectDevice(_ string, _ string)         {}
 
 func discoverRouter(store *mockStore, hub GlobalBroadcaster) http.Handler {
 	return GuildRoutes(store, hub, testJWTSecret)

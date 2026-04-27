@@ -280,6 +280,73 @@ func TestRevokeDevice_Unauthenticated_Returns401(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, rr.Code)
 }
 
+// ---------- Revoke enforcement ----------
+
+// TestAuthenticatedRequest_RevokedDevice_Returns401 verifies that once
+// IsDeviceActive returns false for the JWT's deviceID, any authenticated
+// HTTP request fails with 401, regardless of session validity. This is
+// the middleware-level enforcement that closes the revoke-doesn't-actually-
+// stop-anything bug.
+func TestAuthenticatedRequest_RevokedDevice_Returns401(t *testing.T) {
+	store := &mockStore{}
+	userID := uuid.New().String()
+	token := makeAuth(store, userID)
+	// Simulate revocation: device key no longer exists.
+	store.isDeviceActiveFn = func(_ context.Context, uid, did string) (bool, error) {
+		return false, nil
+	}
+	handler := newDeviceTestRouter(store)
+	// Any authenticated endpoint will do; pick GET /devices for simplicity.
+	req := httptest.NewRequest(http.MethodGet, "/devices", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusUnauthorized, rr.Code, rr.Body.String())
+}
+
+// TestRevokeDevice_DisconnectsActiveWebSocket verifies the revoke handler
+// calls hub.DisconnectDevice for the just-revoked (userID, deviceID).
+func TestRevokeDevice_DisconnectsActiveWebSocket(t *testing.T) {
+	store := &mockStore{}
+	userID := uuid.New().String()
+	token := makeAuth(store, userID)
+	store.revokeDeviceKeyFn = func(_ context.Context, _ string, _ string) error { return nil }
+	store.listDeviceKeysFn = func(_ context.Context, _ string) ([]models.DeviceKey, error) {
+		return []models.DeviceKey{{
+			DeviceID:        "victim-device",
+			DevicePublicKey: []byte("pub"),
+		}}, nil
+	}
+
+	hub := &deviceRevokeHub{}
+	handler := AuthRoutes(store, testJWTSecret, testJWTExpiry, nil, hub)
+
+	req := httptest.NewRequest(http.MethodDelete, "/devices/victim-device", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusNoContent, rr.Code)
+	require.Equal(t, []deviceRevokeKick{{userID, "victim-device"}}, hub.kicks,
+		"revokeDevice must invoke hub.DisconnectDevice for the revoked device")
+}
+
+type deviceRevokeKick struct {
+	userID, deviceID string
+}
+
+type deviceRevokeHub struct {
+	kicks []deviceRevokeKick
+}
+
+func (h *deviceRevokeHub) BroadcastToAll(_ []byte)                              {}
+func (h *deviceRevokeHub) BroadcastToServer(_ string, _ []byte)                 {}
+func (h *deviceRevokeHub) BroadcastToUser(_ string, _ []byte)                   {}
+func (h *deviceRevokeHub) DisconnectUser(_ string)                              {}
+func (h *deviceRevokeHub) DisconnectDevice(uid string, did string) {
+	h.kicks = append(h.kicks, deviceRevokeKick{uid, did})
+}
+
 // ---------- TestRevokeAllDevices ----------
 
 func TestRevokeAllDevices_Valid_Returns204(t *testing.T) {
