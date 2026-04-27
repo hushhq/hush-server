@@ -134,6 +134,42 @@ func (p *Pool) CountActiveLinkArchivesForUser(ctx context.Context, userID string
 	return n, nil
 }
 
+// ListSupersedableLinkArchivesForUser returns IDs of the user's active
+// archives whose last sliding-expiry refresh predates lastTouchBefore.
+//
+// The sliding-expiry contract is: every authenticated touch sets
+// expires_at = LEAST(now() + linkArchiveDefaultExpiry, hard_deadline_at).
+// So an archive that has not been touched since time T has expires_at <=
+// T + linkArchiveDefaultExpiry. The caller computes lastTouchBefore as
+// (now + linkArchiveDefaultExpiry - graceWindow); rows matching the
+// query have not seen a touch within the grace window.
+//
+// Used by /api/auth/link-archive-init to auto-abort an abandoned prior
+// archive (e.g. NEW-device tab killed before the import-failure DELETE
+// fired) so a fresh link attempt is not blocked by the per-user
+// concurrent-archive quota until the 60-min sliding-expiry purge tick.
+func (p *Pool) ListSupersedableLinkArchivesForUser(ctx context.Context, userID string, lastTouchBefore time.Time) ([]string, error) {
+	rows, err := p.Query(ctx, `
+		SELECT id FROM link_archives
+		WHERE user_id = $1 AND state = ANY($2) AND expires_at < $3
+		ORDER BY created_at ASC`,
+		userID, LinkArchiveActiveStates, lastTouchBefore,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 // SumActiveLinkArchiveBytes returns the sum of total_bytes across every
 // non-terminal archive on the instance. Used by the per-instance
 // staging-bytes ceiling check.

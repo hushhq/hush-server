@@ -55,6 +55,7 @@ type Store interface {
 	// never touch persistent storage.
 	InsertLinkArchive(ctx context.Context, in LinkArchiveInsert) (*LinkArchive, error)
 	CountActiveLinkArchivesForUser(ctx context.Context, userID string) (int, error)
+	ListSupersedableLinkArchivesForUser(ctx context.Context, userID string, lastTouchBefore time.Time) ([]string, error)
 	SumActiveLinkArchiveBytes(ctx context.Context) (int64, error)
 	TransitionLinkArchiveState(ctx context.Context, archiveID, nextState string, allowedFrom []string) error
 	GetLinkArchiveByID(ctx context.Context, archiveID string) (*LinkArchive, error)

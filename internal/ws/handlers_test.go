@@ -442,6 +442,9 @@ func (m *messageStoreMock) InsertLinkArchive(context.Context, db.LinkArchiveInse
 func (m *messageStoreMock) CountActiveLinkArchivesForUser(context.Context, string) (int, error) {
 	return 0, nil
 }
+func (m *messageStoreMock) ListSupersedableLinkArchivesForUser(context.Context, string, time.Time) ([]string, error) {
+	return nil, nil
+}
 func (m *messageStoreMock) SumActiveLinkArchiveBytes(context.Context) (int64, error) { return 0, nil }
 func (m *messageStoreMock) TransitionLinkArchiveState(context.Context, string, string, []string) error {
 	return nil

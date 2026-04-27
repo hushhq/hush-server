@@ -79,6 +79,15 @@ func newFakeLinkArchiveStore() *fakeLinkArchiveStore {
 		}
 		return n, nil
 	}
+	s.mu.listSupersedableLinkArchivesForUserFn = func(_ context.Context, userID string, lastTouchBefore time.Time) ([]string, error) {
+		out := make([]string, 0)
+		for _, a := range s.archives {
+			if a.UserID == userID && isActiveState(a.State) && a.ExpiresAt.Before(lastTouchBefore) {
+				out = append(out, a.ID)
+			}
+		}
+		return out, nil
+	}
 	s.mu.sumActiveLinkArchiveBytesFn = func(_ context.Context) (int64, error) {
 		var total int64
 		for _, a := range s.archives {
@@ -551,6 +560,80 @@ func TestLinkArchive_Init_EnforcesPerUserQuota(t *testing.T) {
 	// Second archive exceeds default quota of 1.
 	rr = postJSONWithAuth(handler, "/link-archive-init", token, body)
 	require.Equal(t, http.StatusConflict, rr.Code, rr.Body.String())
+}
+
+func TestLinkArchive_Init_AutoSupersedesAbandonedPriorArchive(t *testing.T) {
+	// Grace = 60s. Default sliding TTL = 60min. The "abandoned" prior
+	// archive has expires_at far in the past (simulating a NEW-device tab
+	// killed before the import-failure DELETE could fire). The next
+	// init for the same user must transparently tear it down and
+	// allocate the new archive.
+	t.Setenv("LINK_ARCHIVE_SUPERSEDE_GRACE_SECONDS", "60")
+
+	store := newFakeLinkArchiveStore()
+	userID := uuid.NewString()
+	token := makeAuth(store.mu, userID)
+	handler := AuthRoutes(store.mu, testJWTSecret, testJWTExpiry, nil)
+
+	body := map[string]any{
+		"totalChunks":   1,
+		"totalBytes":    1,
+		"chunkSize":     linkArchiveChunkSize,
+		"manifestHash":  b64(make([]byte, 32)),
+		"archiveSha256": b64(make([]byte, 32)),
+	}
+
+	first := postJSONWithAuth(handler, "/link-archive-init", token, body)
+	require.Equal(t, http.StatusOK, first.Code, first.Body.String())
+	var firstResp struct{ ArchiveID string }
+	require.NoError(t, json.Unmarshal(first.Body.Bytes(), &firstResp))
+
+	// Pretend the NEW-device tab died: reach into the fake store and
+	// pull the prior archive's expires_at far enough back that
+	// (now + sliding_ttl - grace) > expires_at.
+	prior, ok := store.archives[firstResp.ArchiveID]
+	require.True(t, ok)
+	prior.ExpiresAt = time.Now().UTC().Add(-time.Hour)
+
+	second := postJSONWithAuth(handler, "/link-archive-init", token, body)
+	require.Equal(t, http.StatusOK, second.Code, second.Body.String())
+	var secondResp struct{ ArchiveID string }
+	require.NoError(t, json.Unmarshal(second.Body.Bytes(), &secondResp))
+	require.NotEqual(t, firstResp.ArchiveID, secondResp.ArchiveID)
+
+	// Prior abandoned archive must be gone.
+	_, stillThere := store.archives[firstResp.ArchiveID]
+	require.False(t, stillThere, "abandoned prior archive should have been superseded")
+
+	// Quota slot is now occupied by the second archive only.
+	_, ok = store.archives[secondResp.ArchiveID]
+	require.True(t, ok)
+}
+
+func TestLinkArchive_Init_DoesNotSupersedeRecentlyTouchedPriorArchive(t *testing.T) {
+	// A genuinely-active concurrent session whose expires_at is fresh
+	// (because some other request just refreshed it) must NOT be
+	// superseded — quota check fires and the second init returns 409.
+	t.Setenv("LINK_ARCHIVE_SUPERSEDE_GRACE_SECONDS", "60")
+
+	store := newFakeLinkArchiveStore()
+	userID := uuid.NewString()
+	token := makeAuth(store.mu, userID)
+	handler := AuthRoutes(store.mu, testJWTSecret, testJWTExpiry, nil)
+
+	body := map[string]any{
+		"totalChunks":   1,
+		"totalBytes":    1,
+		"chunkSize":     linkArchiveChunkSize,
+		"manifestHash":  b64(make([]byte, 32)),
+		"archiveSha256": b64(make([]byte, 32)),
+	}
+
+	first := postJSONWithAuth(handler, "/link-archive-init", token, body)
+	require.Equal(t, http.StatusOK, first.Code, first.Body.String())
+
+	second := postJSONWithAuth(handler, "/link-archive-init", token, body)
+	require.Equal(t, http.StatusConflict, second.Code, second.Body.String())
 }
 
 func TestLinkArchive_Init_EnforcesStagingBytesCap(t *testing.T) {

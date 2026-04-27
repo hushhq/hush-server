@@ -52,6 +52,15 @@ const (
 	// Presigned URL TTL: long enough for a slow connection to finish a
 	// chunk PUT/GET; short enough that a stolen URL has minimal value.
 	linkArchivePresignTTL         = 15 * time.Minute
+	// Auto-supersede grace window: at /link-archive-init, prior archives
+	// owned by the same user that have not seen a sliding-expiry refresh
+	// touch within this window are treated as abandoned and torn down
+	// before the per-user concurrent-archive quota is checked. Sized to
+	// outlast the slowest realistic single-chunk download (4 MiB at
+	// ~32 kbps ≈ 17 min) plus margin, so a genuinely-active session is
+	// never preempted. Operator override:
+	// LINK_ARCHIVE_SUPERSEDE_GRACE_SECONDS env var.
+	linkArchiveDefaultSupersedeGrace = 30 * time.Minute
 )
 
 // archiveQuotaForUser returns the maximum number of concurrent active
@@ -64,6 +73,19 @@ func archiveQuotaForUser() int {
 		}
 	}
 	return linkArchiveDefaultUserQuota
+}
+
+// archiveSupersedeGrace returns the abandonment grace window after which
+// a prior active archive owned by the same user is auto-aborted at the
+// start of /link-archive-init. Operator override:
+// LINK_ARCHIVE_SUPERSEDE_GRACE_SECONDS env var.
+func archiveSupersedeGrace() time.Duration {
+	if v := os.Getenv("LINK_ARCHIVE_SUPERSEDE_GRACE_SECONDS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return time.Duration(n) * time.Second
+		}
+	}
+	return linkArchiveDefaultSupersedeGrace
 }
 
 // instanceStagingBytesCap returns the maximum total_bytes summed across
@@ -151,6 +173,14 @@ func (h *deviceHandler) linkArchiveInit(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "archiveSha256 must be base64 sha256"})
 		return
 	}
+
+	// Auto-supersede prior abandoned archives (server-side safety net for
+	// the case where the NEW-device tab dies before the client-side
+	// import-failure cleanup DELETE has a chance to run). Only archives
+	// whose last sliding-expiry refresh predates the grace window are
+	// torn down — a genuinely-active concurrent session retains its
+	// quota slot and the new init returns 409 below.
+	h.supersedeAbandonedArchives(r.Context(), userID)
 
 	// Per-user concurrent quota.
 	activeCount, err := h.store.CountActiveLinkArchivesForUser(r.Context(), userID)
@@ -935,21 +965,54 @@ func (h *deviceHandler) runPurgerTick(parent context.Context) {
 // cleanupAndDeleteArchive runs the same backend-then-DB cleanup the
 // purger uses, but on demand for an explicit DELETE call.
 func (h *deviceHandler) cleanupAndDeleteArchive(w http.ResponseWriter, r *http.Request, archiveID string) {
-	chunks, err := h.store.ListLinkArchiveChunkRows(r.Context(), archiveID)
-	if err == nil {
-		for _, c := range chunks {
-			if delErr := h.backend.Delete(r.Context(), c.StorageKey); delErr != nil {
-				slog.Warn("link-archive: backend delete on user-initiated DELETE",
-					"err", delErr, "archive_id", archiveID, "idx", c.Idx)
-			}
-		}
-	}
-	if err := h.store.DeleteLinkArchive(r.Context(), archiveID); err != nil {
+	if err := h.purgeArchive(r.Context(), archiveID, "user-initiated DELETE"); err != nil {
 		slog.Error("link-archive: delete", "err", err, "archive_id", archiveID)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not delete archive"})
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// purgeArchive deletes the archive's storage-backend objects, then the DB
+// row. Returns the DB delete error so the caller can surface a non-2xx
+// HTTP response when the explicit DELETE path runs; backend object delete
+// failures are logged but do not abort — the supervised purger will
+// retry orphans on its next tick.
+//
+// reason is included in the warning logs so operators can distinguish
+// the supersede path from the explicit user-DELETE path.
+func (h *deviceHandler) purgeArchive(ctx context.Context, archiveID, reason string) error {
+	chunks, err := h.store.ListLinkArchiveChunkRows(ctx, archiveID)
+	if err == nil {
+		for _, c := range chunks {
+			if delErr := h.backend.Delete(ctx, c.StorageKey); delErr != nil {
+				slog.Warn("link-archive: backend delete",
+					"err", delErr, "archive_id", archiveID, "idx", c.Idx, "reason", reason)
+			}
+		}
+	}
+	return h.store.DeleteLinkArchive(ctx, archiveID)
+}
+
+// supersedeAbandonedArchives walks the user's prior active archives and
+// tears down any that have not seen a sliding-expiry refresh within the
+// configured grace window. Failures are logged; the caller continues
+// because an honest quota check below will still gate the new
+// allocation if supersede did not free a slot.
+func (h *deviceHandler) supersedeAbandonedArchives(ctx context.Context, userID string) {
+	threshold := time.Now().UTC().Add(linkArchiveDefaultExpiry - archiveSupersedeGrace())
+	staleIDs, err := h.store.ListSupersedableLinkArchivesForUser(ctx, userID, threshold)
+	if err != nil {
+		slog.Warn("link-archive-init: list supersedable", "err", err, "user_id", userID)
+		return
+	}
+	for _, id := range staleIDs {
+		slog.Info("link-archive-init: superseding abandoned prior archive",
+			"user_id", userID, "archive_id", id)
+		if err := h.purgeArchive(ctx, id, "auto-supersede"); err != nil {
+			slog.Warn("link-archive-init: purge supersede", "err", err, "archive_id", id)
+		}
+	}
 }
 
 // newBearerToken generates a 32-byte random URL-safe base64 token and returns

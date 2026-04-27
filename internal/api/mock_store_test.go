@@ -211,6 +211,7 @@ type mockStore struct {
 	// Link archive methods (chunked device-link transfer).
 	insertLinkArchiveFn                 func(ctx context.Context, in db.LinkArchiveInsert) (*db.LinkArchive, error)
 	countActiveLinkArchivesForUserFn    func(ctx context.Context, userID string) (int, error)
+	listSupersedableLinkArchivesForUserFn func(ctx context.Context, userID string, lastTouchBefore time.Time) ([]string, error)
 	sumActiveLinkArchiveBytesFn         func(ctx context.Context) (int64, error)
 	transitionLinkArchiveStateFn        func(ctx context.Context, archiveID, nextState string, allowedFrom []string) error
 	getLinkArchiveByIDFn                func(ctx context.Context, archiveID string) (*db.LinkArchive, error)
@@ -1368,6 +1369,13 @@ func (m *mockStore) CountActiveLinkArchivesForUser(ctx context.Context, userID s
 		return m.countActiveLinkArchivesForUserFn(ctx, userID)
 	}
 	return 0, nil
+}
+
+func (m *mockStore) ListSupersedableLinkArchivesForUser(ctx context.Context, userID string, lastTouchBefore time.Time) ([]string, error) {
+	if m.listSupersedableLinkArchivesForUserFn != nil {
+		return m.listSupersedableLinkArchivesForUserFn(ctx, userID, lastTouchBefore)
+	}
+	return nil, nil
 }
 
 func (m *mockStore) SumActiveLinkArchiveBytes(ctx context.Context) (int64, error) {
