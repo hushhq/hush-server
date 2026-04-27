@@ -282,9 +282,12 @@ func main() {
 			sub.Use(api.IPRateLimiter(rate.Limit(120.0/60.0), 60))
 			sub.Mount("/", api.AuthRoutes(pool, cfg.JWTSecret, cfg.JWTExpiry, transparencySvc, wsHub))
 		})
-		// MLS key management: per-user limit - 10 requests per minute.
+		// MLS key management: per-user limit. The client legitimately polls
+		// commits/count endpoints across multiple active groups during steady
+		// state and reconnect recovery, so 10/min self-DOSes normal usage.
+		// Keep a limiter here, but move it well above expected app chatter.
 		r.Route("/api/mls", func(sub chi.Router) {
-			sub.Use(api.UserRateLimiter(rate.Limit(10.0/60.0), 10))
+			sub.Use(api.UserRateLimiter(rate.Limit(300.0/60.0), 120))
 			sub.Mount("/", api.MLSRoutes(pool, wsHub, cfg.JWTSecret, transparencySvc))
 		})
 		r.Mount("/api/instance", api.InstanceRoutes(pool, wsHub, cfg.JWTSecret, handshakeCache))
