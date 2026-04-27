@@ -70,12 +70,6 @@ services:
       - MINIO_SERVER_URL=${MINIO_SERVER_URL:-}
     volumes:
       - minio_data:/data
-    healthcheck:
-      test: ["CMD-SHELL", "mc ready local || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
     restart: unless-stopped
     networks:
       - hush-network
@@ -90,7 +84,7 @@ services:
     profiles: ["s3-storage"]
     depends_on:
       minio:
-        condition: service_healthy
+        condition: service_started
     entrypoint: /bin/sh
     environment:
       - MINIO_ROOT_USER=${MINIO_ROOT_USER}
@@ -101,7 +95,9 @@ services:
       - -c
       - |
         set -eu
-        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+        until mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null 2>&1; do
+          sleep 2
+        done
         if ! mc ls "local/$$STORAGE_S3_BUCKET" >/dev/null 2>&1; then
           mc mb "local/$$STORAGE_S3_BUCKET"
         fi
