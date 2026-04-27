@@ -241,8 +241,13 @@ func main() {
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
 		AllowCredentials: false,
 	}))
-	// General per-IP rate limit: 100 requests per minute with a burst of 100. SEC-04.
-	r.Use(api.IPRateLimiter(rate.Limit(100.0/60.0), 100))
+	// General per-IP rate limit: coarse anti-abuse only. Real users can legitimately
+	// burst through many lightweight reads (handshake, instance, members, channels,
+	// MLS commit polling, transparency checks, reconnect churn), especially behind a
+	// desktop/web session that restores multiple active groups at once. Keep the
+	// global limiter comfortably above normal app chatter and rely on narrower
+	// endpoint-specific limiters for more sensitive surfaces.
+	r.Use(api.IPRateLimiter(rate.Limit(600.0/60.0), 300))
 
 	healthHandler := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -269,11 +274,12 @@ func main() {
 		transparencySvc.SetBroadcaster(wsHub)
 	}
 	if pool != nil && cfg.JWTSecret != "" {
-		// Auth endpoints: per-IP limit - 60 requests per minute, burst 30. SEC-01.
-		// Generous to accommodate React StrictMode (double-fires effects),
-		// multi-instance boot (challenge+verify per instance), and /me polling.
+		// Auth endpoints: per-IP limit - 120 requests per minute, burst 60. SEC-01.
+		// This remains tighter than the global limiter while allowing legitimate
+		// challenge+verify churn during reconnects, multi-instance boot, and recovery
+		// from transient client-side auth races.
 		r.Route("/api/auth", func(sub chi.Router) {
-			sub.Use(api.IPRateLimiter(rate.Limit(60.0/60.0), 30))
+			sub.Use(api.IPRateLimiter(rate.Limit(120.0/60.0), 60))
 			sub.Mount("/", api.AuthRoutes(pool, cfg.JWTSecret, cfg.JWTExpiry, transparencySvc, wsHub))
 		})
 		// MLS key management: per-user limit - 10 requests per minute.
