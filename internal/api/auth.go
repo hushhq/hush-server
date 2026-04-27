@@ -130,15 +130,27 @@ type authHandler struct {
 // accounts, created before device-key tracking existed, compatible with flows
 // such as multi-device linking that need the approving device to have a stored key.
 //
-// The operation is intentionally best-effort: authentication must not fail just
-// because auxiliary device metadata could not be upserted.
+// ans23 / F5: this path uses a missing-only insert. A row that already
+// exists for (userID, deviceID) is left untouched, so a root-key holder
+// cannot pollute the device-keys table by replaying /verify with arbitrary
+// deviceIDs to overwrite already-certified rows. The operation is still
+// best-effort with respect to DB hiccups: authentication must not fail
+// just because auxiliary device metadata could not be upserted.
 func (h *authHandler) ensureVerifiedDeviceRegistered(ctx context.Context, userID, deviceID string, publicKey []byte) {
 	if strings.TrimSpace(deviceID) == "" {
 		return
 	}
 
-	if err := h.store.InsertDeviceKey(ctx, userID, deviceID, "", publicKey, nil); err != nil {
+	inserted, err := h.store.BackfillRootDeviceKey(ctx, userID, deviceID, publicKey)
+	if err != nil {
 		slog.Warn("backfill device key on verify", "user_id", userID, "device_id", deviceID, "err", err)
+		return
+	}
+	if !inserted {
+		// Row already existed — leave it. Do NOT call UpsertDevice on
+		// an existing (userID, deviceID): the device row is owned by
+		// the certified-device path; backfill must not rewrite its
+		// label or pretend to refresh ownership.
 		return
 	}
 	if err := h.store.UpsertDevice(ctx, userID, deviceID, ""); err != nil {

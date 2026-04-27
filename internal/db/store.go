@@ -82,6 +82,13 @@ type Store interface {
 	// InsertDeviceKey stores a certified device public key for a user.
 	// certificate may be nil for the first (root) device.
 	InsertDeviceKey(ctx context.Context, userID, deviceID, label string, devicePublicKey, certificate []byte) error
+	// BackfillRootDeviceKey inserts a row only when (userID, deviceID) is
+	// missing. Returns true when a row was actually inserted, false when
+	// the (userID, deviceID) already existed (and was left untouched).
+	// Used by the post-/verify backfill path so a root-key holder cannot
+	// rewrite an already-certified device's public key by replaying
+	// /verify with a chosen deviceID.
+	BackfillRootDeviceKey(ctx context.Context, userID, deviceID string, devicePublicKey []byte) (bool, error)
 	// ListDeviceKeys returns all device keys belonging to a user.
 	ListDeviceKeys(ctx context.Context, userID string) ([]models.DeviceKey, error)
 	// IsDeviceActive returns true iff a device key row still exists for
@@ -151,8 +158,15 @@ type Store interface {
 	GetChannelByID(ctx context.Context, channelID string) (*models.Channel, error)
 	// GetChannelByTypeAndPosition replaces GetChannelByNameAndType (no name column).
 	GetChannelByTypeAndPosition(ctx context.Context, serverID, channelType string, position int) (*models.Channel, error)
-	DeleteChannel(ctx context.Context, channelID string) error
-	MoveChannel(ctx context.Context, channelID string, parentID *string, position int) error
+	// DeleteChannel deletes the channel iff it belongs to serverID. The
+	// server filter is enforced in SQL as defence in depth — handler-level
+	// guards already check ch.ServerID == serverID. Returns pgx.ErrNoRows
+	// when no row matched, so callers can map cross-guild attempts to 404.
+	DeleteChannel(ctx context.Context, channelID, serverID string) error
+	// MoveChannel updates parent/position iff the channel and any non-nil
+	// parent both belong to serverID. Returns pgx.ErrNoRows on cross-guild
+	// mismatch.
+	MoveChannel(ctx context.Context, channelID, serverID string, parentID *string, position int) error
 
 	// Server templates
 	ListServerTemplates(ctx context.Context) ([]models.ServerTemplate, error)
@@ -219,7 +233,10 @@ type Store interface {
 
 	// Moderation - messages
 	GetMessageByID(ctx context.Context, messageID string) (*models.Message, error)
-	DeleteMessage(ctx context.Context, messageID string) error
+	// DeleteMessage deletes a message iff it lives in a channel belonging
+	// to serverID. Returns pgx.ErrNoRows on cross-guild mismatch so callers
+	// can map to 404.
+	DeleteMessage(ctx context.Context, messageID, serverID string) error
 
 	// Moderation - sessions
 	DeleteSessionsByUserID(ctx context.Context, userID string) error

@@ -13,6 +13,7 @@ import (
 	"github.com/hushhq/hush-server/internal/livekit"
 	"github.com/hushhq/hush-server/internal/models"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -20,13 +21,32 @@ import (
 
 // buildModerationRouter returns a moderation routes handler wired with guild context.
 // actorRole maps to a permission level integer via guildLevelFromRoleName.
+// Mounts the moderation router under /servers/{serverId}/moderation so handlers
+// see the serverId chi URL param. Tests that need to target a specific guild
+// use buildModerationRouterFor.
 func buildModerationRouter(store *mockStore, actorID, actorRole string) http.Handler {
-	inner := ModerationRoutes(store, nil, livekit.NoopRoomService{})
+	return buildModerationRouterFor(store, actorID, actorRole, testServerID)
+}
+
+func buildModerationRouterFor(store *mockStore, actorID, actorRole, urlServerID string) http.Handler {
 	level := guildLevelFromRoleName(actorRole)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := withUserID(r.Context(), actorID)
-		ctx = withGuildLevel(ctx, level)
-		inner.ServeHTTP(w, r.WithContext(ctx))
+	inner := ModerationRoutes(store, nil, livekit.NoopRoomService{})
+	root := chi.NewRouter()
+	root.Route("/servers/{serverId}", func(r chi.Router) {
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				ctx := withUserID(req.Context(), actorID)
+				ctx = withGuildLevel(ctx, level)
+				next.ServeHTTP(w, req.WithContext(ctx))
+			})
+		})
+		r.Mount("/moderation", inner)
+	})
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		req2 := req.Clone(req.Context())
+		req2.URL.Path = "/servers/" + urlServerID + "/moderation" + req.URL.Path
+		req2.RequestURI = req2.URL.RequestURI()
+		root.ServeHTTP(w, req2)
 	})
 }
 
@@ -469,6 +489,7 @@ func TestListMutes_EmptyWhenNoMutes(t *testing.T) {
 func TestDeleteMessage_OwnMessage(t *testing.T) {
 	actorID := uuid.New().String()
 	msgID := uuid.New().String()
+	srv := testServerID
 
 	var deleted bool
 	store := &mockStore{
@@ -479,7 +500,11 @@ func TestDeleteMessage_OwnMessage(t *testing.T) {
 				ChannelID: "ch-1",
 			}, nil
 		},
-		deleteMessageFn: func(_ context.Context, _ string) error {
+		getChannelByIDFn: func(_ context.Context, _ string) (*models.Channel, error) {
+			return &models.Channel{ID: "ch-1", ServerID: &srv, Type: "text"}, nil
+		},
+		deleteMessageFn: func(_ context.Context, _, srvID string) error {
+			assert.Equal(t, srv, srvID)
 			deleted = true
 			return nil
 		},
@@ -495,6 +520,7 @@ func TestDeleteMessage_ModDeletesOthers(t *testing.T) {
 	actorID := uuid.New().String()
 	ownerID := uuid.New().String()
 	msgID := uuid.New().String()
+	srv := testServerID
 
 	var deleted bool
 	store := &mockStore{
@@ -505,7 +531,11 @@ func TestDeleteMessage_ModDeletesOthers(t *testing.T) {
 				ChannelID: "ch-1",
 			}, nil
 		},
-		deleteMessageFn: func(_ context.Context, _ string) error {
+		getChannelByIDFn: func(_ context.Context, _ string) (*models.Channel, error) {
+			return &models.Channel{ID: "ch-1", ServerID: &srv, Type: "text"}, nil
+		},
+		deleteMessageFn: func(_ context.Context, _, srvID string) error {
+			assert.Equal(t, srv, srvID)
 			deleted = true
 			return nil
 		},
@@ -521,6 +551,7 @@ func TestDeleteMessage_MemberCannotDeleteOthers(t *testing.T) {
 	actorID := uuid.New().String()
 	ownerID := uuid.New().String()
 	msgID := uuid.New().String()
+	srv := testServerID
 
 	store := &mockStore{
 		getMessageByIDFn: func(_ context.Context, messageID string) (*models.Message, error) {
@@ -529,6 +560,9 @@ func TestDeleteMessage_MemberCannotDeleteOthers(t *testing.T) {
 				SenderID:  &ownerID, // different user
 				ChannelID: "ch-1",
 			}, nil
+		},
+		getChannelByIDFn: func(_ context.Context, _ string) (*models.Channel, error) {
+			return &models.Channel{ID: "ch-1", ServerID: &srv, Type: "text"}, nil
 		},
 	}
 	router := buildModerationRouter(store, actorID, "member")

@@ -40,6 +40,7 @@ type mockStore struct {
 
 	// Device keys
 	insertDeviceKeyFn                    func(ctx context.Context, userID, deviceID, label string, devicePublicKey, certificate []byte) error
+	backfillRootDeviceKeyFn              func(ctx context.Context, userID, deviceID string, devicePublicKey []byte) (bool, error)
 	listDeviceKeysFn                     func(ctx context.Context, userID string) ([]models.DeviceKey, error)
 	revokeDeviceKeyFn                    func(ctx context.Context, userID, deviceID string) error
 	isDeviceActiveFn                     func(ctx context.Context, userID, deviceID string) (bool, error)
@@ -98,8 +99,8 @@ type mockStore struct {
 	listChannelsFn                func(ctx context.Context, serverID string) ([]models.Channel, error)
 	getChannelByIDFn              func(ctx context.Context, channelID string) (*models.Channel, error)
 	getChannelByTypeAndPositionFn func(ctx context.Context, serverID, channelType string, position int) (*models.Channel, error)
-	deleteChannelFn               func(ctx context.Context, channelID string) error
-	moveChannelFn                 func(ctx context.Context, channelID string, parentID *string, position int) error
+	deleteChannelFn               func(ctx context.Context, channelID, serverID string) error
+	moveChannelFn                 func(ctx context.Context, channelID, serverID string, parentID *string, position int) error
 
 	// Server templates
 	listServerTemplatesFn      func(ctx context.Context) ([]models.ServerTemplate, error)
@@ -148,7 +149,7 @@ type mockStore struct {
 
 	// Moderation - messages
 	getMessageByIDFn func(ctx context.Context, messageID string) (*models.Message, error)
-	deleteMessageFn  func(ctx context.Context, messageID string) error
+	deleteMessageFn  func(ctx context.Context, messageID, serverID string) error
 
 	// Moderation - sessions
 	deleteSessionsByUserIDFn func(ctx context.Context, userID string) error
@@ -308,6 +309,13 @@ func (m *mockStore) InsertDeviceKey(ctx context.Context, userID, deviceID, label
 		return m.insertDeviceKeyFn(ctx, userID, deviceID, label, devicePublicKey, certificate)
 	}
 	return nil
+}
+
+func (m *mockStore) BackfillRootDeviceKey(ctx context.Context, userID, deviceID string, devicePublicKey []byte) (bool, error) {
+	if m.backfillRootDeviceKeyFn != nil {
+		return m.backfillRootDeviceKeyFn(ctx, userID, deviceID, devicePublicKey)
+	}
+	return true, nil
 }
 
 func (m *mockStore) ListDeviceKeys(ctx context.Context, userID string) ([]models.DeviceKey, error) {
@@ -730,16 +738,16 @@ func (m *mockStore) DeleteServerTemplate(ctx context.Context, id string) error {
 	return nil
 }
 
-func (m *mockStore) DeleteChannel(ctx context.Context, channelID string) error {
+func (m *mockStore) DeleteChannel(ctx context.Context, channelID, serverID string) error {
 	if m.deleteChannelFn != nil {
-		return m.deleteChannelFn(ctx, channelID)
+		return m.deleteChannelFn(ctx, channelID, serverID)
 	}
 	return nil
 }
 
-func (m *mockStore) MoveChannel(ctx context.Context, channelID string, parentID *string, position int) error {
+func (m *mockStore) MoveChannel(ctx context.Context, channelID, serverID string, parentID *string, position int) error {
 	if m.moveChannelFn != nil {
-		return m.moveChannelFn(ctx, channelID, parentID, position)
+		return m.moveChannelFn(ctx, channelID, serverID, parentID, position)
 	}
 	return nil
 }
@@ -970,9 +978,9 @@ func (m *mockStore) GetMessageByID(ctx context.Context, messageID string) (*mode
 	return nil, nil
 }
 
-func (m *mockStore) DeleteMessage(ctx context.Context, messageID string) error {
+func (m *mockStore) DeleteMessage(ctx context.Context, messageID, serverID string) error {
 	if m.deleteMessageFn != nil {
-		return m.deleteMessageFn(ctx, messageID)
+		return m.deleteMessageFn(ctx, messageID, serverID)
 	}
 	return nil
 }

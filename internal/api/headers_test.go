@@ -21,18 +21,31 @@ func TestSecurityHeaders_CSPPresent(t *testing.T) {
 	rr := applySecurityHeaders(false, "wss://example.com")
 	csp := rr.Header().Get("Content-Security-Policy")
 	require.NotEmpty(t, csp, "Content-Security-Policy must be set")
-	assert.Contains(t, csp, "wss://example.com", "CSP connect-src must include the WS origin")
-	assert.Contains(t, csp, "connect-src 'self' https: http: wss: ws:", "CSP connect-src must allow cross-instance HTTP(S) and WS(S) requests")
+	assert.Contains(t, csp, "connect-src 'self' wss://example.com", "CSP connect-src must include the configured WS origin")
+	assert.NotContains(t, csp, "https: http:", "CSP connect-src must not blanket-allow http(s) origins")
+	assert.NotContains(t, csp, "wss: ws:", "CSP connect-src must not blanket-allow ws(s) schemes")
 	assert.Contains(t, csp, "default-src 'self'", "CSP must include default-src 'self'")
 	assert.Contains(t, csp, "font-src 'self' https://fonts.gstatic.com", "CSP must allow Google Fonts")
 	assert.Contains(t, csp, "https://fonts.googleapis.com", "CSP style-src must allow Google Fonts stylesheets")
 }
 
-func TestSecurityHeaders_CSPDeduplicatesWildcardWebSocketOrigin(t *testing.T) {
+func TestSecurityHeaders_CSPSelfOnlyWhenNoWSOrigin(t *testing.T) {
+	rr := applySecurityHeaders(false, "")
+	csp := rr.Header().Get("Content-Security-Policy")
+	require.NotEmpty(t, csp, "Content-Security-Policy must be set")
+	assert.Contains(t, csp, "connect-src 'self';",
+		"With no WS origin configured, connect-src must be 'self' only (ans23 / F6)")
+}
+
+func TestSecurityHeaders_CSPWildcardKeepsOpenShape(t *testing.T) {
+	// Operators that explicitly opt into a wildcard CORS origin still
+	// need the broad CSP so federated topologies remain workable.
 	rr := applySecurityHeaders(false, "wss:")
 	csp := rr.Header().Get("Content-Security-Policy")
 	require.NotEmpty(t, csp, "Content-Security-Policy must be set")
-	assert.NotContains(t, csp, "wss: wss:", "CSP connect-src must not duplicate the wildcard websocket origin")
+	assert.Contains(t, csp, "connect-src 'self' https: http: wss: ws:",
+		"wildcard CORS_ORIGIN must keep the broad connect-src shape")
+	assert.NotContains(t, csp, "wss: wss:", "must not duplicate the wildcard websocket origin")
 }
 
 func TestSecurityHeaders_NoSniff(t *testing.T) {
@@ -49,7 +62,8 @@ func TestSecurityHeaders_HSTSInProduction(t *testing.T) {
 	rr := applySecurityHeaders(true, "wss://example.com")
 	hsts := rr.Header().Get("Strict-Transport-Security")
 	require.NotEmpty(t, hsts, "Strict-Transport-Security must be set in production mode")
-	assert.Equal(t, "max-age=300", hsts)
+	// ans23 / F7: production-worthy HSTS, one year + includeSubDomains.
+	assert.Equal(t, "max-age=31536000; includeSubDomains", hsts)
 }
 
 func TestSecurityHeaders_NoHSTSInDev(t *testing.T) {

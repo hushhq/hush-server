@@ -58,6 +58,9 @@ func (m *messageStoreMock) PurgeExpiredNonces(context.Context) (int64, error) { 
 func (m *messageStoreMock) InsertDeviceKey(context.Context, string, string, string, []byte, []byte) error {
 	return nil
 }
+func (m *messageStoreMock) BackfillRootDeviceKey(context.Context, string, string, []byte) (bool, error) {
+	return true, nil
+}
 func (m *messageStoreMock) ListDeviceKeys(context.Context, string) ([]models.DeviceKey, error) {
 	return nil, nil
 }
@@ -197,8 +200,8 @@ func (m *messageStoreMock) GetChannelByID(context.Context, string) (*models.Chan
 func (m *messageStoreMock) GetChannelByTypeAndPosition(context.Context, string, string, int) (*models.Channel, error) {
 	return nil, nil
 }
-func (m *messageStoreMock) DeleteChannel(context.Context, string) error             { return nil }
-func (m *messageStoreMock) MoveChannel(context.Context, string, *string, int) error { return nil }
+func (m *messageStoreMock) DeleteChannel(context.Context, string, string) error             { return nil }
+func (m *messageStoreMock) MoveChannel(context.Context, string, string, *string, int) error { return nil }
 func (m *messageStoreMock) ListServerTemplates(context.Context) ([]models.ServerTemplate, error) {
 	return nil, nil
 }
@@ -293,7 +296,7 @@ func (m *messageStoreMock) ListAuditLog(_ context.Context, _ string, _, _ int, _
 func (m *messageStoreMock) GetMessageByID(context.Context, string) (*models.Message, error) {
 	return nil, nil
 }
-func (m *messageStoreMock) DeleteMessage(context.Context, string) error          { return nil }
+func (m *messageStoreMock) DeleteMessage(context.Context, string, string) error  { return nil }
 func (m *messageStoreMock) DeleteSessionsByUserID(context.Context, string) error { return nil }
 
 // Instance ban stubs.

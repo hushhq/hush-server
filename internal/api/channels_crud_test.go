@@ -9,6 +9,7 @@ import (
 
 	"github.com/hushhq/hush-server/internal/models"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -38,15 +39,36 @@ func channelsCrudTestHandler(store *mockStore, level int) http.Handler {
 
 // channelsCrudRouter builds a channel routes handler. The guild permission level
 // is resolved by calling getServerMemberLevelFn on each request, mirroring
-// RequireGuildMember behaviour.
+// RequireGuildMember behaviour. Requests are mounted under
+// /servers/{serverId}/channels so handlers see the serverId chi URL param.
 func channelsCrudRouter(store *mockStore) http.Handler {
+	return channelsCrudRouterFor(store, testServerID)
+}
+
+// channelsCrudRouterFor lets a test target a specific guild ID, used by the
+// cross-guild IDOR regression tests so the URL guild and the channel's actual
+// guild can deliberately differ.
+func channelsCrudRouterFor(store *mockStore, urlServerID string) http.Handler {
 	userID := "test-channel-user-id"
-	inner := ChannelRoutes(store, nil)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		level, _ := store.GetServerMemberLevel(r.Context(), testServerID, userID)
-		ctx := withUserID(r.Context(), userID)
-		ctx = withGuildLevel(ctx, level)
-		inner.ServeHTTP(w, r.WithContext(ctx))
+	r := chi.NewRouter()
+	r.Route("/servers/{serverId}", func(r chi.Router) {
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				level, _ := store.GetServerMemberLevel(req.Context(), urlServerID, userID)
+				ctx := withUserID(req.Context(), userID)
+				ctx = withGuildLevel(ctx, level)
+				next.ServeHTTP(w, req.WithContext(ctx))
+			})
+		})
+		r.Mount("/channels", ChannelRoutes(store, nil))
+	})
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		// Tests historically posted to "/<channelId>" relative to the channel router.
+		// Rewrite the path to mount under the server-scoped route.
+		req2 := req.Clone(req.Context())
+		req2.URL.Path = "/servers/" + urlServerID + "/channels" + req.URL.Path
+		req2.RequestURI = req2.URL.RequestURI()
+		r.ServeHTTP(w, req2)
 	})
 }
 
@@ -134,10 +156,16 @@ func TestListChannels_ReturnsSortedByPosition(t *testing.T) {
 
 func TestDeleteChannel_AsAdmin_Returns204(t *testing.T) {
 	channelID := uuid.New().String()
+	srv := testServerID
 	store := &mockStore{}
 	store.getServerMemberLevelFn = func(_ context.Context, _, _ string) (int, error) { return models.PermissionLevelAdmin, nil }
-	store.deleteChannelFn = func(_ context.Context, chID string) error {
+	store.getChannelByIDFn = func(_ context.Context, chID string) (*models.Channel, error) {
 		assert.Equal(t, channelID, chID)
+		return &models.Channel{ID: chID, ServerID: &srv, Type: "text"}, nil
+	}
+	store.deleteChannelFn = func(_ context.Context, chID, srvID string) error {
+		assert.Equal(t, channelID, chID)
+		assert.Equal(t, srv, srvID)
 		return nil
 	}
 	router := channelsCrudRouter(store)
@@ -191,16 +219,21 @@ func TestCreateChannel_CategoryWithParentID_Returns400(t *testing.T) {
 func TestMoveChannel_AdminMovesToCategory_Returns204(t *testing.T) {
 	channelID := uuid.New().String()
 	categoryID := uuid.New().String()
+	srv := testServerID
 	store := &mockStore{}
 	store.getServerMemberLevelFn = func(_ context.Context, _, _ string) (int, error) { return models.PermissionLevelAdmin, nil }
 	store.getChannelByIDFn = func(_ context.Context, chID string) (*models.Channel, error) {
 		if chID == categoryID {
-			return &models.Channel{ID: categoryID, Type: "category"}, nil
+			return &models.Channel{ID: categoryID, ServerID: &srv, Type: "category"}, nil
+		}
+		if chID == channelID {
+			return &models.Channel{ID: channelID, ServerID: &srv, Type: "text"}, nil
 		}
 		return nil, nil
 	}
-	store.moveChannelFn = func(_ context.Context, chID string, parentID *string, pos int) error {
+	store.moveChannelFn = func(_ context.Context, chID, srvID string, parentID *string, pos int) error {
 		assert.Equal(t, channelID, chID)
+		assert.Equal(t, srv, srvID)
 		require.NotNil(t, parentID)
 		assert.Equal(t, categoryID, *parentID)
 		assert.Equal(t, 2, pos)
@@ -213,10 +246,15 @@ func TestMoveChannel_AdminMovesToCategory_Returns204(t *testing.T) {
 
 func TestMoveChannel_AdminMovesToUncategorized_Returns204(t *testing.T) {
 	channelID := uuid.New().String()
+	srv := testServerID
 	store := &mockStore{}
 	store.getServerMemberLevelFn = func(_ context.Context, _, _ string) (int, error) { return models.PermissionLevelAdmin, nil }
-	store.moveChannelFn = func(_ context.Context, chID string, parentID *string, pos int) error {
+	store.getChannelByIDFn = func(_ context.Context, chID string) (*models.Channel, error) {
+		return &models.Channel{ID: chID, ServerID: &srv, Type: "text"}, nil
+	}
+	store.moveChannelFn = func(_ context.Context, chID, srvID string, parentID *string, pos int) error {
 		assert.Equal(t, channelID, chID)
+		assert.Equal(t, srv, srvID)
 		assert.Nil(t, parentID)
 		assert.Equal(t, 0, pos)
 		return nil
@@ -240,11 +278,15 @@ func TestMoveChannel_NotAdmin_Returns403(t *testing.T) {
 func TestMoveChannel_ParentNotCategory_Returns400(t *testing.T) {
 	channelID := uuid.New().String()
 	textChannelID := uuid.New().String()
+	srv := testServerID
 	store := &mockStore{}
 	store.getServerMemberLevelFn = func(_ context.Context, _, _ string) (int, error) { return models.PermissionLevelAdmin, nil }
 	store.getChannelByIDFn = func(_ context.Context, chID string) (*models.Channel, error) {
 		if chID == textChannelID {
-			return &models.Channel{ID: textChannelID, Type: "text"}, nil
+			return &models.Channel{ID: textChannelID, ServerID: &srv, Type: "text"}, nil
+		}
+		if chID == channelID {
+			return &models.Channel{ID: channelID, ServerID: &srv, Type: "text"}, nil
 		}
 		return nil, nil
 	}

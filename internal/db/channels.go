@@ -78,10 +78,21 @@ func (p *Pool) GetChannelByID(ctx context.Context, channelID string) (*models.Ch
 	return c, nil
 }
 
-// DeleteChannel deletes the channel by ID.
-func (p *Pool) DeleteChannel(ctx context.Context, channelID string) error {
-	_, err := p.Exec(ctx, `DELETE FROM channels WHERE id = $1`, channelID)
-	return err
+// DeleteChannel deletes the channel iff (channelID, serverID) matches.
+// Returns pgx.ErrNoRows when no row was deleted so handlers can map the
+// cross-guild case to 404 without distinguishing it from "not found".
+func (p *Pool) DeleteChannel(ctx context.Context, channelID, serverID string) error {
+	tag, err := p.Exec(ctx,
+		`DELETE FROM channels WHERE id = $1 AND server_id = $2`,
+		channelID, serverID,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
 }
 
 // MoveChannel updates a channel's parent and position, shifting sibling channels to
@@ -91,7 +102,7 @@ func (p *Pool) DeleteChannel(ctx context.Context, channelID string) error {
 //   - type='category'                   → among all categories
 //   - type!='category', parentID=nil    → among uncategorized non-category channels
 //   - type!='category', parentID=some   → among channels within that parent category
-func (p *Pool) MoveChannel(ctx context.Context, channelID string, newParentID *string, newPosition int) error {
+func (p *Pool) MoveChannel(ctx context.Context, channelID, serverID string, newParentID *string, newPosition int) error {
 	tx, err := p.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -101,11 +112,30 @@ func (p *Pool) MoveChannel(ctx context.Context, channelID string, newParentID *s
 	var oldParentID *string
 	var channelType string
 	var oldPosition int
+	// Bind the channel lookup to serverID so a caller that targets a
+	// foreign guild's channel sees pgx.ErrNoRows and the handler maps
+	// the result to 404. Defence in depth alongside the handler check.
 	if err := tx.QueryRow(ctx,
-		`SELECT parent_id, type, position FROM channels WHERE id = $1`,
-		channelID,
+		`SELECT parent_id, type, position FROM channels WHERE id = $1 AND server_id = $2`,
+		channelID, serverID,
 	).Scan(&oldParentID, &channelType, &oldPosition); err != nil {
-		return fmt.Errorf("get channel state: %w", err)
+		return err
+	}
+
+	// If a new parent is requested, it must also belong to serverID.
+	// We do not constrain the parent's type here — that gate lives in
+	// the handler — but we do refuse cross-guild reparenting.
+	if newParentID != nil {
+		var parentServerID string
+		if err := tx.QueryRow(ctx,
+			`SELECT server_id FROM channels WHERE id = $1`,
+			*newParentID,
+		).Scan(&parentServerID); err != nil {
+			return err
+		}
+		if parentServerID != serverID {
+			return pgx.ErrNoRows
+		}
 	}
 
 	isCategory := channelType == "category"

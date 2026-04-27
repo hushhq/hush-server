@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 	"github.com/hushhq/hush-server/internal/models"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 const (
@@ -430,6 +432,22 @@ func (h *moderationHandler) deleteMessage(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "message not found"})
 		return
 	}
+	// The moderation route is guild-scoped. Confirm the message lives in
+	// a channel belonging to serverID before any further checks. A
+	// foreign-guild message is reported as 404 — the actor's mod role in
+	// the URL guild does not extend to other guilds, even if they know
+	// the messageID. The data-layer DeleteMessage filter below also
+	// enforces this; the handler check avoids leaking sender identity.
+	channel, err := h.store.GetChannelByID(r.Context(), msg.ChannelID)
+	if err != nil {
+		slog.Error("deleteMessage: get channel", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to resolve message channel"})
+		return
+	}
+	if channel == nil || channel.ServerID == nil || *channel.ServerID != serverID {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "message not found"})
+		return
+	}
 	isSender := msg.SenderID != nil && *msg.SenderID == actorID
 	if !isSender {
 		actorLevel := guildLevelFromContext(r.Context())
@@ -438,7 +456,11 @@ func (h *moderationHandler) deleteMessage(w http.ResponseWriter, r *http.Request
 			return
 		}
 	}
-	if err := h.store.DeleteMessage(r.Context(), messageID); err != nil {
+	if err := h.store.DeleteMessage(r.Context(), messageID, serverID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "message not found"})
+			return
+		}
 		slog.Error("deleteMessage: delete message", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to delete message"})
 		return

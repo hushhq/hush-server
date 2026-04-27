@@ -6,6 +6,27 @@ import (
 	"github.com/hushhq/hush-server/internal/models"
 )
 
+// BackfillRootDeviceKey inserts a device key row only when no row exists
+// for (userID, deviceID). Used by the post-/verify backfill path so a
+// legitimate root-key holder cannot rewrite an already-certified device's
+// public key by re-presenting /verify with the same deviceID.
+//
+// Returns (true, nil) when a row was inserted. Returns (false, nil) when
+// a row already existed (and was left untouched). Returns (false, err)
+// only on hard DB failures.
+func (p *Pool) BackfillRootDeviceKey(ctx context.Context, userID, deviceID string, devicePublicKey []byte) (bool, error) {
+	tag, err := p.Exec(ctx, `
+		INSERT INTO device_keys (user_id, device_id, device_public_key, certificate, label)
+		VALUES ($1, $2, $3, NULL, NULL)
+		ON CONFLICT (user_id, device_id) DO NOTHING`,
+		userID, deviceID, devicePublicKey,
+	)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
 // InsertDeviceKey stores a certified device public key for a user.
 // certificate may be nil for the first (root) device registered at sign-up.
 // On conflict (user_id, device_id) the existing row is overwritten so that

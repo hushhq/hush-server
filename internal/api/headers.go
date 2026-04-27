@@ -6,6 +6,13 @@ import (
 	"strings"
 )
 
+// hstsMaxAgeSeconds is the Strict-Transport-Security max-age applied when
+// productionMode is true. One year is the lower bound for HSTS preload and
+// is the value the hosted Cloudflare edge already uses; bringing the
+// server's own header up to that line keeps the self-hoster posture
+// coherent with hosted (ans23 / F7).
+const hstsMaxAgeSeconds = 31536000
+
 // SecurityHeaders returns middleware that sets security-related HTTP response
 // headers on every response. productionMode enables HSTS. wsOrigin is the
 // WebSocket origin to allow in the Content-Security-Policy connect-src directive;
@@ -13,6 +20,7 @@ import (
 // If CORSOrigin is "*", pass "wss:" to allow all WebSocket origins.
 func SecurityHeaders(productionMode bool, wsOrigin string) func(http.Handler) http.Handler {
 	csp := buildCSP(wsOrigin)
+	hsts := fmt.Sprintf("max-age=%d; includeSubDomains", hstsMaxAgeSeconds)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			h := w.Header()
@@ -20,7 +28,7 @@ func SecurityHeaders(productionMode bool, wsOrigin string) func(http.Handler) ht
 			h.Set("X-Content-Type-Options", "nosniff")
 			h.Set("X-Frame-Options", "DENY")
 			if productionMode {
-				h.Set("Strict-Transport-Security", "max-age=300")
+				h.Set("Strict-Transport-Security", hsts)
 			}
 			next.ServeHTTP(w, r)
 		})
@@ -28,12 +36,29 @@ func SecurityHeaders(productionMode bool, wsOrigin string) func(http.Handler) ht
 }
 
 // buildCSP constructs the Content-Security-Policy header value.
-// wsOrigin is included verbatim in the connect-src directive.
+//
+// ans23 / F6: the server-side default is now narrow. `connect-src` is
+// `'self'` plus the same-origin WebSocket scheme; the prior `https: http:
+// wss: ws:` blanket allowed any origin and made same-origin XSS exfiltrate
+// trivially. The hosted Cloudflare edge replaces this header with its own
+// nonce-based CSP, so the change matters mostly for self-hoster deploys.
+//
+// wsOrigin is included verbatim in `connect-src`. When the operator passes
+// the wildcard "wss:" (i.e. CORS_ORIGIN=*), the CSP keeps the prior open
+// shape for that operator's deployment so federated topologies still work.
 func buildCSP(wsOrigin string) string {
-	connectSrc := []string{"'self'", "https:", "http:", "wss:", "ws:"}
+	connectSrc := []string{"'self'"}
 	trimmedOrigin := strings.TrimSpace(wsOrigin)
-	if trimmedOrigin != "" && !containsString(connectSrc, trimmedOrigin) {
-		connectSrc = append(connectSrc, trimmedOrigin)
+	switch trimmedOrigin {
+	case "":
+		// No CORS origin configured — default to same-origin only.
+	case "wss:", "ws:":
+		// Operator opted into wildcard CORS; preserve the open shape.
+		connectSrc = append(connectSrc, "https:", "http:", "wss:", "ws:")
+	default:
+		if !containsString(connectSrc, trimmedOrigin) {
+			connectSrc = append(connectSrc, trimmedOrigin)
+		}
 	}
 
 	return fmt.Sprintf(

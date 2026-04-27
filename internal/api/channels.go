@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"github.com/hushhq/hush-server/internal/models"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 const (
@@ -216,18 +218,29 @@ func (h *channelsHandler) deleteChannel(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin level or higher required to delete channel"})
 		return
 	}
-	// Block deletion of system channels.
+	// Resolve the channel and confirm it belongs to this guild before
+	// any further checks. A foreign-guild channel is reported as 404 to
+	// avoid confirming its existence.
 	ch, err := h.store.GetChannelByID(r.Context(), channelID)
 	if err != nil {
 		slog.Error("delete channel: get channel", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to get channel"})
 		return
 	}
-	if ch != nil && ch.Type == "system" {
+	if ch == nil || ch.ServerID == nil || *ch.ServerID != serverID {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "channel not found"})
+		return
+	}
+	// Block deletion of system channels.
+	if ch.Type == "system" {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "system channels cannot be deleted"})
 		return
 	}
-	if err := h.store.DeleteChannel(r.Context(), channelID); err != nil {
+	if err := h.store.DeleteChannel(r.Context(), channelID, serverID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "channel not found"})
+			return
+		}
 		slog.Error("delete channel", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to delete channel"})
 		return
@@ -263,14 +276,20 @@ func (h *channelsHandler) moveChannel(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "position must be >= 0"})
 		return
 	}
-	// Block moves on system channels.
+	// Resolve the channel and confirm it belongs to this guild before
+	// any further checks. A foreign-guild channel is reported as 404.
 	ch, err := h.store.GetChannelByID(r.Context(), channelID)
 	if err != nil {
 		slog.Error("move channel: get channel", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to get channel"})
 		return
 	}
-	if ch != nil && ch.Type == "system" {
+	if ch == nil || ch.ServerID == nil || *ch.ServerID != serverID {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "channel not found"})
+		return
+	}
+	// Block moves on system channels.
+	if ch.Type == "system" {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "system channels cannot be moved"})
 		return
 	}
@@ -280,12 +299,22 @@ func (h *channelsHandler) moveChannel(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "parent channel not found"})
 			return
 		}
+		// A parent in another guild is treated as 404 — the parent does
+		// not exist from this guild's perspective.
+		if parent.ServerID == nil || *parent.ServerID != serverID {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "parent channel not found"})
+			return
+		}
 		if parent.Type != "category" {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "parent must be a category channel"})
 			return
 		}
 	}
-	if err := h.store.MoveChannel(r.Context(), channelID, req.ParentID, req.Position); err != nil {
+	if err := h.store.MoveChannel(r.Context(), channelID, serverID, req.ParentID, req.Position); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "channel not found"})
+			return
+		}
 		slog.Error("move channel", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to move channel"})
 		return

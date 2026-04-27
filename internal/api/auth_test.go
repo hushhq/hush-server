@@ -555,9 +555,9 @@ func TestVerify_BackfillsDeviceKey_WhenDeviceIDProvided(t *testing.T) {
 	user := newTestUser("alice")
 	nonceStore := newInMemoryNonceStore()
 
-	var insertedDeviceUserID string
-	var insertedDeviceID string
-	var insertedPublicKey []byte
+	var backfilledUserID string
+	var backfilledDeviceID string
+	var backfilledPublicKey []byte
 	var upsertedDeviceUserID string
 	var upsertedDeviceID string
 
@@ -567,12 +567,16 @@ func TestVerify_BackfillsDeviceKey_WhenDeviceIDProvided(t *testing.T) {
 		getUserByPublicKeyFn: func(_ context.Context, _ []byte) (*models.User, error) {
 			return user, nil
 		},
-		insertDeviceKeyFn: func(_ context.Context, userID, deviceID, label string, devicePublicKey, certificate []byte) error {
-			insertedDeviceUserID = userID
-			insertedDeviceID = deviceID
-			insertedPublicKey = append([]byte(nil), devicePublicKey...)
-			require.Nil(t, certificate)
-			require.Empty(t, label)
+		// ans23 / F5: /verify backfill now goes through
+		// BackfillRootDeviceKey, never the upsert-on-conflict path.
+		backfillRootDeviceKeyFn: func(_ context.Context, userID, deviceID string, devicePublicKey []byte) (bool, error) {
+			backfilledUserID = userID
+			backfilledDeviceID = deviceID
+			backfilledPublicKey = append([]byte(nil), devicePublicKey...)
+			return true, nil
+		},
+		insertDeviceKeyFn: func(context.Context, string, string, string, []byte, []byte) error {
+			t.Fatalf("InsertDeviceKey must not be called from /verify backfill")
 			return nil
 		},
 		upsertDeviceFn: func(_ context.Context, userID, deviceID, label string) error {
@@ -599,14 +603,14 @@ func TestVerify_BackfillsDeviceKey_WhenDeviceIDProvided(t *testing.T) {
 	})
 
 	require.Equal(t, http.StatusOK, rr.Code)
-	assert.Equal(t, user.ID, insertedDeviceUserID)
-	assert.Equal(t, "device-backfill-1", insertedDeviceID)
+	assert.Equal(t, user.ID, backfilledUserID)
+	assert.Equal(t, "device-backfill-1", backfilledDeviceID)
 	assert.Equal(t, user.ID, upsertedDeviceUserID)
 	assert.Equal(t, "device-backfill-1", upsertedDeviceID)
 
 	expectedPublicKey, err := base64.StdEncoding.DecodeString(pubBase64)
 	require.NoError(t, err)
-	assert.Equal(t, expectedPublicKey, insertedPublicKey)
+	assert.Equal(t, expectedPublicKey, backfilledPublicKey)
 }
 
 func TestVerify_ExpiredNonce_Returns401(t *testing.T) {
