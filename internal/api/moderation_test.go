@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/hushhq/hush-server/internal/db"
+	"github.com/hushhq/hush-server/internal/livekit"
 	"github.com/hushhq/hush-server/internal/models"
 
 	"github.com/google/uuid"
@@ -20,7 +21,7 @@ import (
 // buildModerationRouter returns a moderation routes handler wired with guild context.
 // actorRole maps to a permission level integer via guildLevelFromRoleName.
 func buildModerationRouter(store *mockStore, actorID, actorRole string) http.Handler {
-	inner := ModerationRoutes(store, nil)
+	inner := ModerationRoutes(store, nil, livekit.NoopRoomService{})
 	level := guildLevelFromRoleName(actorRole)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := withUserID(r.Context(), actorID)
@@ -235,7 +236,7 @@ func TestBan_GuildScoped_DoesNotAffectOtherGuilds(t *testing.T) {
 		},
 	}
 	token := makeAuth(store, actorID)
-	router := ServerRoutes(store, nil, testJWTSecret)
+	router := ServerRoutes(store, nil, testJWTSecret, livekit.NoopRoomService{})
 
 	// Ban in Guild A.
 	rrA := postServerJSON(router, "/"+guildAID+"/moderation/ban",
@@ -775,7 +776,14 @@ func (m *mockHub) DisconnectDevice(_ string, _ string)       { /* no-op */ }
 // buildModerationRouterWithHub wires ModerationRoutes with a custom hub for testing broadcast/disconnect.
 // actorRole maps to a permission level integer via guildLevelFromRoleName.
 func buildModerationRouterWithHub(store *mockStore, actorID, actorRole string, hub GlobalBroadcaster) http.Handler {
-	inner := ModerationRoutes(store, hub)
+	return buildModerationRouterWithHubAndRoomService(store, actorID, actorRole, hub, livekit.NoopRoomService{})
+}
+
+// buildModerationRouterWithHubAndRoomService is the most flexible
+// variant: it lets a test inject a fake LiveKit RoomService so the
+// post-ban eviction call can be observed.
+func buildModerationRouterWithHubAndRoomService(store *mockStore, actorID, actorRole string, hub GlobalBroadcaster, rs livekit.RoomService) http.Handler {
+	inner := ModerationRoutes(store, hub, rs)
 	level := guildLevelFromRoleName(actorRole)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := withUserID(r.Context(), actorID)
@@ -1068,3 +1076,131 @@ func TestClaimInvite_BannedFromOtherGuild_Allowed(t *testing.T) {
 	// Guild B invite must succeed even though user is banned from Guild A.
 	require.Equal(t, http.StatusOK, rr.Code)
 }
+
+// ---------- LiveKit eviction on ban / kick ----------
+
+// fakeRoomServiceCall records a single RemoveParticipant invocation.
+type fakeRoomServiceCall struct {
+	room     string
+	identity string
+}
+
+// fakeRoomService is a deterministic in-memory RoomService used to
+// observe what the moderation handlers ask LiveKit to do. The
+// optional err field is returned from RemoveParticipant so tests
+// can also exercise the failure-design path.
+type fakeRoomService struct {
+	calls []fakeRoomServiceCall
+	err   error
+}
+
+func (f *fakeRoomService) RemoveParticipant(_ context.Context, room, identity string) error {
+	f.calls = append(f.calls, fakeRoomServiceCall{room: room, identity: identity})
+	return f.err
+}
+
+// TestBanMember_EvictsFromAllVoiceChannels proves a successful guild
+// ban triggers a RoomService.RemoveParticipant call for every voice
+// channel of that guild and skips non-voice channels.
+func TestBanMember_EvictsFromAllVoiceChannels(t *testing.T) {
+	actorID := uuid.New().String()
+	targetID := uuid.New().String()
+	voiceA := uuid.New().String()
+	voiceB := uuid.New().String()
+	textC := uuid.New().String()
+
+	store := &mockStore{
+		getServerMemberLevelFn: func(_ context.Context, _, _ string) (int, error) {
+			return models.PermissionLevelMember, nil
+		},
+		insertBanFn: func(_ context.Context, _, _, _, _ string, _ *time.Time) (*models.Ban, error) {
+			return &models.Ban{ID: uuid.New().String()}, nil
+		},
+		listChannelsFn: func(_ context.Context, _ string) ([]models.Channel, error) {
+			return []models.Channel{
+				{ID: voiceA, Type: "voice"},
+				{ID: textC, Type: "text"},
+				{ID: voiceB, Type: "voice"},
+			}, nil
+		},
+		deleteSessionsByUserIDFn: func(_ context.Context, _ string) error { return nil },
+	}
+	hub := &mockHub{}
+	rs := &fakeRoomService{}
+	router := buildModerationRouterWithHubAndRoomService(store, actorID, "admin", hub, rs)
+
+	rr := postServerJSON(router, "/ban", models.BanRequest{UserID: targetID, Reason: "x"}, "")
+	require.Equal(t, http.StatusNoContent, rr.Code)
+
+	require.Len(t, rs.calls, 2, "ban must evict only voice channels")
+	rooms := map[string]bool{rs.calls[0].room: true, rs.calls[1].room: true}
+	assert.True(t, rooms["channel-"+voiceA])
+	assert.True(t, rooms["channel-"+voiceB])
+	assert.False(t, rooms["channel-"+textC])
+	assert.Equal(t, targetID, rs.calls[0].identity)
+	assert.Equal(t, targetID, rs.calls[1].identity)
+}
+
+// TestBanMember_EvictionFailureDoesNotBlockBan proves the failure
+// design from ans17.md: if LiveKit is briefly unreachable when a
+// ban lands, the database state still wins (HTTP 204) and the
+// eviction is logged for operator triage.
+func TestBanMember_EvictionFailureDoesNotBlockBan(t *testing.T) {
+	actorID := uuid.New().String()
+	targetID := uuid.New().String()
+	voiceA := uuid.New().String()
+
+	store := &mockStore{
+		getServerMemberLevelFn: func(_ context.Context, _, _ string) (int, error) {
+			return models.PermissionLevelMember, nil
+		},
+		insertBanFn: func(_ context.Context, _, _, _, _ string, _ *time.Time) (*models.Ban, error) {
+			return &models.Ban{ID: uuid.New().String()}, nil
+		},
+		listChannelsFn: func(_ context.Context, _ string) ([]models.Channel, error) {
+			return []models.Channel{{ID: voiceA, Type: "voice"}}, nil
+		},
+		deleteSessionsByUserIDFn: func(_ context.Context, _ string) error { return nil },
+	}
+	hub := &mockHub{}
+	rs := &fakeRoomService{err: errLiveKitUnreachable}
+	router := buildModerationRouterWithHubAndRoomService(store, actorID, "admin", hub, rs)
+
+	rr := postServerJSON(router, "/ban", models.BanRequest{UserID: targetID, Reason: "x"}, "")
+	require.Equal(t, http.StatusNoContent, rr.Code, "ban must succeed despite LiveKit eviction error")
+	require.Len(t, rs.calls, 1)
+}
+
+// TestKickMember_EvictsFromVoiceChannels proves kicks share the same
+// eviction plumbing so a kicked user does not stay in voice on a
+// stale token.
+func TestKickMember_EvictsFromVoiceChannels(t *testing.T) {
+	actorID := uuid.New().String()
+	targetID := uuid.New().String()
+	voiceA := uuid.New().String()
+
+	store := &mockStore{
+		getServerMemberLevelFn: func(_ context.Context, _, _ string) (int, error) {
+			return models.PermissionLevelMember, nil
+		},
+		listChannelsFn: func(_ context.Context, _ string) ([]models.Channel, error) {
+			return []models.Channel{{ID: voiceA, Type: "voice"}}, nil
+		},
+	}
+	hub := &mockHub{}
+	rs := &fakeRoomService{}
+	router := buildModerationRouterWithHubAndRoomService(store, actorID, "mod", hub, rs)
+
+	rr := postServerJSON(router, "/kick", models.KickRequest{UserID: targetID, Reason: "spam"}, "")
+	require.Equal(t, http.StatusNoContent, rr.Code)
+	require.Len(t, rs.calls, 1)
+	assert.Equal(t, "channel-"+voiceA, rs.calls[0].room)
+	assert.Equal(t, targetID, rs.calls[0].identity)
+}
+
+// errLiveKitUnreachable simulates a transient LiveKit transport error.
+var errLiveKitUnreachable = &mockTransportErr{msg: "connection refused"}
+
+type mockTransportErr struct{ msg string }
+
+func (e *mockTransportErr) Error() string { return e.msg }

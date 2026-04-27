@@ -11,6 +11,7 @@ import (
 
 	"github.com/hushhq/hush-server/internal/auth"
 	"github.com/hushhq/hush-server/internal/db"
+	"github.com/hushhq/hush-server/internal/livekit"
 	"github.com/hushhq/hush-server/internal/models"
 
 	"github.com/google/uuid"
@@ -22,6 +23,10 @@ const testAdminBootstrapSecret = "bootstrap-secret"
 const testAdminCookieValue = "admin-cookie-token"
 
 func adminRouter(store *mockStore) http.Handler {
+	return adminRouterWithRoomService(store, livekit.NoopRoomService{})
+}
+
+func adminRouterWithRoomService(store *mockStore, rs livekit.RoomService) http.Handler {
 	return AdminAPIRoutes(
 		store,
 		testAdminBootstrapSecret,
@@ -30,6 +35,7 @@ func adminRouter(store *mockStore) http.Handler {
 		"",
 		nil,
 		nil,
+		rs,
 	)
 }
 
@@ -437,4 +443,79 @@ func TestAdminAuditLog_ReturnsEntries(t *testing.T) {
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&entries))
 	require.Len(t, entries, 1)
 	assert.Equal(t, "config_change", entries[0].Action)
+}
+
+// ---------- Instance ban LiveKit eviction ----------
+
+// adminFakeRoomServiceCall mirrors the moderation_test fakeRoomService
+// shape; it is duplicated locally because this test file lives in the
+// same package and referencing the moderation_test types from outside
+// a *_test.go would not compile in CI builds where the test files are
+// compiled per-package.
+type adminFakeRoomServiceCall struct {
+	room     string
+	identity string
+}
+
+type adminFakeRoomService struct {
+	calls []adminFakeRoomServiceCall
+}
+
+func (f *adminFakeRoomService) RemoveParticipant(_ context.Context, room, identity string) error {
+	f.calls = append(f.calls, adminFakeRoomServiceCall{room: room, identity: identity})
+	return nil
+}
+
+// TestInstanceBan_EvictsFromAllVoiceChannels proves an instance-wide
+// ban iterates every guild the user belongs to, lists each guild's
+// voice channels, and asks LiveKit to evict the user from each one.
+// This is the moderation gap closed in slice 17.
+func TestInstanceBan_EvictsFromAllVoiceChannels(t *testing.T) {
+	targetUserID := uuid.NewString()
+	guildA := uuid.NewString()
+	guildB := uuid.NewString()
+	voiceA1 := uuid.NewString()
+	voiceA2 := uuid.NewString()
+	voiceB1 := uuid.NewString()
+	textA := uuid.NewString()
+
+	req, store := authenticatedAdminRequest(http.MethodPost, "/bans",
+		models.InstanceBanRequest{UserID: targetUserID, Reason: "policy"}, "owner")
+	store.deleteSessionsByUserIDFn = func(_ context.Context, _ string) error { return nil }
+	store.insertInstanceBanByAdminFn = func(_ context.Context, _, _, _ string, _ *time.Time) (*models.InstanceBan, error) {
+		return &models.InstanceBan{ID: uuid.NewString()}, nil
+	}
+	store.listServersForUserFn = func(_ context.Context, _ string) ([]models.Server, error) {
+		return []models.Server{{ID: guildA}, {ID: guildB}}, nil
+	}
+	store.removeServerMemberFn = func(_ context.Context, _, _ string) error { return nil }
+	store.listChannelsFn = func(_ context.Context, sid string) ([]models.Channel, error) {
+		switch sid {
+		case guildA:
+			return []models.Channel{
+				{ID: voiceA1, Type: "voice"},
+				{ID: textA, Type: "text"},
+				{ID: voiceA2, Type: "voice"},
+			}, nil
+		case guildB:
+			return []models.Channel{{ID: voiceB1, Type: "voice"}}, nil
+		}
+		return nil, nil
+	}
+
+	rs := &adminFakeRoomService{}
+	router := adminRouterWithRoomService(store, rs)
+	rr := doAdmin(router, req)
+
+	require.Equal(t, http.StatusNoContent, rr.Code)
+	require.Len(t, rs.calls, 3, "instance ban must evict every voice channel across every guild")
+	rooms := map[string]bool{}
+	for _, c := range rs.calls {
+		rooms[c.room] = true
+		assert.Equal(t, targetUserID, c.identity)
+	}
+	assert.True(t, rooms["channel-"+voiceA1])
+	assert.True(t, rooms["channel-"+voiceA2])
+	assert.True(t, rooms["channel-"+voiceB1])
+	assert.False(t, rooms["channel-"+textA], "non-voice channels must not be evicted")
 }

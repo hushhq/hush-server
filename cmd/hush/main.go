@@ -18,6 +18,7 @@ import (
 	"github.com/hushhq/hush-server/internal/api"
 	"github.com/hushhq/hush-server/internal/config"
 	"github.com/hushhq/hush-server/internal/db"
+	"github.com/hushhq/hush-server/internal/livekit"
 	"github.com/hushhq/hush-server/internal/models"
 	"github.com/hushhq/hush-server/internal/transparency"
 	"github.com/hushhq/hush-server/internal/ws"
@@ -260,9 +261,14 @@ func main() {
 			r.Mount("/api/transparency", api.TransparencyRoutes(transparencySvc, pool, cfg.JWTSecret))
 		}
 
+		// Outbound LiveKit room-service client used by ban / kick paths
+		// to evict participants from active voice rooms. Falls back to
+		// a no-op when LiveKit is not configured.
+		roomService := livekit.NewTwirpRoomService(cfg.LiveKitURL, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret)
+
 		// Guild-scoped API: auth and RequireGuildMember applied inside ServerRoutes.
 		// Channels, guild invites, and moderation are all mounted under /{serverId}.
-		r.Mount("/api/servers", api.ServerRoutes(pool, wsHub, cfg.JWTSecret))
+		r.Mount("/api/servers", api.ServerRoutes(pool, wsHub, cfg.JWTSecret, roomService))
 
 		// Guild discovery, DM creation, and public user search.
 		r.Mount("/api/guilds", api.GuildRoutes(pool, wsHub, cfg.JWTSecret))
@@ -278,6 +284,7 @@ func main() {
 			cfg.ServiceIdentityMasterKey,
 			wsHub,
 			handshakeCache,
+			roomService,
 		))
 
 		r.Get("/ws", ws.Handler(wsHub, cfg.JWTSecret, pool, cfg.CORSOrigin))

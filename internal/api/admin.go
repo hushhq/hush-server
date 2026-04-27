@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/hushhq/hush-server/internal/db"
+	"github.com/hushhq/hush-server/internal/livekit"
 	"github.com/hushhq/hush-server/internal/models"
 	"github.com/hushhq/hush-server/internal/version"
 
@@ -50,6 +51,7 @@ type adminStore interface {
 	GetActiveInstanceBan(ctx context.Context, userID string) (*models.InstanceBan, error)
 	LiftInstanceBanByAdmin(ctx context.Context, banID, liftedByAdminID string) error
 	ListServersForUser(ctx context.Context, userID string) ([]models.Server, error)
+	ListChannels(ctx context.Context, serverID string) ([]models.Channel, error)
 	RemoveServerMember(ctx context.Context, serverID, userID string) error
 	DeleteSessionsByUserID(ctx context.Context, userID string) error
 	ListInstanceAuditLog(ctx context.Context, limit, offset int, filter *db.InstanceAuditLogFilter) ([]models.InstanceAuditLogEntry, error)
@@ -67,11 +69,13 @@ func AdminAPIRoutes(
 	serviceIdentityMasterKey string,
 	hub GlobalBroadcaster,
 	cache *InstanceCache,
+	roomService livekit.RoomService,
 ) chi.Router {
 	h := &adminHandler{
 		store:                    store,
 		hub:                      hub,
 		cache:                    cache,
+		roomService:              roomService,
 		startedAt:                time.Now(),
 		bootstrapSecret:          bootstrapSecret,
 		sessionTTL:               sessionTTL,
@@ -116,11 +120,50 @@ type adminHandler struct {
 	store                    adminStore
 	hub                      GlobalBroadcaster
 	cache                    *InstanceCache
+	roomService              livekit.RoomService
 	startedAt                time.Time
 	bootstrapSecret          string
 	sessionTTL               time.Duration
 	secureCookies            bool
 	serviceIdentityMasterKey string
+}
+
+// instanceBanEvictionTimeout caps each per-channel RemoveParticipant
+// call invoked during an instance-wide ban. The instance ban path
+// can fan out across every voice channel of every guild the user
+// belongs to, so we cap each call individually rather than the
+// outer loop to keep one slow channel from starving the rest.
+const instanceBanEvictionTimeout = 4 * time.Second
+
+// evictUserFromAllVoice removes the target user from every voice
+// channel of every guild they belong to. Best-effort: the database
+// state has already been written before this runs and is the
+// source of truth, so a LiveKit outage cannot block the ban. Each
+// failure is logged for operator triage.
+func (h *adminHandler) evictUserFromAllVoice(ctx context.Context, userID string, guilds []models.Server) {
+	if h.roomService == nil {
+		return
+	}
+	for _, guild := range guilds {
+		channels, err := h.store.ListChannels(ctx, guild.ID)
+		if err != nil {
+			slog.Error("instance ban eviction: list channels",
+				"guild_id", guild.ID, "user_id", userID, "err", err)
+			continue
+		}
+		for _, ch := range channels {
+			if ch.Type != "voice" {
+				continue
+			}
+			evictCtx, cancel := context.WithTimeout(ctx, instanceBanEvictionTimeout)
+			room := "channel-" + ch.ID
+			if err := h.roomService.RemoveParticipant(evictCtx, room, userID); err != nil {
+				slog.Error("instance ban eviction: remove participant",
+					"room", room, "user_id", userID, "err", err)
+			}
+			cancel()
+		}
+	}
 }
 
 // listGuilds handles GET /api/admin/guilds.
@@ -484,6 +527,10 @@ func (h *adminHandler) instanceBan(w http.ResponseWriter, r *http.Request) {
 			h.hub.BroadcastToServer(guild.ID, msg)
 		}
 	}
+
+	// 5. Evict the banned user from every voice channel they were
+	//    in. Best-effort eventual consistency; see ans17.md.
+	h.evictUserFromAllVoice(r.Context(), req.UserID, guilds)
 
 	w.WriteHeader(http.StatusNoContent)
 }

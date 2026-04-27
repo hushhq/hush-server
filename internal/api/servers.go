@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/hushhq/hush-server/internal/db"
+	"github.com/hushhq/hush-server/internal/livekit"
 	"github.com/hushhq/hush-server/internal/models"
 
 	"github.com/go-chi/chi/v5"
@@ -38,7 +39,11 @@ func fallbackTemplate() []models.TemplateChannel {
 // RequireGuildMember is applied to all member-only /{serverId} sub-routes.
 // The /join endpoint is intentionally outside RequireGuildMember - the user
 // is not yet a member when they hit that route.
-func ServerRoutes(store db.Store, hub GlobalBroadcaster, jwtSecret string) chi.Router {
+//
+// roomService is forwarded to ModerationRoutes for LiveKit eviction
+// after a successful ban or kick. Pass livekit.NoopRoomService{} to
+// disable.
+func ServerRoutes(store db.Store, hub GlobalBroadcaster, jwtSecret string, roomService livekit.RoomService) chi.Router {
 	h := &serversHandler{store: store, hub: hub}
 	r := chi.NewRouter()
 	r.Use(RequireAuth(jwtSecret, store))
@@ -58,7 +63,7 @@ func ServerRoutes(store db.Store, hub GlobalBroadcaster, jwtSecret string) chi.R
 			r.Post("/leave", h.leaveServer)
 			r.Mount("/channels", ChannelRoutes(store, hub))
 			r.Mount("/invites", GuildInviteRoutes(store))
-			r.Mount("/moderation", ModerationRoutes(store, hub))
+			r.Mount("/moderation", ModerationRoutes(store, hub, roomService))
 			r.Mount("/system-messages", SystemMessagesRoutes(store))
 		})
 	})

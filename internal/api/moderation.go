@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/hushhq/hush-server/internal/db"
+	"github.com/hushhq/hush-server/internal/livekit"
 	"github.com/hushhq/hush-server/internal/models"
 
 	"github.com/go-chi/chi/v5"
@@ -22,8 +24,12 @@ const (
 // ModerationRoutes returns the router for guild-scoped moderation endpoints.
 // Mounted under /api/servers/{serverId}/moderation.
 // Auth and RequireGuildMember are applied by the parent router.
-func ModerationRoutes(store db.Store, hub GlobalBroadcaster) chi.Router {
-	h := &moderationHandler{store: store, hub: hub}
+//
+// roomService receives best-effort RemoveParticipant calls for any
+// voice channel of the guild after a successful ban or kick. Pass
+// livekit.NoopRoomService{} to disable eviction (e.g. dev / test).
+func ModerationRoutes(store db.Store, hub GlobalBroadcaster, roomService livekit.RoomService) chi.Router {
+	h := &moderationHandler{store: store, hub: hub, roomService: roomService}
 	r := chi.NewRouter()
 	r.Post("/kick", h.kickMember)
 	r.Post("/ban", h.banMember)
@@ -38,8 +44,44 @@ func ModerationRoutes(store db.Store, hub GlobalBroadcaster) chi.Router {
 }
 
 type moderationHandler struct {
-	store db.Store
-	hub   GlobalBroadcaster
+	store       db.Store
+	hub         GlobalBroadcaster
+	roomService livekit.RoomService
+}
+
+// evictionRoomServiceTimeout caps the per-channel eviction call so a
+// stalled LiveKit deployment cannot wedge a moderation request.
+// The ban itself has already been committed before this runs, so a
+// timeout here only delays the LiveKit-side cleanup.
+const evictionRoomServiceTimeout = 4 * time.Second
+
+// evictUserFromGuildVoice asks LiveKit to remove the target user
+// from every voice channel of the guild. Failures are logged but
+// never propagated: the database state is the source of truth, so
+// the ban must succeed even if LiveKit is briefly unreachable.
+// LiveKit eventual-consistency is the deliberate trade-off; see
+// ans17.md for the failure-design rationale.
+func (h *moderationHandler) evictUserFromGuildVoice(ctx context.Context, serverID, userID string) {
+	if h.roomService == nil {
+		return
+	}
+	channels, err := h.store.ListChannels(ctx, serverID)
+	if err != nil {
+		slog.Error("livekit eviction: list channels", "server_id", serverID, "err", err)
+		return
+	}
+	for _, ch := range channels {
+		if ch.Type != "voice" {
+			continue
+		}
+		evictCtx, cancel := context.WithTimeout(ctx, evictionRoomServiceTimeout)
+		room := "channel-" + ch.ID
+		if err := h.roomService.RemoveParticipant(evictCtx, room, userID); err != nil {
+			slog.Error("livekit eviction: remove participant",
+				"room", room, "user_id", userID, "err", err)
+		}
+		cancel()
+	}
 }
 
 // kickMember handles POST /api/servers/{serverId}/moderation/kick.
@@ -87,6 +129,7 @@ func (h *moderationHandler) kickMember(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to remove member"})
 		return
 	}
+	h.evictUserFromGuildVoice(r.Context(), serverID, req.UserID)
 	targetID := req.UserID
 	if err := h.store.InsertAuditLog(r.Context(), serverID, actorID, &targetID, "kick", req.Reason, nil); err != nil {
 		slog.Error("kick: insert audit log", "err", err)
@@ -162,6 +205,10 @@ func (h *moderationHandler) banMember(w http.ResponseWriter, r *http.Request) {
 	if err := h.store.RemoveServerMember(r.Context(), serverID, req.UserID); err != nil {
 		slog.Error("ban: remove server member", "err", err)
 	}
+	// Evict the banned user from any active LiveKit voice rooms
+	// belonging to this guild. Best-effort; the ban itself has
+	// already been committed regardless of the eviction outcome.
+	h.evictUserFromGuildVoice(r.Context(), serverID, req.UserID)
 	targetID := req.UserID
 	metadata := map[string]interface{}{}
 	if req.ExpiresIn != nil {

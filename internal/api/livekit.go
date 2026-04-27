@@ -82,15 +82,44 @@ func (h *livekitHandler) token(w http.ResponseWriter, r *http.Request) {
 	}
 	userID := userIDFromContext(r.Context())
 
-	// Mute check: deny token if the user is muted in the channel's server.
-	// roomName format: "channel-{channelId}" - skip check for other formats.
+	// Moderation gate: deny token issuance when an active ban or mute
+	// applies. Order matters: the instance ban is the broadest signal
+	// (covers any room), then the per-guild ban (covers any voice
+	// channel of that guild), then mute (specific to the target
+	// guild's voice channels). The first matching reason short-circuits
+	// the rest so the response carries a single, accurate code.
 	if h.store != nil {
+		instanceBan, err := h.store.GetActiveInstanceBan(r.Context(), userID)
+		if err == nil && instanceBan != nil {
+			writeJSON(w, http.StatusForbidden, map[string]string{
+				"error": "You are banned from this instance and cannot join voice channels.",
+				"code":  "instance_banned",
+			})
+			return
+		}
+
+		// Per-guild checks require a "channel-{channelId}" room. Other
+		// room name formats (legacy, ad-hoc) bypass these because they
+		// have no resolvable guild scope.
 		channelID := strings.TrimPrefix(roomName, "channel-")
-		if channelID != roomName { // roomName started with "channel-"
+		if channelID != roomName {
 			ch, err := h.store.GetChannelByID(r.Context(), channelID)
 			if err == nil && ch != nil && ch.ServerID != nil {
-				mute, err := h.store.GetActiveMute(r.Context(), *ch.ServerID, userID)
-				if err == nil && mute != nil {
+				if ban, err := h.store.GetActiveBan(r.Context(), *ch.ServerID, userID); err == nil && ban != nil {
+					writeJSON(w, http.StatusForbidden, map[string]string{
+						"error": "You are banned from this server and cannot join voice channels.",
+						"code":  "banned",
+					})
+					return
+				}
+				if _, err := h.store.GetServerMemberLevel(r.Context(), *ch.ServerID, userID); err != nil {
+					writeJSON(w, http.StatusForbidden, map[string]string{
+						"error": "You are not a member of this server.",
+						"code":  "not_member",
+					})
+					return
+				}
+				if mute, err := h.store.GetActiveMute(r.Context(), *ch.ServerID, userID); err == nil && mute != nil {
 					writeJSON(w, http.StatusForbidden, map[string]string{
 						"error": "You are muted in this server and cannot join voice channels.",
 						"code":  "muted",

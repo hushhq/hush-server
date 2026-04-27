@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hushhq/hush-server/internal/livekit"
 	"github.com/hushhq/hush-server/internal/models"
 
 	"github.com/google/uuid"
@@ -18,12 +19,12 @@ import (
 
 // serversRouter returns a ServerRoutes handler wired with testJWTSecret.
 func serversRouter(store *mockStore) http.Handler {
-	return ServerRoutes(store, nil, testJWTSecret)
+	return ServerRoutes(store, nil, testJWTSecret, livekit.NoopRoomService{})
 }
 
 // serversRouterWithHub wires ServerRoutes with a custom hub for broadcast tests.
 func serversRouterWithHub(store *mockStore, hub GlobalBroadcaster) http.Handler {
-	return ServerRoutes(store, hub, testJWTSecret)
+	return ServerRoutes(store, hub, testJWTSecret, livekit.NoopRoomService{})
 }
 
 // ---------- POST / (createServer) ----------
@@ -524,7 +525,7 @@ func TestChangeRole_EmitsSystemMessage(t *testing.T) {
 		},
 	}
 	token := makeAuth(store, actorID)
-	router := ServerRoutes(store, &mockHub{}, testJWTSecret)
+	router := ServerRoutes(store, &mockHub{}, testJWTSecret, livekit.NoopRoomService{})
 
 	rr := putServerJSON(router, "/"+serverID+"/members/"+targetID+"/role",
 		changePermissionLevelRequest{PermissionLevel: models.PermissionLevelMod}, token)
