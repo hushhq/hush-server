@@ -48,7 +48,11 @@ LOG_PREFIX="[hush]"
 log() { printf '%s %s\n' "$LOG_PREFIX" "$1"; }
 err() { printf '%s ERROR: %s\n' "$LOG_PREFIX" "$1" >&2; }
 die() { err "$1"; exit "${2:-1}"; }
-compose_cmd() { $DOCKER_COMPOSE -f "$COMPOSE_BASE_FILE" -f "$COMPOSE_PROXY_FILE" "$@"; }
+# COMPOSE_PROFILE_ARGS is set later (after env decisions) so the s3-storage
+# profile is enabled iff the bundled MinIO is wired in. Until set it is
+# empty and compose_cmd behaves like before.
+COMPOSE_PROFILE_ARGS=""
+compose_cmd() { $DOCKER_COMPOSE -f "$COMPOSE_BASE_FILE" -f "$COMPOSE_PROXY_FILE" $COMPOSE_PROFILE_ARGS "$@"; }
 
 # ---------------------------------------------------------------------------
 # Parse arguments
@@ -230,6 +234,50 @@ TRANSPARENCY_LOG_PRIVATE_KEY="$(_existing_env TRANSPARENCY_LOG_PRIVATE_KEY)"
 CORS_ORIGIN="$(_existing_env CORS_ORIGIN)"
 [ -z "$CORS_ORIGIN" ] && CORS_ORIGIN="https://app.gethush.live"
 
+# Self-host MinIO credentials and the matching STORAGE_S3_* values that
+# point hush-api at it. Domain mode wires MinIO via a `storage.<domain>`
+# Caddy subdomain (DNS A record required); IP mode leaves the bulk
+# plane on `postgres_bytea` because there is no usable browser-trusted
+# external URL for an IP-only deploy.
+MINIO_ROOT_USER="$(_existing_env MINIO_ROOT_USER)"
+[ -z "$MINIO_ROOT_USER" ] && MINIO_ROOT_USER="hush-minio-$(openssl rand -hex 4)"
+
+MINIO_ROOT_PASSWORD="$(_existing_env MINIO_ROOT_PASSWORD)"
+[ -z "$MINIO_ROOT_PASSWORD" ] && MINIO_ROOT_PASSWORD="$(openssl rand -hex 24)"
+
+if [ "$mode" = "domain" ]; then
+  STORAGE_BACKEND="s3"
+  STORAGE_S3_ENDPOINT="storage.$domain"
+  STORAGE_S3_REGION="us-east-1"
+  STORAGE_S3_BUCKET="hush-link-archive"
+  STORAGE_S3_ACCESS_KEY="$MINIO_ROOT_USER"
+  STORAGE_S3_SECRET_KEY="$MINIO_ROOT_PASSWORD"
+  STORAGE_S3_USE_SSL="true"
+  MINIO_SERVER_URL="https://storage.$domain"
+  # Bring up the bundled MinIO + bootstrap one-shot.
+  COMPOSE_PROFILE_ARGS="--profile s3-storage"
+else
+  # IP mode: bulk plane stays on postgres_bytea by default. Operator
+  # can flip this manually once they wire an external S3 endpoint.
+  STORAGE_BACKEND="postgres_bytea"
+  STORAGE_S3_ENDPOINT=""
+  STORAGE_S3_REGION="us-east-1"
+  STORAGE_S3_BUCKET="hush-link-archive"
+  STORAGE_S3_ACCESS_KEY=""
+  STORAGE_S3_SECRET_KEY=""
+  STORAGE_S3_USE_SSL="true"
+  MINIO_SERVER_URL=""
+fi
+
+STORAGE_BROWSER_ORIGIN="$(_existing_env STORAGE_BROWSER_ORIGIN)"
+[ -z "$STORAGE_BROWSER_ORIGIN" ] && STORAGE_BROWSER_ORIGIN="$CORS_ORIGIN"
+
+LINK_ARCHIVE_USER_QUOTA="$(_existing_env LINK_ARCHIVE_USER_QUOTA)"
+[ -z "$LINK_ARCHIVE_USER_QUOTA" ] && LINK_ARCHIVE_USER_QUOTA="1"
+
+LINK_ARCHIVE_STAGING_BYTES_CAP="$(_existing_env LINK_ARCHIVE_STAGING_BYTES_CAP)"
+[ -z "$LINK_ARCHIVE_STAGING_BYTES_CAP" ] && LINK_ARCHIVE_STAGING_BYTES_CAP="8589934592"
+
 # ---------------------------------------------------------------------------
 # Step 5: Write .env
 # ---------------------------------------------------------------------------
@@ -281,6 +329,32 @@ LIVEKIT_API_SECRET=$LIVEKIT_API_SECRET
 # --- Transparency log -----------------------------------------------------
 # Ed25519 seed (hex) - MUST NOT change after first message is logged
 TRANSPARENCY_LOG_PRIVATE_KEY=$TRANSPARENCY_LOG_PRIVATE_KEY
+
+# --- Device-link bulk transfer storage ------------------------------------
+# Self-host MinIO is wired automatically in domain mode; IP-mode deploys
+# fall back to postgres_bytea until the operator points STORAGE_S3_* at
+# an external bucket.
+STORAGE_BACKEND=$STORAGE_BACKEND
+STORAGE_S3_ENDPOINT=$STORAGE_S3_ENDPOINT
+STORAGE_S3_REGION=$STORAGE_S3_REGION
+STORAGE_S3_BUCKET=$STORAGE_S3_BUCKET
+STORAGE_S3_ACCESS_KEY=$STORAGE_S3_ACCESS_KEY
+STORAGE_S3_SECRET_KEY=$STORAGE_S3_SECRET_KEY
+STORAGE_S3_USE_SSL=$STORAGE_S3_USE_SSL
+
+# Self-host MinIO root credentials. The bundled MinIO container reads
+# these; STORAGE_S3_ACCESS_KEY/SECRET_KEY above are intentionally set
+# to the same values for self-host installs (single tenant).
+MINIO_ROOT_USER=$MINIO_ROOT_USER
+MINIO_ROOT_PASSWORD=$MINIO_ROOT_PASSWORD
+MINIO_SERVER_URL=$MINIO_SERVER_URL
+
+# Operational containment for the bulk plane.
+LINK_ARCHIVE_USER_QUOTA=$LINK_ARCHIVE_USER_QUOTA
+LINK_ARCHIVE_STAGING_BYTES_CAP=$LINK_ARCHIVE_STAGING_BYTES_CAP
+
+# Origin allowed by the bucket CORS policy. minio-bootstrap reads this.
+STORAGE_BROWSER_ORIGIN=$STORAGE_BROWSER_ORIGIN
 
 # --- Optional / advanced --------------------------------------------------
 # NODE_IP: public IP of this server for LiveKit ICE candidates.
@@ -454,6 +528,29 @@ fi
 log "Admin dashboard:          https://$host/admin/"
 log "Admin bootstrap secret:   $ADMIN_BOOTSTRAP_SECRET"
 printf '\n'
+
+# Bulk-plane (device-link archive transfer) status banner
+if [ "$STORAGE_BACKEND" = "s3" ]; then
+  log "--- Device-link bulk transfer (MinIO/S3) ---"
+  log "Bucket:    $STORAGE_S3_BUCKET on $STORAGE_S3_ENDPOINT"
+  log "Origin:    $STORAGE_BROWSER_ORIGIN (CORS allowed by bucket policy)"
+  log ""
+  log "ACTION REQUIRED: create a DNS A record"
+  log "  storage.$host  ->  this server's public IP"
+  log ""
+  log "Caddy will obtain a Let's Encrypt cert for storage.$host on first"
+  log "request. The browser PUTs/GETs presigned URLs there directly;"
+  log "chunks never traverse the API process."
+  printf '\n'
+else
+  log "--- Device-link bulk transfer (Postgres BYTEA fallback) ---"
+  log "STORAGE_BACKEND=postgres_bytea (no S3 backend wired)."
+  log "Small-account device-link transfer works through the in-API path,"
+  log "but the reverse-proxy body limit applies. To enable the full S3"
+  log "bulk plane, set STORAGE_BACKEND=s3 and STORAGE_S3_* in .env, then"
+  log "restart the stack. See docs/RUNBOOK.md."
+  printf '\n'
+fi
 log "--- Preserve your secrets ---"
 log "All secrets are saved in .env. Back it up to a secure location NOW."
 log ""

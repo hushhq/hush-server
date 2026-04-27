@@ -435,6 +435,53 @@ func (m *messageStoreMock) GetServerMemberLevelByFederatedID(context.Context, st
 	return 0, nil
 }
 
+// Link archive methods - not used by message handlers, stubs only.
+func (m *messageStoreMock) InsertLinkArchive(context.Context, db.LinkArchiveInsert) (*db.LinkArchive, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) CountActiveLinkArchivesForUser(context.Context, string) (int, error) {
+	return 0, nil
+}
+func (m *messageStoreMock) SumActiveLinkArchiveBytes(context.Context) (int64, error) { return 0, nil }
+func (m *messageStoreMock) TransitionLinkArchiveState(context.Context, string, string, []string) error {
+	return nil
+}
+func (m *messageStoreMock) GetLinkArchiveByID(context.Context, string) (*db.LinkArchive, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) GetLinkArchiveByUploadTokenHash(context.Context, string, []byte) (*db.LinkArchive, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) GetLinkArchiveByDownloadTokenHash(context.Context, string, []byte) (*db.LinkArchive, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) RefreshLinkArchiveExpiry(context.Context, string, time.Duration) (time.Time, error) {
+	return time.Time{}, nil
+}
+func (m *messageStoreMock) InsertLinkArchiveChunk(context.Context, db.LinkArchiveChunkInsert) error {
+	return nil
+}
+func (m *messageStoreMock) GetLinkArchiveChunkPointer(context.Context, string, int) (string, string, error) {
+	return "", "", nil
+}
+func (m *messageStoreMock) ListLinkArchiveChunkRows(context.Context, string) ([]db.LinkArchiveChunkRow, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) MarkLinkArchiveFinalized(context.Context, string) error { return nil }
+func (m *messageStoreMock) DeleteLinkArchive(context.Context, string) error        { return nil }
+func (m *messageStoreMock) ListGcEligibleLinkArchives(context.Context, int) ([]string, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) PurgeExpiredLinkArchives(context.Context) (int64, error) {
+	return 0, nil
+}
+func (m *messageStoreMock) UpsertChunkBlob(context.Context, string, []byte) error { return nil }
+func (m *messageStoreMock) GetChunkBlob(context.Context, string) ([]byte, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) DeleteChunkBlob(context.Context, string) error            { return nil }
+func (m *messageStoreMock) ChunkBlobExists(context.Context, string) (bool, error)    { return false, nil }
+
 // drainUntilType reads from c.send until a message with the given type is received or timeout.
 func drainUntilType(t *testing.T, c *Client, wantType string, timeout time.Duration) []byte {
 	t.Helper()

@@ -44,11 +44,17 @@ services:
       dockerfile: Dockerfile
     container_name: hush-api
     environment:
+      - PRODUCTION=${PRODUCTION:-false}
       - HOST=0.0.0.0
       - PORT=8080
+      - DOMAIN=${DOMAIN:-localhost}
       - DATABASE_URL=postgres://${POSTGRES_USER:-hush}:${POSTGRES_PASSWORD:-hush}@postgres:5432/${POSTGRES_DB:-hush}?sslmode=disable
       - JWT_SECRET=${JWT_SECRET:-dev-jwt-secret-change-in-production}
+      - ADMIN_BOOTSTRAP_SECRET=${ADMIN_BOOTSTRAP_SECRET:-}
+      - ADMIN_SESSION_TTL_HOURS=${ADMIN_SESSION_TTL_HOURS:-24}
       - CORS_ORIGIN=${CORS_ORIGIN:-*}
+      - SERVICE_IDENTITY_MASTER_KEY=${SERVICE_IDENTITY_MASTER_KEY:-}
+      - TRANSPARENCY_LOG_PRIVATE_KEY=${TRANSPARENCY_LOG_PRIVATE_KEY:-}
       - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
       - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
       - LIVEKIT_URL=${LIVEKIT_URL:-ws://livekit:7880}

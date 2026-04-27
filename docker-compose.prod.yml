@@ -39,6 +39,95 @@ services:
     networks:
       - hush-network
 
+  # MinIO is the self-host S3-compatible backend for the device-link bulk
+  # transfer plane. The API uses it via `STORAGE_BACKEND=s3`; chunks
+  # never traverse the API process for upload/download — the browser
+  # PUTs/GETs presigned URLs directly.
+  #
+  # Public reachability: domain-mode self-hosters expose MinIO via
+  # Caddy on `storage.${DOMAIN}` (TLS via Let's Encrypt, see Caddy
+  # template). The internal listener (port 9000 in the compose
+  # network) is what Caddy reverse-proxies; we do NOT publish 9000 on
+  # the host to keep the surface narrow.
+  #
+  # IP-mode self-hosters cannot use this MinIO out of the box because
+  # the browser presigned URLs need a routable, browser-trusted
+  # hostname that matches the API's signing host. Use external S3
+  # (AWS/etc.) instead — see RUNBOOK.md.
+  minio:
+    image: quay.io/minio/minio:RELEASE.2024-09-22T00-33-43Z
+    container_name: hush-minio
+    profiles: ["s3-storage"]
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+      # MINIO_SERVER_URL teaches MinIO its own externally-visible URL
+      # so that presigned-URL signatures it validates match the host
+      # the browser actually hit. Set to https://storage.${DOMAIN}
+      # by setup.sh in domain mode; left blank in IP mode (operator
+      # must point STORAGE_S3_ENDPOINT at an external S3 bucket).
+      - MINIO_SERVER_URL=${MINIO_SERVER_URL:-}
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "mc ready local || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      - hush-network
+
+  # One-shot: creates the bucket and applies the CORS policy required
+  # by the browser client. Idempotent — `mc mb` reports an OK no-op
+  # if the bucket already exists; `mc cors set` overwrites the policy
+  # in place.
+  minio-bootstrap:
+    image: quay.io/minio/mc:RELEASE.2024-09-16T17-43-14Z
+    container_name: hush-minio-bootstrap
+    profiles: ["s3-storage"]
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: /bin/sh
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+      - STORAGE_S3_BUCKET=${STORAGE_S3_BUCKET:-hush-link-archive}
+      - STORAGE_BROWSER_ORIGIN=${STORAGE_BROWSER_ORIGIN:-https://app.gethush.live}
+    command:
+      - -c
+      - |
+        set -eu
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+        if ! mc ls "local/$$STORAGE_S3_BUCKET" >/dev/null 2>&1; then
+          mc mb "local/$$STORAGE_S3_BUCKET"
+        fi
+        # CORS policy: the browser client (origin from STORAGE_BROWSER_ORIGIN)
+        # PUTs and GETs ciphertext directly to the bucket, declaring the
+        # SHA-256 via x-amz-checksum-sha256 and verifying the same
+        # header on download.
+        cat >/tmp/cors.json <<JSON
+        {
+          "CORSRules": [
+            {
+              "AllowedOrigin": ["$$STORAGE_BROWSER_ORIGIN"],
+              "AllowedMethod": ["GET", "PUT", "HEAD"],
+              "AllowedHeader": ["Content-Type", "x-amz-checksum-sha256", "x-amz-content-sha256", "x-amz-date", "authorization"],
+              "ExposeHeader": ["ETag", "x-amz-checksum-sha256"],
+              "MaxAgeSeconds": 3000
+            }
+          ]
+        }
+        JSON
+        mc cors set "local/$$STORAGE_S3_BUCKET" /tmp/cors.json
+        echo "minio-bootstrap: bucket $$STORAGE_S3_BUCKET ready, CORS allowed origin $$STORAGE_BROWSER_ORIGIN"
+    restart: "no"
+    networks:
+      - hush-network
+
   hush-api:
     build:
       context: .
@@ -56,6 +145,19 @@ services:
       - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
       - LIVEKIT_URL=wss://${DOMAIN}/livekit
       - TRANSPARENCY_LOG_PRIVATE_KEY=${TRANSPARENCY_LOG_PRIVATE_KEY}
+      # Storage backend for the device-link bulk transfer plane.
+      # Defaults to postgres_bytea so a self-host without S3 still works
+      # for small accounts; setup.sh sets STORAGE_BACKEND=s3 + the
+      # STORAGE_S3_* vars when MinIO is wired up.
+      - STORAGE_BACKEND=${STORAGE_BACKEND:-postgres_bytea}
+      - STORAGE_S3_ENDPOINT=${STORAGE_S3_ENDPOINT:-}
+      - STORAGE_S3_REGION=${STORAGE_S3_REGION:-us-east-1}
+      - STORAGE_S3_BUCKET=${STORAGE_S3_BUCKET:-hush-link-archive}
+      - STORAGE_S3_ACCESS_KEY=${STORAGE_S3_ACCESS_KEY:-}
+      - STORAGE_S3_SECRET_KEY=${STORAGE_S3_SECRET_KEY:-}
+      - STORAGE_S3_USE_SSL=${STORAGE_S3_USE_SSL:-true}
+      - LINK_ARCHIVE_USER_QUOTA=${LINK_ARCHIVE_USER_QUOTA:-1}
+      - LINK_ARCHIVE_STAGING_BYTES_CAP=${LINK_ARCHIVE_STAGING_BYTES_CAP:-8589934592}
     depends_on:
       postgres:
         condition: service_healthy
@@ -106,3 +208,4 @@ networks:
 volumes:
   postgres_data:
   redis_data:
+  minio_data:

@@ -14,6 +14,7 @@ For release and deployment paths, see [RELEASE.md](../RELEASE.md).
 3. [Restore Procedure](#3-restore-procedure)
 4. [Rollback Procedure](#4-rollback-procedure)
 5. [Reference: Secrets Classification](#5-reference-secrets-classification)
+6. [Device-link Bulk Transfer (MinIO/S3)](#6-device-link-bulk-transfer-minios3)
 
 ---
 
@@ -314,3 +315,166 @@ curl http://localhost:8080/api/handshake
 | `ADMIN_BOOTSTRAP_SECRET` | **One-time use** | No effect after first owner account is claimed. |
 
 Full explanation in [SECURITY.md §6](../SECURITY.md#6-secrets-lifecycle).
+
+---
+
+## 6. Device-link Bulk Transfer (MinIO/S3)
+
+The chunked archive plane that backs `/api/auth/link-archive-*` uses an
+S3-compatible object store. Two modes are supported:
+
+- **Self-host MinIO** — the bundled `minio` service in
+  `docker-compose.prod.yml` (gated by the `s3-storage` profile).
+  Domain-mode self-hosters get this wired automatically by `setup.sh`.
+- **External S3 / R2 / etc.** — point `STORAGE_S3_*` at a managed
+  bucket. The `minio` service stays off.
+
+`STORAGE_BACKEND=postgres_bytea` keeps chunks in Postgres BYTEA
+without any object storage. Acceptable for tiny self-host installs;
+hits the same proxy body-size limits as the prior in-API path.
+
+### 6.1 Self-host MinIO (domain mode, recommended)
+
+`setup.sh --domain chat.example.com --email …` does the following
+automatically:
+
+- Generates `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` and writes them
+  to `.env`.
+- Sets `STORAGE_BACKEND=s3` plus the `STORAGE_S3_*` block pointing at
+  `storage.<DOMAIN>` (TLS via Caddy + Let's Encrypt).
+- Adds the `--profile s3-storage` flag so the `minio` and
+  `minio-bootstrap` containers are brought up alongside the rest of
+  the stack.
+- The `minio-bootstrap` one-shot creates the `hush-link-archive`
+  bucket (idempotent) and applies the bucket CORS policy that
+  permits the browser client to PUT/GET ciphertext directly with the
+  `x-amz-checksum-sha256` header.
+
+**One operator step is still required:** create a DNS A record
+
+```
+storage.<DOMAIN>   A   <server public IP>
+```
+
+before clients can use the bulk plane. Caddy will obtain a Let's
+Encrypt certificate for `storage.<DOMAIN>` on first request to it.
+
+### 6.2 External S3 / R2 (recommended for production)
+
+Provision the bucket out-of-band:
+
+1. Create a bucket. Recommended name: `hush-link-archive`. Region:
+   wherever your API is.
+2. Create an IAM user / role with PUT, GET, HEAD, DELETE on that
+   bucket.
+3. Enable native SHA-256 object checksums (default on AWS S3 since
+   2022; MinIO supports the same since RELEASE.2022-09-25).
+4. Apply the CORS policy (replace origin):
+
+   ```json
+   {
+     "CORSRules": [
+       {
+         "AllowedOrigin": ["https://app.gethush.live"],
+         "AllowedMethod": ["GET", "PUT", "HEAD"],
+         "AllowedHeader": [
+           "Content-Type",
+           "x-amz-checksum-sha256",
+           "x-amz-content-sha256",
+           "x-amz-date",
+           "authorization"
+         ],
+         "ExposeHeader": ["ETag", "x-amz-checksum-sha256"],
+         "MaxAgeSeconds": 3000
+       }
+     ]
+   }
+   ```
+
+5. Set in `.env`:
+
+   ```
+   STORAGE_BACKEND=s3
+   STORAGE_S3_ENDPOINT=s3.us-east-1.amazonaws.com
+   STORAGE_S3_REGION=us-east-1
+   STORAGE_S3_BUCKET=hush-link-archive
+   STORAGE_S3_ACCESS_KEY=<from IAM>
+   STORAGE_S3_SECRET_KEY=<from IAM>
+   STORAGE_S3_USE_SSL=true
+   ```
+
+6. Restart the stack: `docker compose -f docker-compose.prod.yml -f
+   docker-compose.caddy.yml up -d hush-api`. **Do not** pass
+   `--profile s3-storage` — the bundled MinIO is not used.
+
+### 6.3 IP-mode self-host caveat
+
+The bundled MinIO is not wired in IP mode because there is no
+browser-trusted hostname for `storage.<IP>`. `setup.sh --ip` falls
+back to `STORAGE_BACKEND=postgres_bytea`. Operators who need the
+full bulk plane in IP mode should:
+
+- point `STORAGE_S3_*` at an external S3 bucket (above), or
+- separately provision DNS + a Caddy block for a hostname they own
+  and re-run `setup.sh --domain` against that hostname.
+
+### 6.4 Verifying the bulk plane is live
+
+After `setup.sh` completes, check:
+
+```
+docker logs hush-api 2>&1 | grep -i 'storage backend selected'
+```
+
+Expected:
+
+```
+link-archive: storage backend selected kind=s3
+```
+
+Then run the smoke test:
+
+```
+curl -fsS https://<DOMAIN>/api/handshake | jq .server_version
+curl -fsS -X POST https://<DOMAIN>/api/auth/link-archive-init \
+     -H "Authorization: Bearer <some valid jwt>" -H 'Content-Type: application/json' \
+     -d '{"totalChunks":1,"totalBytes":16,"chunkSize":4194304,
+          "manifestHash":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+          "archiveSha256":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}' | jq .backendKind
+```
+
+A `kind=s3` log line and `"backendKind":"s3"` from the init JSON
+confirm the bulk plane is wired correctly.
+
+### 6.5 Operational containment knobs
+
+| Env var | Default | Purpose |
+|-|-|-|
+| `LINK_ARCHIVE_USER_QUOTA` | `1` | Concurrent active archives per user. |
+| `LINK_ARCHIVE_STAGING_BYTES_CAP` | `8589934592` (8 GiB) | Sum of `total_bytes` across all non-terminal archives. New `link-archive-init` returns 503 once this is reached. |
+
+The sliding 60-min expiry and 7-day hard deadline are constants in
+the API binary; tiered-TTL GC reaps acknowledged/aborted archives
+immediately, terminal_failure/imported (no-ack) after 24 h, and
+active states once the sliding window lapses.
+
+### 6.6 Rotating MinIO credentials
+
+The bundled MinIO uses `MINIO_ROOT_USER` + `MINIO_ROOT_PASSWORD` and
+the same values as `STORAGE_S3_ACCESS_KEY` + `STORAGE_S3_SECRET_KEY`.
+To rotate:
+
+1. Generate new values (`openssl rand -hex 24`).
+2. Update all four env vars in `.env`.
+3. `docker compose --profile s3-storage -f docker-compose.prod.yml -f
+    docker-compose.caddy.yml up -d minio hush-api`.
+4. The bootstrap container is idempotent on re-run; it will re-apply
+   CORS but will not re-create the bucket if it already exists.
+
+### 6.7 Backup considerations
+
+`minio_data` is a Docker named volume; back it up the same way you
+back up `postgres_data`. The bucket holds short-lived chunk
+ciphertext only (purger cleans archives within hours of completion);
+losing it during a backup window does not lose long-term user data,
+but does abort any in-flight archive transfers.

@@ -51,3 +51,21 @@ __DOMAIN__ {
     format console
   }
 }
+
+# Device-link bulk transfer storage: presigned-URL endpoint for the
+# MinIO backend. Requires a DNS A record `storage.__DOMAIN__` pointing
+# at this server. The browser PUTs/GETs ciphertext directly here via
+# presigned URLs minted by the API; chunks never traverse the API
+# process.
+#
+# CORS is enforced by MinIO at the bucket level (see scripts/setup.sh
+# bootstrap step), not by Caddy, because the SDK signature includes
+# Host + path and any header-rewriting middleware could break it.
+storage.__DOMAIN__ {
+  reverse_proxy minio:9000
+
+  log {
+    output stdout
+    format console
+  }
+}

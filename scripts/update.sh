@@ -32,7 +32,11 @@ LOG_PREFIX="[hush]"
 log() { printf '%s %s\n' "$LOG_PREFIX" "$1"; }
 err() { printf '%s ERROR: %s\n' "$LOG_PREFIX" "$1" >&2; }
 die() { err "$1"; exit "${2:-1}"; }
-compose_cmd() { $DOCKER_COMPOSE -f "$COMPOSE_BASE_FILE" -f "$COMPOSE_PROXY_FILE" "$@"; }
+
+# COMPOSE_PROFILE_ARGS picks up the s3-storage profile when the .env
+# wired the bundled MinIO. Set after .env is rendered, below.
+COMPOSE_PROFILE_ARGS=""
+compose_cmd() { $DOCKER_COMPOSE -f "$COMPOSE_BASE_FILE" -f "$COMPOSE_PROXY_FILE" $COMPOSE_PROFILE_ARGS "$@"; }
 
 # ---------------------------------------------------------------------------
 # Resolve project root
@@ -91,6 +95,21 @@ if ! docker info >/dev/null 2>&1; then
 fi
 
 log "Pre-flight checks passed."
+
+# Decide whether the bundled MinIO/s3-storage profile should be active.
+# Reads STORAGE_BACKEND from .env without sourcing the file (.env may
+# contain values with shell metacharacters that we do not want to
+# expand here).
+_storage_backend="$(grep -m1 '^STORAGE_BACKEND=' .env 2>/dev/null | cut -d= -f2- || true)"
+_minio_user="$(grep -m1 '^MINIO_ROOT_USER=' .env 2>/dev/null | cut -d= -f2- || true)"
+if [ "$_storage_backend" = "s3" ] && [ -n "$_minio_user" ]; then
+  COMPOSE_PROFILE_ARGS="--profile s3-storage"
+  log "Bulk plane: bundled MinIO active (STORAGE_BACKEND=s3 + MINIO_ROOT_USER set)."
+elif [ "$_storage_backend" = "s3" ]; then
+  log "Bulk plane: STORAGE_BACKEND=s3, external bucket (no bundled MinIO)."
+else
+  log "Bulk plane: STORAGE_BACKEND=${_storage_backend:-postgres_bytea} (no S3 backend)."
+fi
 
 # ---------------------------------------------------------------------------
 # Step 2: Backup database

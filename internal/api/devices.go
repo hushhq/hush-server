@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/hushhq/hush-server/internal/db"
+	"github.com/hushhq/hush-server/internal/storage"
 	"github.com/hushhq/hush-server/internal/transparency"
 
 	"github.com/go-chi/chi/v5"
@@ -85,19 +86,46 @@ type storedLinkResult struct {
 //
 // hub may be nil; all broadcast calls are nil-checked before use.
 func DeviceRoutes(store db.Store, jwtSecret string, transparencySvc *transparency.TransparencyService, hub GlobalBroadcaster) func(r chi.Router) {
-	h := &deviceHandler{
+	h := newDeviceHandler(store, transparencySvc, hub)
+	return h.routes(jwtSecret)
+}
+
+// newDeviceHandler builds the deviceHandler without mounting routes; callers
+// that need a handle on the handler (for example, to start the link-archive
+// purger goroutine) use this directly.
+//
+// The link-archive plane requires a storage.Backend; the in-process
+// helper newDefaultLinkArchiveBackend wires the postgres_bytea backend
+// over the same store so the call site below stays simple. Production
+// deployments swap this through the env-driven factory at startup.
+func newDeviceHandler(store db.Store, transparencySvc *transparency.TransparencyService, hub GlobalBroadcaster) *deviceHandler {
+	return &deviceHandler{
 		store:           store,
 		transparencySvc: transparencySvc,
 		hub:             hub,
+		backend:         storage.NewPostgresBytea(store),
 		approvalTracker: make(map[string][]time.Time),
 	}
+}
+
+// newDeviceHandlerWithBackend lets the application boot wire a
+// non-default backend (e.g. one constructed via storage.LoadConfig +
+// storage.NewBackend so STORAGE_BACKEND=s3 takes effect).
+func newDeviceHandlerWithBackend(store db.Store, transparencySvc *transparency.TransparencyService, hub GlobalBroadcaster, backend storage.Backend) *deviceHandler {
+	h := newDeviceHandler(store, transparencySvc, hub)
+	h.backend = backend
+	return h
+}
+
+// routes returns the chi setup func; lifted out so callers can mount it.
+func (h *deviceHandler) routes(jwtSecret string) func(r chi.Router) {
 	return func(r chi.Router) {
 		// New-device side: no auth session exists yet.
 		r.Post("/link-request", h.linkRequest)
 		r.Post("/link-result", h.linkResult)
 
 		r.Group(func(r chi.Router) {
-			r.Use(RequireAuth(jwtSecret, store))
+			r.Use(RequireAuth(jwtSecret, h.store))
 
 			r.Route("/devices", func(r chi.Router) {
 				r.Get("/", h.listDevices)
@@ -109,6 +137,10 @@ func DeviceRoutes(store db.Store, jwtSecret string, transparencySvc *transparenc
 			r.Post("/link-resolve", h.linkResolve)
 			r.Post("/link-verify", h.linkVerify)
 		})
+
+		// Chunked device-link transfer plane. Authenticated upload routes and
+		// download-token-gated download routes are mounted side-by-side.
+		h.linkArchiveRoutes(r, jwtSecret)
 	}
 }
 
@@ -117,6 +149,10 @@ type deviceHandler struct {
 	transparencySvc *transparency.TransparencyService
 	// hub is used for downstream WS notifications. May be nil.
 	hub GlobalBroadcaster
+
+	// backend stores chunk bytes for the link-archive plane. Always
+	// non-nil after newDeviceHandler runs.
+	backend storage.Backend
 
 	// approvalTracker tracks per-signing-device approval timestamps for soft
 	// rate monitoring. Access is guarded by approvalMu.

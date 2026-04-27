@@ -207,6 +207,27 @@ type mockStore struct {
 	// Read markers (GC.3)
 	getUnreadCountFn  func(ctx context.Context, channelID, userID string) (int, error)
 	markChannelReadFn func(ctx context.Context, channelID, userID, messageID string) error
+
+	// Link archive methods (chunked device-link transfer).
+	insertLinkArchiveFn                 func(ctx context.Context, in db.LinkArchiveInsert) (*db.LinkArchive, error)
+	countActiveLinkArchivesForUserFn    func(ctx context.Context, userID string) (int, error)
+	sumActiveLinkArchiveBytesFn         func(ctx context.Context) (int64, error)
+	transitionLinkArchiveStateFn        func(ctx context.Context, archiveID, nextState string, allowedFrom []string) error
+	getLinkArchiveByIDFn                func(ctx context.Context, archiveID string) (*db.LinkArchive, error)
+	getLinkArchiveByUploadTokenHashFn   func(ctx context.Context, archiveID string, tokenHash []byte) (*db.LinkArchive, error)
+	getLinkArchiveByDownloadTokenHashFn func(ctx context.Context, archiveID string, tokenHash []byte) (*db.LinkArchive, error)
+	refreshLinkArchiveExpiryFn          func(ctx context.Context, archiveID string, ttl time.Duration) (time.Time, error)
+	insertLinkArchiveChunkFn            func(ctx context.Context, in db.LinkArchiveChunkInsert) error
+	getLinkArchiveChunkPointerFn        func(ctx context.Context, archiveID string, idx int) (string, string, error)
+	listLinkArchiveChunkRowsFn          func(ctx context.Context, archiveID string) ([]db.LinkArchiveChunkRow, error)
+	markLinkArchiveFinalizedFn          func(ctx context.Context, archiveID string) error
+	deleteLinkArchiveFn                 func(ctx context.Context, archiveID string) error
+	listGcEligibleLinkArchivesFn        func(ctx context.Context, limit int) ([]string, error)
+	purgeExpiredLinkArchivesFn          func(ctx context.Context) (int64, error)
+	upsertChunkBlobFn                   func(ctx context.Context, storageKey string, bytes []byte) error
+	getChunkBlobFn                      func(ctx context.Context, storageKey string) ([]byte, error)
+	deleteChunkBlobFn                   func(ctx context.Context, storageKey string) error
+	chunkBlobExistsFn                   func(ctx context.Context, storageKey string) (bool, error)
 }
 
 func (m *mockStore) Ping(ctx context.Context) error {
@@ -1331,6 +1352,141 @@ func decodeError(t *testing.T, rr *httptest.ResponseRecorder) map[string]string 
 	var m map[string]string
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&m))
 	return m
+}
+
+// ---------- Link archives ----------
+
+func (m *mockStore) InsertLinkArchive(ctx context.Context, in db.LinkArchiveInsert) (*db.LinkArchive, error) {
+	if m.insertLinkArchiveFn != nil {
+		return m.insertLinkArchiveFn(ctx, in)
+	}
+	return nil, errors.New("InsertLinkArchive not implemented")
+}
+
+func (m *mockStore) CountActiveLinkArchivesForUser(ctx context.Context, userID string) (int, error) {
+	if m.countActiveLinkArchivesForUserFn != nil {
+		return m.countActiveLinkArchivesForUserFn(ctx, userID)
+	}
+	return 0, nil
+}
+
+func (m *mockStore) SumActiveLinkArchiveBytes(ctx context.Context) (int64, error) {
+	if m.sumActiveLinkArchiveBytesFn != nil {
+		return m.sumActiveLinkArchiveBytesFn(ctx)
+	}
+	return 0, nil
+}
+
+func (m *mockStore) TransitionLinkArchiveState(ctx context.Context, archiveID, nextState string, allowedFrom []string) error {
+	if m.transitionLinkArchiveStateFn != nil {
+		return m.transitionLinkArchiveStateFn(ctx, archiveID, nextState, allowedFrom)
+	}
+	return nil
+}
+
+func (m *mockStore) GetLinkArchiveByID(ctx context.Context, archiveID string) (*db.LinkArchive, error) {
+	if m.getLinkArchiveByIDFn != nil {
+		return m.getLinkArchiveByIDFn(ctx, archiveID)
+	}
+	return nil, errors.New("GetLinkArchiveByID not implemented")
+}
+
+func (m *mockStore) GetLinkArchiveByUploadTokenHash(ctx context.Context, archiveID string, tokenHash []byte) (*db.LinkArchive, error) {
+	if m.getLinkArchiveByUploadTokenHashFn != nil {
+		return m.getLinkArchiveByUploadTokenHashFn(ctx, archiveID, tokenHash)
+	}
+	return nil, errors.New("GetLinkArchiveByUploadTokenHash not implemented")
+}
+
+func (m *mockStore) GetLinkArchiveByDownloadTokenHash(ctx context.Context, archiveID string, tokenHash []byte) (*db.LinkArchive, error) {
+	if m.getLinkArchiveByDownloadTokenHashFn != nil {
+		return m.getLinkArchiveByDownloadTokenHashFn(ctx, archiveID, tokenHash)
+	}
+	return nil, errors.New("GetLinkArchiveByDownloadTokenHash not implemented")
+}
+
+func (m *mockStore) RefreshLinkArchiveExpiry(ctx context.Context, archiveID string, ttl time.Duration) (time.Time, error) {
+	if m.refreshLinkArchiveExpiryFn != nil {
+		return m.refreshLinkArchiveExpiryFn(ctx, archiveID, ttl)
+	}
+	return time.Time{}, nil
+}
+
+func (m *mockStore) InsertLinkArchiveChunk(ctx context.Context, in db.LinkArchiveChunkInsert) error {
+	if m.insertLinkArchiveChunkFn != nil {
+		return m.insertLinkArchiveChunkFn(ctx, in)
+	}
+	return nil
+}
+
+func (m *mockStore) GetLinkArchiveChunkPointer(ctx context.Context, archiveID string, idx int) (string, string, error) {
+	if m.getLinkArchiveChunkPointerFn != nil {
+		return m.getLinkArchiveChunkPointerFn(ctx, archiveID, idx)
+	}
+	return "", "", errors.New("GetLinkArchiveChunkPointer not implemented")
+}
+
+func (m *mockStore) ListLinkArchiveChunkRows(ctx context.Context, archiveID string) ([]db.LinkArchiveChunkRow, error) {
+	if m.listLinkArchiveChunkRowsFn != nil {
+		return m.listLinkArchiveChunkRowsFn(ctx, archiveID)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) MarkLinkArchiveFinalized(ctx context.Context, archiveID string) error {
+	if m.markLinkArchiveFinalizedFn != nil {
+		return m.markLinkArchiveFinalizedFn(ctx, archiveID)
+	}
+	return nil
+}
+
+func (m *mockStore) DeleteLinkArchive(ctx context.Context, archiveID string) error {
+	if m.deleteLinkArchiveFn != nil {
+		return m.deleteLinkArchiveFn(ctx, archiveID)
+	}
+	return nil
+}
+
+func (m *mockStore) ListGcEligibleLinkArchives(ctx context.Context, limit int) ([]string, error) {
+	if m.listGcEligibleLinkArchivesFn != nil {
+		return m.listGcEligibleLinkArchivesFn(ctx, limit)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) UpsertChunkBlob(ctx context.Context, storageKey string, bytes []byte) error {
+	if m.upsertChunkBlobFn != nil {
+		return m.upsertChunkBlobFn(ctx, storageKey, bytes)
+	}
+	return nil
+}
+
+func (m *mockStore) GetChunkBlob(ctx context.Context, storageKey string) ([]byte, error) {
+	if m.getChunkBlobFn != nil {
+		return m.getChunkBlobFn(ctx, storageKey)
+	}
+	return nil, errors.New("GetChunkBlob not implemented")
+}
+
+func (m *mockStore) DeleteChunkBlob(ctx context.Context, storageKey string) error {
+	if m.deleteChunkBlobFn != nil {
+		return m.deleteChunkBlobFn(ctx, storageKey)
+	}
+	return nil
+}
+
+func (m *mockStore) ChunkBlobExists(ctx context.Context, storageKey string) (bool, error) {
+	if m.chunkBlobExistsFn != nil {
+		return m.chunkBlobExistsFn(ctx, storageKey)
+	}
+	return false, nil
+}
+
+func (m *mockStore) PurgeExpiredLinkArchives(ctx context.Context) (int64, error) {
+	if m.purgeExpiredLinkArchivesFn != nil {
+		return m.purgeExpiredLinkArchivesFn(ctx)
+	}
+	return 0, nil
 }
 
 func ptrString(s string) *string {

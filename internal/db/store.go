@@ -50,6 +50,33 @@ type Store interface {
 	// returns the number of rows deleted.
 	PurgeExpiredNonces(ctx context.Context) (int64, error)
 
+	// Chunked device-link archive methods (migrations 000031 + 000032).
+	// Token hashes are SHA-256 of the raw 32-byte bearer tokens; raw tokens
+	// never touch persistent storage.
+	InsertLinkArchive(ctx context.Context, in LinkArchiveInsert) (*LinkArchive, error)
+	CountActiveLinkArchivesForUser(ctx context.Context, userID string) (int, error)
+	SumActiveLinkArchiveBytes(ctx context.Context) (int64, error)
+	TransitionLinkArchiveState(ctx context.Context, archiveID, nextState string, allowedFrom []string) error
+	GetLinkArchiveByID(ctx context.Context, archiveID string) (*LinkArchive, error)
+	GetLinkArchiveByUploadTokenHash(ctx context.Context, archiveID string, tokenHash []byte) (*LinkArchive, error)
+	GetLinkArchiveByDownloadTokenHash(ctx context.Context, archiveID string, tokenHash []byte) (*LinkArchive, error)
+	RefreshLinkArchiveExpiry(ctx context.Context, archiveID string, ttl time.Duration) (time.Time, error)
+	InsertLinkArchiveChunk(ctx context.Context, in LinkArchiveChunkInsert) error
+	GetLinkArchiveChunkPointer(ctx context.Context, archiveID string, idx int) (storageBackend, storageKey string, err error)
+	ListLinkArchiveChunkRows(ctx context.Context, archiveID string) ([]LinkArchiveChunkRow, error)
+	MarkLinkArchiveFinalized(ctx context.Context, archiveID string) error
+	DeleteLinkArchive(ctx context.Context, archiveID string) error
+	ListGcEligibleLinkArchives(ctx context.Context, limit int) ([]string, error)
+	PurgeExpiredLinkArchives(ctx context.Context) (int64, error)
+
+	// Storage-backend chunk-bytes plane (migration 000032).
+	// PostgresBytea backend persists archive chunk bytes here; the s3
+	// backend never touches these methods.
+	UpsertChunkBlob(ctx context.Context, storageKey string, bytes []byte) error
+	GetChunkBlob(ctx context.Context, storageKey string) ([]byte, error)
+	DeleteChunkBlob(ctx context.Context, storageKey string) error
+	ChunkBlobExists(ctx context.Context, storageKey string) (bool, error)
+
 	// Device key methods
 	// InsertDeviceKey stores a certified device public key for a user.
 	// certificate may be nil for the first (root) device.

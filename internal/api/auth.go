@@ -19,6 +19,7 @@ import (
 	"github.com/hushhq/hush-server/internal/auth"
 	"github.com/hushhq/hush-server/internal/db"
 	"github.com/hushhq/hush-server/internal/models"
+	"github.com/hushhq/hush-server/internal/storage"
 	"github.com/hushhq/hush-server/internal/transparency"
 
 	"github.com/go-chi/chi/v5"
@@ -89,9 +90,29 @@ func AuthRoutes(store db.Store, jwtSecret string, jwtExpiry time.Duration, trans
 	if len(hub) > 0 {
 		deviceHub = hub[0]
 	}
-	r.Group(DeviceRoutes(store, jwtSecret, transparencySvc, deviceHub))
+	dh := newDeviceHandler(store, transparencySvc, deviceHub)
+	// Override the default postgres_bytea backend when STORAGE_BACKEND
+	// resolves to something different (typically `s3`). Failures here
+	// are non-fatal: we log and keep the default so a bad operator
+	// config does not take auth offline.
+	if cfg, cfgErr := storage.LoadConfig(); cfgErr != nil {
+		slog.Warn("link-archive: storage.LoadConfig failed; falling back to postgres_bytea", "err", cfgErr)
+	} else if cfg.Kind != storage.BackendPostgresBytea {
+		if backend, bErr := storage.NewBackend(cfg, store); bErr != nil {
+			slog.Error("link-archive: storage.NewBackend failed; falling back to postgres_bytea", "err", bErr)
+		} else {
+			dh.backend = backend
+			slog.Info("link-archive: storage backend selected", "kind", cfg.Kind)
+		}
+	}
+	r.Group(dh.routes(jwtSecret))
 
 	go h.purgeNoncesLoop()
+	// Supervised purger; honours ctx.Done(). Backed by context.Background
+	// here because the existing AuthRoutes signature predates the
+	// ctx-threaded shutdown path; main.go already terminates background
+	// goroutines on process exit. Future cleanup can lift ctx through.
+	go dh.purgeLinkArchivesSupervised(context.Background())
 
 	return r
 }
