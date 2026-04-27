@@ -61,6 +61,12 @@ type adminStore interface {
 
 // AdminAPIRoutes returns the chi router for /api/admin.
 // Bootstrap and session routes are public; all resource routes use local admin sessions.
+//
+// httpMetrics and hubStats are optional operator telemetry hooks consumed by
+// the /metrics route; they may be nil in tests where the metrics surface is
+// not under exercise. startedAt overrides the handler's process-start time
+// when non-zero so the uptime-bearing endpoints stay consistent across the
+// admin and metrics surfaces wired by main.go.
 func AdminAPIRoutes(
 	store adminStore,
 	bootstrapSecret string,
@@ -70,17 +76,25 @@ func AdminAPIRoutes(
 	hub GlobalBroadcaster,
 	cache *InstanceCache,
 	roomService livekit.RoomService,
+	httpMetrics *HTTPMetrics,
+	hubStats HubStatsProvider,
+	startedAt time.Time,
 ) chi.Router {
+	if startedAt.IsZero() {
+		startedAt = time.Now()
+	}
 	h := &adminHandler{
 		store:                    store,
 		hub:                      hub,
 		cache:                    cache,
 		roomService:              roomService,
-		startedAt:                time.Now(),
+		startedAt:                startedAt,
 		bootstrapSecret:          bootstrapSecret,
 		sessionTTL:               sessionTTL,
 		secureCookies:            secureCookies,
 		serviceIdentityMasterKey: serviceIdentityMasterKey,
+		httpMetrics:              httpMetrics,
+		hubStats:                 hubStats,
 	}
 	r := chi.NewRouter()
 	r.Post("/bootstrap/status", h.bootstrapStatus)
@@ -96,6 +110,7 @@ func AdminAPIRoutes(
 		protected.Get("/guilds", h.listGuilds)
 		protected.Get("/users", h.listUsers)
 		protected.Get("/health", h.health)
+		protected.Get("/metrics", h.metrics)
 		protected.Get("/config", h.getConfig)
 		protected.Put("/config", h.updateConfig)
 		protected.Get("/templates", h.listServerTemplates)
@@ -126,6 +141,8 @@ type adminHandler struct {
 	sessionTTL               time.Duration
 	secureCookies            bool
 	serviceIdentityMasterKey string
+	httpMetrics              *HTTPMetrics
+	hubStats                 HubStatsProvider
 }
 
 // instanceBanEvictionTimeout caps each per-channel RemoveParticipant

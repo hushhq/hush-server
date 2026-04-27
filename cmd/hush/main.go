@@ -197,15 +197,42 @@ func main() {
 				}
 			}
 		}()
+
+		// Session cleanup: drop expired user sessions and stale admin sessions
+		// once a day. Expired rows are already rejected at the read path; this
+		// exists to keep the tables bounded over time.
+		go func() {
+			const adminRevokedRetention = 30 * 24 * time.Hour
+			ticker := time.NewTicker(24 * time.Hour)
+			defer ticker.Stop()
+			for range ticker.C {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				if n, err := pool.PurgeExpiredSessions(ctx); err != nil {
+					slog.Error("session cleanup: user sessions", "err", err)
+				} else if n > 0 {
+					slog.Info("expired user sessions purged", "count", n)
+				}
+				if n, err := pool.PurgeStaleAdminSessions(ctx, adminRevokedRetention); err != nil {
+					slog.Error("session cleanup: admin sessions", "err", err)
+				} else if n > 0 {
+					slog.Info("stale admin sessions purged", "count", n)
+				}
+				cancel()
+			}
+		}()
 	}
 
 	wsOrigin := api.WSOriginFromCORSOrigin(cfg.CORSOrigin)
+
+	startedAt := time.Now()
+	httpMetrics := api.NewHTTPMetrics()
 
 	r := chi.NewRouter()
 	r.Use(chimiddleware.RequestID)
 	r.Use(chimiddleware.RealIP)
 	r.Use(chimiddleware.Logger)
 	r.Use(chimiddleware.Recoverer)
+	r.Use(api.HTTPMetricsMiddleware(httpMetrics))
 	// Security headers before CORS so they are always present regardless of origin check outcome.
 	r.Use(api.SecurityHeaders(cfg.Production, wsOrigin))
 	r.Use(cors.Handler(cors.Options{
@@ -285,6 +312,9 @@ func main() {
 			wsHub,
 			handshakeCache,
 			roomService,
+			httpMetrics,
+			wsHub,
+			startedAt,
 		))
 
 		r.Get("/ws", ws.Handler(wsHub, cfg.JWTSecret, pool, cfg.CORSOrigin))

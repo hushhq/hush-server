@@ -48,6 +48,8 @@ type mockStore struct {
 	createSessionFn                      func(ctx context.Context, sessionID, userID, tokenHash string, expiresAt time.Time) (*models.Session, error)
 	getSessionByTokenHashFn              func(ctx context.Context, tokenHash string) (*models.Session, error)
 	deleteSessionByIDFn                  func(ctx context.Context, sessionID string) error
+	purgeExpiredSessionsFn               func(ctx context.Context) (int64, error)
+	purgeStaleAdminSessionsFn            func(ctx context.Context, revokedRetention time.Duration) (int64, error)
 	countInstanceAdminsFn                func(ctx context.Context) (int, error)
 	createInstanceAdminFn                func(ctx context.Context, username string, email *string, passwordHash, role string) (*models.InstanceAdmin, error)
 	getInstanceAdminByUsernameFn         func(ctx context.Context, username string) (*models.InstanceAdmin, error)
@@ -368,6 +370,20 @@ func (m *mockStore) DeleteSessionByID(ctx context.Context, sessionID string) err
 		return m.deleteSessionByIDFn(ctx, sessionID)
 	}
 	return nil
+}
+
+func (m *mockStore) PurgeExpiredSessions(ctx context.Context) (int64, error) {
+	if m.purgeExpiredSessionsFn != nil {
+		return m.purgeExpiredSessionsFn(ctx)
+	}
+	return 0, nil
+}
+
+func (m *mockStore) PurgeStaleAdminSessions(ctx context.Context, revokedRetention time.Duration) (int64, error) {
+	if m.purgeStaleAdminSessionsFn != nil {
+		return m.purgeStaleAdminSessionsFn(ctx, revokedRetention)
+	}
+	return 0, nil
 }
 
 func (m *mockStore) CountInstanceAdmins(ctx context.Context) (int, error) {

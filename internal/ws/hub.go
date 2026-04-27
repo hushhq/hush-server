@@ -300,6 +300,27 @@ func (h *Hub) DisconnectUser(userID string) {
 	}
 }
 
+// HubStats is a point-in-time snapshot of Hub population counters used by
+// operator-facing metrics endpoints. All fields are non-negative.
+type HubStats struct {
+	Clients          int `json:"clients"`
+	PresentIdentities int `json:"presentIdentities"`
+	SubscribedChannels int `json:"subscribedChannels"`
+	SubscribedServers  int `json:"subscribedServers"`
+}
+
+// Stats returns the current Hub population. Cheap; takes only the read lock.
+func (h *Hub) Stats() HubStats {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return HubStats{
+		Clients:            len(h.clients),
+		PresentIdentities:  len(h.presence),
+		SubscribedChannels: len(h.channels),
+		SubscribedServers:  len(h.servers),
+	}
+}
+
 func (h *Hub) broadcastPresenceLocked() {
 	userIDs := make([]string, 0, len(h.presence))
 	for uid := range h.presence {

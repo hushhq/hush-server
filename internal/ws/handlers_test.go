@@ -74,6 +74,10 @@ func (m *messageStoreMock) GetSessionByTokenHash(context.Context, string) (*mode
 	return nil, nil
 }
 func (m *messageStoreMock) DeleteSessionByID(context.Context, string) error  { return nil }
+func (m *messageStoreMock) PurgeExpiredSessions(context.Context) (int64, error) { return 0, nil }
+func (m *messageStoreMock) PurgeStaleAdminSessions(context.Context, time.Duration) (int64, error) {
+	return 0, nil
+}
 func (m *messageStoreMock) CountInstanceAdmins(context.Context) (int, error) { return 0, nil }
 func (m *messageStoreMock) CreateInstanceAdmin(context.Context, string, *string, string, string) (*models.InstanceAdmin, error) {
 	return nil, nil

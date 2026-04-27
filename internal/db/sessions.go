@@ -44,3 +44,14 @@ func (p *Pool) DeleteSessionByID(ctx context.Context, sessionID string) error {
 	_, err := p.Exec(ctx, `DELETE FROM sessions WHERE id = $1`, sessionID)
 	return err
 }
+
+// PurgeExpiredSessions deletes session rows whose expires_at is in the past.
+// Returns the number of rows removed. Expired rows are already rejected by
+// GetSessionByTokenHash; this exists to keep the table bounded.
+func (p *Pool) PurgeExpiredSessions(ctx context.Context) (int64, error) {
+	tag, err := p.Exec(ctx, `DELETE FROM sessions WHERE expires_at < now()`)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}

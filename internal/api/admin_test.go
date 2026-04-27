@@ -36,6 +36,9 @@ func adminRouterWithRoomService(store *mockStore, rs livekit.RoomService) http.H
 		nil,
 		nil,
 		rs,
+		nil,
+		nil,
+		time.Time{},
 	)
 }
 

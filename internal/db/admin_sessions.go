@@ -54,6 +54,22 @@ func (p *Pool) DeleteInstanceAdminSessionByID(ctx context.Context, sessionID str
 	return err
 }
 
+// PurgeStaleAdminSessions deletes admin-session rows whose expires_at is in
+// the past, plus any revoked rows older than revokedRetention. Returns the
+// number of rows removed.
+func (p *Pool) PurgeStaleAdminSessions(ctx context.Context, revokedRetention time.Duration) (int64, error) {
+	tag, err := p.Exec(ctx, `
+		DELETE FROM instance_admin_sessions
+		WHERE expires_at < now()
+		   OR (revoked_at IS NOT NULL AND revoked_at < now() - $1::interval)`,
+		revokedRetention,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
 // UpdateInstanceAdminSessionLastSeen records the latest request time for a session.
 func (p *Pool) UpdateInstanceAdminSessionLastSeen(ctx context.Context, sessionID string, seenAt time.Time) error {
 	_, err := p.Exec(ctx, `

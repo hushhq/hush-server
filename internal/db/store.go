@@ -98,6 +98,15 @@ type Store interface {
 	CreateSession(ctx context.Context, sessionID, userID, tokenHash string, expiresAt time.Time) (*models.Session, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash string) (*models.Session, error)
 	DeleteSessionByID(ctx context.Context, sessionID string) error
+	// PurgeExpiredSessions deletes user-session rows whose expires_at is in
+	// the past. Returns the number of rows removed. Hygienic only — expired
+	// rows are already rejected by GetSessionByTokenHash; this prevents the
+	// table from growing unboundedly.
+	PurgeExpiredSessions(ctx context.Context) (int64, error)
+	// PurgeStaleAdminSessions deletes admin-session rows whose expires_at is
+	// in the past, plus any revoked rows older than revokedRetention. Returns
+	// the number of rows removed.
+	PurgeStaleAdminSessions(ctx context.Context, revokedRetention time.Duration) (int64, error)
 
 	// MLS credential methods
 	UpsertMLSCredential(ctx context.Context, userID, deviceID string, credentialBytes, signingPublicKey []byte, identityVersion int) error
