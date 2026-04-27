@@ -105,20 +105,25 @@ services:
         # PUTs and GETs ciphertext directly to the bucket, declaring the
         # SHA-256 via x-amz-checksum-sha256 and verifying the same
         # header on download.
-        cat >/tmp/cors.json <<JSON
-        {
-          "CORSRules": [
-            {
-              "AllowedOrigins": ["$$STORAGE_BROWSER_ORIGIN"],
-              "AllowedMethods": ["GET", "PUT", "HEAD"],
-              "AllowedHeaders": ["Content-Type", "x-amz-checksum-sha256", "x-amz-content-sha256", "x-amz-date", "authorization"],
-              "ExposeHeaders": ["ETag", "x-amz-checksum-sha256"],
-              "MaxAgeSeconds": 3000
-            }
-          ]
-        }
-        JSON
-        mc cors set "local/$$STORAGE_S3_BUCKET" /tmp/cors.json
+        cat >/tmp/cors.xml <<XML
+        <CORSConfiguration>
+          <CORSRule>
+            <AllowedOrigin>$$STORAGE_BROWSER_ORIGIN</AllowedOrigin>
+            <AllowedMethod>GET</AllowedMethod>
+            <AllowedMethod>PUT</AllowedMethod>
+            <AllowedMethod>HEAD</AllowedMethod>
+            <AllowedHeader>Content-Type</AllowedHeader>
+            <AllowedHeader>x-amz-checksum-sha256</AllowedHeader>
+            <AllowedHeader>x-amz-content-sha256</AllowedHeader>
+            <AllowedHeader>x-amz-date</AllowedHeader>
+            <AllowedHeader>authorization</AllowedHeader>
+            <ExposeHeader>ETag</ExposeHeader>
+            <ExposeHeader>x-amz-checksum-sha256</ExposeHeader>
+            <MaxAgeSeconds>3000</MaxAgeSeconds>
+          </CORSRule>
+        </CORSConfiguration>
+        XML
+        mc cors set "local/$$STORAGE_S3_BUCKET" /tmp/cors.xml
         echo "minio-bootstrap: bucket $$STORAGE_S3_BUCKET ready, CORS allowed origin $$STORAGE_BROWSER_ORIGIN"
     restart: "no"
     networks:
