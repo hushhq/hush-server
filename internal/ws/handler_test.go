@@ -107,3 +107,28 @@ func TestHandler_NormalJWT_URLToken_Accepts(t *testing.T) {
 	}
 	conn.Close()
 }
+
+func TestOriginChecker_AllowsPrimaryOrigin(t *testing.T) {
+	checkOrigin := newOriginChecker("https://app.example.com", []string{"app://localhost"})
+
+	assert.True(t, checkOrigin("https://app.example.com"))
+}
+
+func TestOriginChecker_AllowsAdditionalDesktopOrigin(t *testing.T) {
+	checkOrigin := newOriginChecker("https://app.example.com", []string{"app://localhost"})
+
+	assert.True(t, checkOrigin("app://localhost"))
+}
+
+func TestOriginChecker_RejectsUnknownOrigin(t *testing.T) {
+	checkOrigin := newOriginChecker("https://app.example.com", []string{"app://localhost"})
+
+	assert.False(t, checkOrigin("https://evil.example"))
+}
+
+func TestOriginChecker_WildcardAllowsAllOrigins(t *testing.T) {
+	checkOrigin := newOriginChecker("*", nil)
+
+	assert.True(t, checkOrigin("https://evil.example"))
+	assert.True(t, checkOrigin("app://localhost"))
+}

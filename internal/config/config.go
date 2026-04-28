@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -13,6 +14,7 @@ type Config struct {
 	JWTSecret                string
 	JWTExpiry                time.Duration
 	CORSOrigin               string
+	WSAllowedOrigins         []string
 	Production               bool
 	AdminBootstrapSecret     string
 	AdminSessionTTL          time.Duration
@@ -62,6 +64,7 @@ func Load() Config {
 		JWTSecret:                 os.Getenv("JWT_SECRET"),
 		JWTExpiry:                 time.Duration(jwtExpiryHours) * time.Hour,
 		CORSOrigin:                corsOrigin,
+		WSAllowedOrigins:          parseCSV(os.Getenv("WS_ALLOWED_ORIGINS")),
 		Production:                production,
 		AdminBootstrapSecret:      os.Getenv("ADMIN_BOOTSTRAP_SECRET"),
 		AdminSessionTTL:           time.Duration(adminSessionTTLHours) * time.Hour,
@@ -71,4 +74,19 @@ func Load() Config {
 		LiveKitURL:                os.Getenv("LIVEKIT_URL"),
 		TransparencyLogPrivateKey: os.Getenv("TRANSPARENCY_LOG_PRIVATE_KEY"),
 	}
+}
+
+func parseCSV(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	items := make([]string, 0, len(parts))
+	for _, part := range parts {
+		item := strings.TrimSpace(part)
+		if item != "" {
+			items = append(items, item)
+		}
+	}
+	return items
 }

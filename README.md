@@ -146,6 +146,7 @@ The server reads configuration from environment variables (or `.env` in the proj
 | `ADMIN_SESSION_TTL_HOURS` | Dashboard session lifetime in hours |
 | `DOMAIN` | Public instance hostname; also used to derive `CORS_ORIGIN` when omitted |
 | `CORS_ORIGIN` | Allowed frontend origin. For backend-only self-hosting with the official client, use `https://app.gethush.live`. Do not use `*` in production. |
+| `WS_ALLOWED_ORIGINS` | Optional comma-separated extra WebSocket origins for trusted desktop shells, for example `app://localhost`. |
 | `SERVICE_IDENTITY_MASTER_KEY` | 32-byte hex/base64 key used to wrap the instance service identity private key at rest |
 | `LIVEKIT_API_KEY` | LiveKit API key |
 | `LIVEKIT_API_SECRET` | LiveKit API secret |

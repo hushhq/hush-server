@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"slices"
 
 	"github.com/hushhq/hush-server/internal/auth"
 	"github.com/hushhq/hush-server/internal/db"
@@ -16,19 +17,17 @@ var errFederationUnsupported = errors.New("federation is not supported in this M
 
 // Handler returns an HTTP handler that upgrades to WebSocket and runs the client.
 // Validates JWT (and session if pool is non-nil) from query param or first message.
-// corsOrigin controls the WebSocket origin check: "*" allows all origins,
-// otherwise only requests whose Origin header matches corsOrigin are accepted.
-func Handler(hub *Hub, jwtSecret string, store db.Store, corsOrigin string) http.HandlerFunc {
+// corsOrigin controls the primary WebSocket origin check: "*" allows all origins.
+// additionalOrigins extends the allowlist for trusted non-browser shells.
+func Handler(hub *Hub, jwtSecret string, store db.Store, corsOrigin string, additionalOrigins ...string) http.HandlerFunc {
+	originChecker := newOriginChecker(corsOrigin, additionalOrigins)
 	upgrader := websocket.Upgrader{
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
 		CheckOrigin: func(r *http.Request) bool {
-			if corsOrigin == "*" {
-				return true
-			}
 			origin := r.Header.Get("Origin")
-			if origin != corsOrigin {
-				slog.Warn("ws upgrade rejected: origin mismatch", "origin", origin, "expected", corsOrigin)
+			if !originChecker(origin) {
+				slog.Warn("ws upgrade rejected: origin mismatch", "origin", origin, "expected", corsOrigin, "additional", additionalOrigins)
 				return false
 			}
 			return true
@@ -95,6 +94,26 @@ func Handler(hub *Hub, jwtSecret string, store db.Store, corsOrigin string) http
 		client := NewClient(conn, hub, userID, deviceID, fedID, msgHandler)
 		hub.Register(client)
 		client.Run()
+	}
+}
+
+func newOriginChecker(primaryOrigin string, additionalOrigins []string) func(string) bool {
+	if primaryOrigin == "*" {
+		return func(string) bool {
+			return true
+		}
+	}
+	allowedOrigins := make([]string, 0, len(additionalOrigins)+1)
+	if primaryOrigin != "" {
+		allowedOrigins = append(allowedOrigins, primaryOrigin)
+	}
+	for _, origin := range additionalOrigins {
+		if origin != "" && !slices.Contains(allowedOrigins, origin) {
+			allowedOrigins = append(allowedOrigins, origin)
+		}
+	}
+	return func(origin string) bool {
+		return slices.Contains(allowedOrigins, origin)
 	}
 }
 
