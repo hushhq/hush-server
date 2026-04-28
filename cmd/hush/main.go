@@ -235,12 +235,7 @@ func main() {
 	r.Use(api.HTTPMetricsMiddleware(httpMetrics))
 	// Security headers before CORS so they are always present regardless of origin check outcome.
 	r.Use(api.SecurityHeaders(cfg.Production, wsOrigin))
-	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"*"},
-		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
-		AllowCredentials: false,
-	}))
+	r.Use(cors.Handler(api.CORSOptions()))
 	// General per-IP rate limit: coarse anti-abuse only. Real users can legitimately
 	// burst through many lightweight reads (handshake, instance, members, channels,
 	// MLS commit polling, transparency checks, reconnect churn), especially behind a
