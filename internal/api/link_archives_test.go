@@ -527,7 +527,9 @@ func TestLinkArchive_Init_RejectsInvalidParams(t *testing.T) {
 			"manifestHash": b64(make([]byte, 32)), "archiveSha256": b64(make([]byte, 32)),
 		}},
 		{"totalBytes inconsistent", map[string]any{
-			"totalChunks": 1, "totalBytes": int64(linkArchiveChunkSize) + 1, "chunkSize": linkArchiveChunkSize,
+			// chunkBodyMax = chunkSize + 256; one byte beyond the per-chunk
+			// ciphertext ceiling for a single-chunk archive must reject.
+			"totalChunks": 1, "totalBytes": int64(linkArchiveChunkBodyMax) + 1, "chunkSize": linkArchiveChunkSize,
 			"manifestHash": b64(make([]byte, 32)), "archiveSha256": b64(make([]byte, 32)),
 		}},
 	}
@@ -537,6 +539,37 @@ func TestLinkArchive_Init_RejectsInvalidParams(t *testing.T) {
 			require.Equal(t, http.StatusBadRequest, rr.Code, rr.Body.String())
 		})
 	}
+}
+
+// Pins the per-chunk-body-max envelope: an honest client whose chunks
+// are full plaintext (incompressible payloads such as already-encrypted
+// transcript blobs) ships ciphertexts of size chunkSize + gzip framing
+// + AES-GCM tag. The aggregate `totalBytes` constraint must permit
+// totalChunks * (chunkSize + 256) since that is the per-chunk PUT
+// ceiling already enforced when the chunk uploads. Regression guard
+// for the 400 "totalBytes inconsistent" surfaced during real
+// LinkDevice approval against active accounts.
+func TestLinkArchive_Init_AcceptsBytesUpToChunkBodyMaxPerChunk(t *testing.T) {
+	store := newFakeLinkArchiveStore()
+	userID := uuid.NewString()
+	token := makeAuth(store.mu, userID)
+	handler := AuthRoutes(store.mu, testJWTSecret, testJWTExpiry, nil)
+
+	const chunks = 4
+	body := map[string]any{
+		"totalChunks":   chunks,
+		"totalBytes":    int64(linkArchiveChunkBodyMax) * int64(chunks),
+		"chunkSize":     linkArchiveChunkSize,
+		"manifestHash":  b64(make([]byte, 32)),
+		"archiveSha256": b64(make([]byte, 32)),
+	}
+	rr := postJSONWithAuth(handler, "/link-archive-init", token, body)
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+
+	// One byte beyond the per-chunk ceiling for the same archive must reject.
+	body["totalBytes"] = int64(linkArchiveChunkBodyMax)*int64(chunks) + 1
+	rr2 := postJSONWithAuth(handler, "/link-archive-init", token, body)
+	require.Equal(t, http.StatusBadRequest, rr2.Code, rr2.Body.String())
 }
 
 func TestLinkArchive_Init_EnforcesPerUserQuota(t *testing.T) {

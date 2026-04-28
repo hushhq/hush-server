@@ -158,8 +158,17 @@ func (h *deviceHandler) linkArchiveInit(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "totalBytes must be positive"})
 		return
 	}
-	if req.TotalBytes > int64(req.TotalChunks)*int64(req.ChunkSize) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "totalBytes inconsistent with totalChunks * chunkSize"})
+	// `chunkSize` is the PLAINTEXT slice size. Each chunk's encrypted upload
+	// body is bounded by `linkArchiveChunkBodyMax = chunkSize + 256` (the
+	// per-chunk PUT limit enforced separately when the client uploads
+	// each chunk), which already accounts for gzip framing + AES-GCM
+	// tag overhead. The aggregate constraint here must use that same
+	// per-chunk ciphertext ceiling, otherwise an honest client whose
+	// every chunk is full plaintext (incompressible payloads such as
+	// already-encrypted transcript blobs) would be incorrectly rejected
+	// here while still being well within the per-chunk upload limit.
+	if req.TotalBytes > int64(req.TotalChunks)*int64(linkArchiveChunkBodyMax) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "totalBytes inconsistent with totalChunks * chunkBodyMax"})
 		return
 	}
 
