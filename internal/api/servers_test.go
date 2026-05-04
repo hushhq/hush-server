@@ -568,7 +568,7 @@ func TestCreateServer_Template(t *testing.T) {
 				IsDefault: true,
 				Channels: []models.TemplateChannel{
 					{Name: "system", Type: "system", Position: -1},
-					{Name: "general", Type: "text", Position: 0},
+					{Name: `gen"eral`, Type: "text", Position: 0},
 					{Name: "General", Type: "voice", Position: 1},
 				},
 			}, nil
@@ -631,6 +631,9 @@ func TestCreateServer_Template(t *testing.T) {
 	assert.Equal(t, 0, createdChannels[1].Position)
 	assert.Equal(t, "voice", createdChannels[2].Type)
 	assert.Equal(t, 1, createdChannels[2].Position)
+	var textMetadata map[string]string
+	require.NoError(t, json.Unmarshal(createdChannels[1].EncryptedMetadata, &textMetadata))
+	assert.Equal(t, `gen"eral`, textMetadata["n"])
 
 	// server_created system message should be emitted
 	assert.Contains(t, systemMessages, "server_created")

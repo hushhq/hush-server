@@ -34,6 +34,20 @@ func fallbackTemplate() []models.TemplateChannel {
 	}
 }
 
+func plaintextMetadata(name string) []byte {
+	data, err := json.Marshal(struct {
+		Name        string `json:"n"`
+		Description string `json:"d"`
+	}{
+		Name:        name,
+		Description: "",
+	})
+	if err != nil {
+		return nil
+	}
+	return data
+}
+
 // ServerRoutes mounts guild CRUD, member management, and nested sub-routes
 // (channels, guild invites, moderation). Auth is applied at the top level;
 // RequireGuildMember is applied to all member-only /{serverId} sub-routes.
@@ -134,7 +148,7 @@ func (h *serversHandler) createServer(w http.ResponseWriter, r *http.Request) {
 	// Plaintext name fallback: when MLS is not bootstrapped, clients send Name
 	// instead of EncryptedMetadata. Wrap it as a JSON blob for the metadata column.
 	if len(req.EncryptedMetadata) == 0 && req.Name != "" {
-		req.EncryptedMetadata = []byte(`{"n":"` + req.Name + `","d":""}`)
+		req.EncryptedMetadata = plaintextMetadata(req.Name)
 	}
 	server, err := h.store.CreateServer(r.Context(), req.EncryptedMetadata)
 	if err != nil {
@@ -147,8 +161,6 @@ func (h *serversHandler) createServer(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to add creator as guild owner"})
 		return
 	}
-	// Server creation itself succeeded - respond immediately. Template channels are fire-and-forget.
-	writeJSON(w, http.StatusCreated, server)
 
 	// Resolve the channel template: explicit templateId > default template > hardcoded default.
 	var template []models.TemplateChannel
@@ -208,14 +220,12 @@ func (h *serversHandler) createServer(w http.ResponseWriter, r *http.Request) {
 			}
 			continue
 		}
-		// Seed encrypted_metadata with the hardcoded template name so channels
-		// are visible before MLS is bootstrapped. This is safe because default
-		// template names are server-defined constants, not user content.
-		// NOTE: when user-created templates are implemented, user-chosen channel
-		// names MUST be opaque - only hardcoded default templates get plaintext seeding.
+		// Seed encrypted_metadata with the template name so channels are visible
+		// before MLS is bootstrapped. Instance admins control templates from the
+		// local admin panel; end users cannot inject arbitrary template names.
 		var meta []byte
 		if tc.Name != "" {
-			meta = []byte(`{"n":"` + tc.Name + `","d":""}`)
+			meta = plaintextMetadata(tc.Name)
 		}
 		ch, err := h.store.CreateChannel(ctx, server.ID, meta, tc.Type, nil, tc.Position)
 		if err != nil {
@@ -257,10 +267,10 @@ func (h *serversHandler) createServer(w http.ResponseWriter, r *http.Request) {
 		if existing != nil {
 			continue
 		}
-		// Same plaintext seeding as pass 1 - see note above re: user-created templates.
+		// Same plaintext seeding as pass 1.
 		var meta []byte
 		if tc.Name != "" {
-			meta = []byte(`{"n":"` + tc.Name + `","d":""}`)
+			meta = plaintextMetadata(tc.Name)
 		}
 		ch, err := h.store.CreateChannel(ctx, server.ID, meta, tc.Type, &parentID, tc.Position)
 		if err != nil {
@@ -283,6 +293,8 @@ func (h *serversHandler) createServer(w http.ResponseWriter, r *http.Request) {
 	if failures > 0 {
 		EmitSystemMessage(ctx, h.store, h.hub, server.ID, "template_partial_failure", userID, nil, "Some default channels could not be created", nil)
 	}
+
+	writeJSON(w, http.StatusCreated, server)
 }
 
 // updateServer handles PUT /api/servers/{serverId}.
