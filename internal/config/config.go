@@ -26,10 +26,10 @@ type Config struct {
 	// transparency log signing keypair. If empty in dev mode, an ephemeral key
 	// is generated with a warning. Required in production.
 	TransparencyLogPrivateKey string
-	// TenorAPIKey is the Google Tenor v2 API key. When empty the
+	// GiphyAPIKey is the Giphy v1 API key. When empty the
 	// /api/gif/search route returns 503 — the chat surface keeps
 	// working, just without the GIF picker.
-	TenorAPIKey string
+	GiphyAPIKey string
 }
 
 // Load reads configuration from environment variables.
@@ -77,7 +77,7 @@ func Load() Config {
 		LiveKitAPISecret:          os.Getenv("LIVEKIT_API_SECRET"),
 		LiveKitURL:                os.Getenv("LIVEKIT_URL"),
 		TransparencyLogPrivateKey: os.Getenv("TRANSPARENCY_LOG_PRIVATE_KEY"),
-		TenorAPIKey:               os.Getenv("TENOR_API_KEY"),
+		GiphyAPIKey:               os.Getenv("GIPHY_API_KEY"),
 	}
 }
 

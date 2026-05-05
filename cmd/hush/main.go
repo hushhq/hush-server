@@ -322,12 +322,12 @@ func main() {
 		// Global attachment download/delete (channel-membership checked per row).
 		r.Mount("/api/attachments", api.AttachmentRoutes(pool, attachmentBackend, cfg.JWTSecret))
 
-		// Tenor GIF search proxy. Requires auth so anonymous traffic
-		// does not burn the upstream key; returns 503 when TENOR_API_KEY
+		// Giphy GIF search proxy. Requires auth so anonymous traffic
+		// does not burn the upstream key; returns 503 when GIPHY_API_KEY
 		// is unset so the rest of the chat surface keeps working.
 		r.Group(func(r chi.Router) {
 			r.Use(api.RequireAuth(cfg.JWTSecret, pool))
-			r.Mount("/api/gif", api.GifRoutes(cfg.TenorAPIKey))
+			r.Mount("/api/gif", api.GifRoutes(cfg.GiphyAPIKey))
 		})
 
 		// Guild discovery, DM creation, and public user search.
