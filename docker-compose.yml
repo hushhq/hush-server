@@ -58,6 +58,7 @@ services:
       - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
       - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
       - LIVEKIT_URL=${LIVEKIT_URL:-ws://livekit:7880}
+      - TENOR_API_KEY=${TENOR_API_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy

@@ -146,6 +146,7 @@ services:
       - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
       - LIVEKIT_URL=wss://${DOMAIN}/livekit
       - TRANSPARENCY_LOG_PRIVATE_KEY=${TRANSPARENCY_LOG_PRIVATE_KEY}
+      - TENOR_API_KEY=${TENOR_API_KEY:-}
       # Storage backend for the device-link bulk transfer plane.
       # Defaults to postgres_bytea so a self-host without S3 still works
       # for small accounts; setup.sh sets STORAGE_BACKEND=s3 + the
