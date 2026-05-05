@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -20,6 +21,7 @@ import (
 	"github.com/hushhq/hush-server/internal/db"
 	"github.com/hushhq/hush-server/internal/livekit"
 	"github.com/hushhq/hush-server/internal/models"
+	"github.com/hushhq/hush-server/internal/storage"
 	"github.com/hushhq/hush-server/internal/transparency"
 	"github.com/hushhq/hush-server/internal/ws"
 
@@ -297,9 +299,28 @@ func main() {
 		// a no-op when LiveKit is not configured.
 		roomService := livekit.NewTwirpRoomService(cfg.LiveKitURL, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret)
 
+		// Storage backend for attachment presign URLs. Lazy-built per
+		// request via the closure so a transient backend outage does not
+		// require a server restart. Returns nil when STORAGE_BACKEND is
+		// the default postgres_bytea — attachments require an
+		// S3-compatible backend to produce native presigned URLs.
+		attachmentBackend := func() (storage.Backend, error) {
+			cfg, err := storage.LoadConfig()
+			if err != nil {
+				return nil, err
+			}
+			if cfg.Kind == storage.BackendPostgresBytea {
+				return nil, fmt.Errorf("attachments require STORAGE_BACKEND=s3 (current: %s)", cfg.Kind)
+			}
+			return storage.NewBackend(cfg, pool)
+		}
+
 		// Guild-scoped API: auth and RequireGuildMember applied inside ServerRoutes.
 		// Channels, guild invites, and moderation are all mounted under /{serverId}.
-		r.Mount("/api/servers", api.ServerRoutes(pool, wsHub, cfg.JWTSecret, roomService))
+		r.Mount("/api/servers", api.ServerRoutes(pool, wsHub, cfg.JWTSecret, roomService, attachmentBackend))
+
+		// Global attachment download/delete (channel-membership checked per row).
+		r.Mount("/api/attachments", api.AttachmentRoutes(pool, attachmentBackend, cfg.JWTSecret))
 
 		// Guild discovery, DM creation, and public user search.
 		r.Mount("/api/guilds", api.GuildRoutes(pool, wsHub, cfg.JWTSecret))

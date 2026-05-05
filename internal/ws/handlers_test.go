@@ -202,6 +202,15 @@ func (m *messageStoreMock) GetChannelByTypeAndPosition(context.Context, string, 
 }
 func (m *messageStoreMock) DeleteChannel(context.Context, string, string) error             { return nil }
 func (m *messageStoreMock) MoveChannel(context.Context, string, string, *string, int) error { return nil }
+func (m *messageStoreMock) InsertAttachment(context.Context, string, string, string, string, int64) (*models.Attachment, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) GetAttachmentByID(context.Context, string) (*models.Attachment, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) SoftDeleteAttachment(context.Context, string, string) (*models.Attachment, error) {
+	return nil, nil
+}
 func (m *messageStoreMock) ListServerTemplates(context.Context) ([]models.ServerTemplate, error) {
 	return nil, nil
 }

@@ -20,7 +20,7 @@ import (
 // channelsRouter wraps ChannelRoutes with RequireAuth for message history tests.
 // In production, auth is applied by the parent ServerRoutes router.
 func channelsRouter(store *mockStore) http.Handler {
-	inner := ChannelRoutes(store, nil)
+	inner := ChannelRoutes(store, nil, nil)
 	return RequireAuth(testJWTSecret, store)(inner)
 }
 

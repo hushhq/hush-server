@@ -25,7 +25,11 @@ const (
 // ChannelRoutes returns the router for channels nested under /api/servers/{serverId}.
 // Auth and RequireGuildMember are applied by the parent router; this router
 // only adds channel-specific routes.
-func ChannelRoutes(store db.Store, hub GlobalBroadcaster) chi.Router {
+//
+// attachmentBackend is the factory used to presign attachment uploads
+// for the per-channel `/attachments/presign` endpoint. Pass nil to
+// surface a 503 — the rest of the channel surface keeps working.
+func ChannelRoutes(store db.Store, hub GlobalBroadcaster, attachmentBackend AttachmentBackendFactory) chi.Router {
 	r := chi.NewRouter()
 	h := &channelsHandler{store: store, hub: hub}
 	r.Post("/", h.createChannel)
@@ -33,6 +37,9 @@ func ChannelRoutes(store db.Store, hub GlobalBroadcaster) chi.Router {
 	r.Get("/{id}/messages", h.getMessages)
 	r.Delete("/{id}", h.deleteChannel)
 	r.Put("/{id}/move", h.moveChannel)
+	r.Route("/{channelId}/attachments", func(r chi.Router) {
+		r.Mount("/", ChannelAttachmentRoutes(store, attachmentBackend))
+	})
 	return r
 }
 

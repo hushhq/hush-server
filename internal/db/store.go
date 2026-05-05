@@ -168,6 +168,11 @@ type Store interface {
 	// mismatch.
 	MoveChannel(ctx context.Context, channelID, serverID string, parentID *string, position int) error
 
+	// Attachments (per-channel encrypted blob refs).
+	InsertAttachment(ctx context.Context, channelID, ownerID, storageKey, contentType string, size int64) (*models.Attachment, error)
+	GetAttachmentByID(ctx context.Context, attachmentID string) (*models.Attachment, error)
+	SoftDeleteAttachment(ctx context.Context, attachmentID, ownerID string) (*models.Attachment, error)
+
 	// Server templates
 	ListServerTemplates(ctx context.Context) ([]models.ServerTemplate, error)
 	GetServerTemplateByID(ctx context.Context, id string) (*models.ServerTemplate, error)

@@ -186,6 +186,21 @@ type Message struct {
 	Timestamp         time.Time `json:"timestamp"`
 }
 
+// Attachment is a single client-side-encrypted blob uploaded to the
+// configured storage backend. The encryption key + IV travel inside the
+// MLS message envelope (`AttachmentRef.key`, `AttachmentRef.iv`) and
+// never reach the server. ContentType is advisory; the bytes are opaque.
+type Attachment struct {
+	ID          string     `json:"id"`
+	ChannelID   string     `json:"channelId"`
+	OwnerID     string     `json:"ownerId"`
+	StorageKey  string     `json:"-"`
+	Size        int64      `json:"size"`
+	ContentType string     `json:"contentType"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	DeletedAt   *time.Time `json:"deletedAt,omitempty"`
+}
+
 // SystemMessage is an event log entry in a guild's #system channel.
 type SystemMessage struct {
 	ID        string                 `json:"id"`

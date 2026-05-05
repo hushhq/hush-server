@@ -102,6 +102,11 @@ type mockStore struct {
 	deleteChannelFn               func(ctx context.Context, channelID, serverID string) error
 	moveChannelFn                 func(ctx context.Context, channelID, serverID string, parentID *string, position int) error
 
+	// Attachments
+	insertAttachmentFn     func(ctx context.Context, channelID, ownerID, storageKey, contentType string, size int64) (*models.Attachment, error)
+	getAttachmentByIDFn    func(ctx context.Context, attachmentID string) (*models.Attachment, error)
+	softDeleteAttachmentFn func(ctx context.Context, attachmentID, ownerID string) (*models.Attachment, error)
+
 	// Server templates
 	listServerTemplatesFn      func(ctx context.Context) ([]models.ServerTemplate, error)
 	getServerTemplateByIDFn    func(ctx context.Context, id string) (*models.ServerTemplate, error)
@@ -692,6 +697,27 @@ func (m *mockStore) GetChannelByID(ctx context.Context, channelID string) (*mode
 func (m *mockStore) GetChannelByTypeAndPosition(ctx context.Context, serverID, channelType string, position int) (*models.Channel, error) {
 	if m.getChannelByTypeAndPositionFn != nil {
 		return m.getChannelByTypeAndPositionFn(ctx, serverID, channelType, position)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) InsertAttachment(ctx context.Context, channelID, ownerID, storageKey, contentType string, size int64) (*models.Attachment, error) {
+	if m.insertAttachmentFn != nil {
+		return m.insertAttachmentFn(ctx, channelID, ownerID, storageKey, contentType, size)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) GetAttachmentByID(ctx context.Context, attachmentID string) (*models.Attachment, error) {
+	if m.getAttachmentByIDFn != nil {
+		return m.getAttachmentByIDFn(ctx, attachmentID)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) SoftDeleteAttachment(ctx context.Context, attachmentID, ownerID string) (*models.Attachment, error) {
+	if m.softDeleteAttachmentFn != nil {
+		return m.softDeleteAttachmentFn(ctx, attachmentID, ownerID)
 	}
 	return nil, nil
 }

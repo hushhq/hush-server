@@ -33,7 +33,7 @@ func withGuildLevelContext(userID string, level int) func(http.Handler) http.Han
 // channelsCrudTestHandler wraps ChannelRoutes with a guild level context middleware.
 func channelsCrudTestHandler(store *mockStore, level int) http.Handler {
 	userID := "test-user-id"
-	inner := ChannelRoutes(store, nil)
+	inner := ChannelRoutes(store, nil, nil)
 	return withGuildLevelContext(userID, level)(inner)
 }
 
@@ -60,7 +60,7 @@ func channelsCrudRouterFor(store *mockStore, urlServerID string) http.Handler {
 				next.ServeHTTP(w, req.WithContext(ctx))
 			})
 		})
-		r.Mount("/channels", ChannelRoutes(store, nil))
+		r.Mount("/channels", ChannelRoutes(store, nil, nil))
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		// Tests historically posted to "/<channelId>" relative to the channel router.

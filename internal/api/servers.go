@@ -57,7 +57,7 @@ func plaintextMetadata(name string) []byte {
 // roomService is forwarded to ModerationRoutes for LiveKit eviction
 // after a successful ban or kick. Pass livekit.NoopRoomService{} to
 // disable.
-func ServerRoutes(store db.Store, hub GlobalBroadcaster, jwtSecret string, roomService livekit.RoomService) chi.Router {
+func ServerRoutes(store db.Store, hub GlobalBroadcaster, jwtSecret string, roomService livekit.RoomService, attachmentBackend AttachmentBackendFactory) chi.Router {
 	h := &serversHandler{store: store, hub: hub}
 	r := chi.NewRouter()
 	r.Use(RequireAuth(jwtSecret, store))
@@ -75,7 +75,7 @@ func ServerRoutes(store db.Store, hub GlobalBroadcaster, jwtSecret string, roomS
 			r.Get("/members", h.listMembers)
 			r.Put("/members/{userId}/role", h.changeRole)
 			r.Post("/leave", h.leaveServer)
-			r.Mount("/channels", ChannelRoutes(store, hub))
+			r.Mount("/channels", ChannelRoutes(store, hub, attachmentBackend))
 			r.Mount("/invites", GuildInviteRoutes(store))
 			r.Mount("/moderation", ModerationRoutes(store, hub, roomService))
 			r.Mount("/system-messages", SystemMessagesRoutes(store))

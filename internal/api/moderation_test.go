@@ -256,7 +256,7 @@ func TestBan_GuildScoped_DoesNotAffectOtherGuilds(t *testing.T) {
 		},
 	}
 	token := makeAuth(store, actorID)
-	router := ServerRoutes(store, nil, testJWTSecret, livekit.NoopRoomService{})
+	router := ServerRoutes(store, nil, testJWTSecret, livekit.NoopRoomService{}, nil)
 
 	// Ban in Guild A.
 	rrA := postServerJSON(router, "/"+guildAID+"/moderation/ban",

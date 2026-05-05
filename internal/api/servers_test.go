@@ -19,12 +19,12 @@ import (
 
 // serversRouter returns a ServerRoutes handler wired with testJWTSecret.
 func serversRouter(store *mockStore) http.Handler {
-	return ServerRoutes(store, nil, testJWTSecret, livekit.NoopRoomService{})
+	return ServerRoutes(store, nil, testJWTSecret, livekit.NoopRoomService{}, nil)
 }
 
 // serversRouterWithHub wires ServerRoutes with a custom hub for broadcast tests.
 func serversRouterWithHub(store *mockStore, hub GlobalBroadcaster) http.Handler {
-	return ServerRoutes(store, hub, testJWTSecret, livekit.NoopRoomService{})
+	return ServerRoutes(store, hub, testJWTSecret, livekit.NoopRoomService{}, nil)
 }
 
 // ---------- POST / (createServer) ----------
@@ -525,7 +525,7 @@ func TestChangeRole_EmitsSystemMessage(t *testing.T) {
 		},
 	}
 	token := makeAuth(store, actorID)
-	router := ServerRoutes(store, &mockHub{}, testJWTSecret, livekit.NoopRoomService{})
+	router := ServerRoutes(store, &mockHub{}, testJWTSecret, livekit.NoopRoomService{}, nil)
 
 	rr := putServerJSON(router, "/"+serverID+"/members/"+targetID+"/role",
 		changePermissionLevelRequest{PermissionLevel: models.PermissionLevelMod}, token)
