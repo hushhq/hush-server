@@ -144,6 +144,12 @@ func (h *MessageHandler) handleMessageSend(c *Client, raw []byte) {
 		ChannelID             string            `json:"channel_id"`
 		Ciphertext            string            `json:"ciphertext"`
 		CiphertextByRecipient map[string]string `json:"ciphertext_by_recipient"`
+		// Optional client-generated correlation id. When present the
+		// server echoes it back via `message.send.ack` so the client
+		// can flip the optimistic row from pending to sent without
+		// waiting for the broadcast `message.new` (which the client
+		// receives anyway and dedups via `id`).
+		LocalID string `json:"local_id"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil || payload.ChannelID == "" {
 		sendError(c, "bad_request", "channel_id required")
@@ -175,7 +181,7 @@ func (h *MessageHandler) handleMessageSend(c *Client, raw []byte) {
 			sendError(c, "bad_request", "too many fan-out recipients")
 			return
 		}
-		h.handleMessageSendFanout(c, payload.ChannelID, payload.CiphertextByRecipient, ctx)
+		h.handleMessageSendFanout(c, payload.ChannelID, payload.CiphertextByRecipient, payload.LocalID, ctx)
 		return
 	}
 	if payload.Ciphertext == "" {
@@ -206,12 +212,30 @@ func (h *MessageHandler) handleMessageSend(c *Client, raw []byte) {
 			slog.Warn("ws IncrementGuildMessageCount failed", "err", err, "channelID", payload.ChannelID)
 		}
 	}()
+	// Send the ack to the originator first so it arrives ahead of the
+	// broadcast echo. Both flow over the same client.send channel so
+	// ordering is preserved end-to-end.
+	if payload.LocalID != "" {
+		ack := map[string]interface{}{
+			"type":       "message.send.ack",
+			"local_id":   payload.LocalID,
+			"message_id": msg.ID,
+			"channel_id": payload.ChannelID,
+			"timestamp":  msg.Timestamp.Format(time.RFC3339Nano),
+		}
+		ackBytes, _ := json.Marshal(ack)
+		select {
+		case c.send <- ackBytes:
+		default:
+			slog.Warn("ws ack send buffer full", "clientID", c.id)
+		}
+	}
 	out := messageNewBroadcast(msg, c.deviceID)
 	b, _ := json.Marshal(out)
 	h.hub.Broadcast(payload.ChannelID, b, "")
 }
 
-func (h *MessageHandler) handleMessageSendFanout(c *Client, channelID string, ciphertextByRecipient map[string]string, ctx context.Context) {
+func (h *MessageHandler) handleMessageSendFanout(c *Client, channelID string, ciphertextByRecipient map[string]string, localID string, ctx context.Context) {
 	senderID, federatedSenderID := resolveSenderIdentity(c)
 	for recipientID, b64 := range ciphertextByRecipient {
 		if recipientID == "" || b64 == "" {
@@ -243,6 +267,21 @@ func (h *MessageHandler) handleMessageSendFanout(c *Client, channelID string, ci
 	if err != nil {
 		slog.Warn("ws InsertMessage sender-copy failed", "err", err)
 		return
+	}
+	if localID != "" {
+		ack := map[string]interface{}{
+			"type":       "message.send.ack",
+			"local_id":   localID,
+			"message_id": senderCopy.ID,
+			"channel_id": channelID,
+			"timestamp":  senderCopy.Timestamp.Format(time.RFC3339Nano),
+		}
+		ackBytes, _ := json.Marshal(ack)
+		select {
+		case c.send <- ackBytes:
+		default:
+			slog.Warn("ws ack send buffer full (fanout)", "clientID", c.id)
+		}
 	}
 	echo := messageNewBroadcast(senderCopy, c.deviceID)
 	echoBytes, _ := json.Marshal(echo)
