@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -31,7 +32,7 @@ const (
 // surface a 503 — the rest of the channel surface keeps working.
 func ChannelRoutes(store db.Store, hub GlobalBroadcaster, attachmentBackend AttachmentBackendFactory) chi.Router {
 	r := chi.NewRouter()
-	h := &channelsHandler{store: store, hub: hub}
+	h := &channelsHandler{store: store, hub: hub, attachmentBackend: attachmentBackend}
 	r.Post("/", h.createChannel)
 	r.Get("/", h.listChannels)
 	r.Get("/{id}/messages", h.getMessages)
@@ -44,8 +45,9 @@ func ChannelRoutes(store db.Store, hub GlobalBroadcaster, attachmentBackend Atta
 }
 
 type channelsHandler struct {
-	store db.Store
-	hub   GlobalBroadcaster
+	store             db.Store
+	hub               GlobalBroadcaster
+	attachmentBackend AttachmentBackendFactory
 }
 
 // messageResponse is the JSON shape for one message (ciphertext as base64 string).
@@ -243,23 +245,61 @@ func (h *channelsHandler) deleteChannel(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "system channels cannot be deleted"})
 		return
 	}
-	if err := h.store.DeleteChannel(r.Context(), channelID, serverID); err != nil {
+	// Single transactional sweep: snapshots attachment storage keys,
+	// then issues one `DELETE … RETURNING id` covering the channel and
+	// — when it is a category — every direct child. Atomic by design:
+	// either every targeted row is gone and the user gets a clean
+	// `deletedChannelIds` list, or nothing is touched and the caller
+	// retries against a consistent state. No half-deleted trees.
+	deletedIDs, storageKeys, err := h.store.DeleteChannelTree(r.Context(), channelID, serverID)
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "channel not found"})
 			return
 		}
-		slog.Error("delete channel", "err", err)
+		slog.Error("delete channel tree", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to delete channel"})
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
-	if h.hub != nil {
-		msg, _ := json.Marshal(map[string]interface{}{
-			"type":       "channel_deleted",
-			"channel_id": channelID,
-		})
-		h.hub.BroadcastToServer(serverID, msg)
+
+	// Best-effort blob purge. Detached from the request context so a
+	// disconnect mid-cleanup does not leak storage. Errors only logged
+	// because (a) the DB is the source of truth — once rows are gone
+	// the channel is deleted from the user's perspective, and (b) any
+	// orphan blob is still recoverable by a reconciliation cron.
+	if h.attachmentBackend != nil && len(storageKeys) > 0 {
+		go func(keys []string) {
+			backend, err := h.attachmentBackend()
+			if err != nil {
+				slog.Warn("delete channel: backend factory", "err", err)
+				return
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			for _, key := range keys {
+				if err := backend.Delete(ctx, key); err != nil {
+					slog.Warn("delete channel: backend.Delete", "key", key, "err", err)
+				}
+			}
+		}(storageKeys)
 	}
+
+	// Broadcast one channel_deleted per actually-removed id so peers'
+	// adapter layers can drop each row from local state without a
+	// refetch.
+	if h.hub != nil {
+		for _, id := range deletedIDs {
+			msg, _ := json.Marshal(map[string]interface{}{
+				"type":       "channel_deleted",
+				"channel_id": id,
+			})
+			h.hub.BroadcastToServer(serverID, msg)
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"deletedChannelIds": deletedIDs,
+	})
 }
 
 func (h *channelsHandler) moveChannel(w http.ResponseWriter, r *http.Request) {

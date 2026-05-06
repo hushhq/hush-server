@@ -143,10 +143,10 @@ func TestF1_DeleteChannel_SameGuild_StillSucceeds(t *testing.T) {
 	store.getChannelByIDFn = func(_ context.Context, _ string) (*models.Channel, error) {
 		return &models.Channel{ID: channelID, ServerID: &srv, Type: "text"}, nil
 	}
-	store.deleteChannelFn = func(_ context.Context, _, srvID string) error {
+	store.deleteChannelTreeFn = func(_ context.Context, _, srvID string) ([]string, []string, error) {
 		assert.Equal(t, srv, srvID)
 		deleted = true
-		return nil
+		return []string{channelID}, nil, nil
 	}
 
 	router := channelsCrudRouter(store)
@@ -154,8 +154,11 @@ func TestF1_DeleteChannel_SameGuild_StillSucceeds(t *testing.T) {
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
-	assert.Equal(t, http.StatusNoContent, rr.Code)
-	assert.True(t, deleted, "same-guild happy path must still reach DeleteChannel")
+	// Channel delete now returns 200 with `deletedChannelIds` so the
+	// frontend can apply an optimistic local removal that survives a
+	// flapping WS subscription.
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.True(t, deleted, "same-guild happy path must still reach DeleteChannelTree")
 }
 
 func TestF2_DeleteMessage_SameGuild_StillSucceeds(t *testing.T) {

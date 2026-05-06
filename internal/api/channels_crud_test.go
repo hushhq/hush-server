@@ -154,7 +154,12 @@ func TestListChannels_ReturnsSortedByPosition(t *testing.T) {
 	assert.Equal(t, 1, list[1].Position)
 }
 
-func TestDeleteChannel_AsAdmin_Returns204(t *testing.T) {
+// Channel delete now returns 200 + a `deletedChannelIds` JSON payload so
+// the frontend can apply an optimistic local removal that survives a
+// flapping WS connection. Recursive category delete uses the same shape
+// to enumerate every cascaded child id; single-channel delete returns a
+// one-element list.
+func TestDeleteChannel_AsAdmin_ReturnsDeletedIds(t *testing.T) {
 	channelID := uuid.New().String()
 	srv := testServerID
 	store := &mockStore{}
@@ -163,16 +168,63 @@ func TestDeleteChannel_AsAdmin_Returns204(t *testing.T) {
 		assert.Equal(t, channelID, chID)
 		return &models.Channel{ID: chID, ServerID: &srv, Type: "text"}, nil
 	}
-	store.deleteChannelFn = func(_ context.Context, chID, srvID string) error {
+	store.deleteChannelTreeFn = func(_ context.Context, chID, srvID string) ([]string, []string, error) {
 		assert.Equal(t, channelID, chID)
 		assert.Equal(t, srv, srvID)
-		return nil
+		return []string{channelID}, nil, nil
 	}
 	router := channelsCrudRouter(store)
 	req := httptest.NewRequest(http.MethodDelete, "/"+channelID, nil)
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
-	assert.Equal(t, http.StatusNoContent, rr.Code)
+	assert.Equal(t, http.StatusOK, rr.Code)
+	var body struct {
+		DeletedChannelIDs []string `json:"deletedChannelIds"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
+	assert.Equal(t, []string{channelID}, body.DeletedChannelIDs)
+}
+
+// Deleting a category must cascade to every nested channel and the
+// blobs they reference. The handler delegates the whole cascade to
+// Store.DeleteChannelTree (single tx with `DELETE … RETURNING id`),
+// so this test asserts the contract:
+//   - the request reaches DeleteChannelTree with the category id
+//   - the response echoes every id the store reported as deleted
+//   - the storage keys returned by the store make it through to the
+//     async backend purge (covered indirectly: the handler logs but
+//     does not block on it; here we just assert the response shape).
+func TestDeleteChannel_Category_CascadesToChildren(t *testing.T) {
+	categoryID := uuid.New().String()
+	childA := uuid.New().String()
+	childB := uuid.New().String()
+	srv := testServerID
+	store := &mockStore{}
+	store.getServerMemberLevelFn = func(_ context.Context, _, _ string) (int, error) { return models.PermissionLevelAdmin, nil }
+	store.getChannelByIDFn = func(_ context.Context, chID string) (*models.Channel, error) {
+		assert.Equal(t, categoryID, chID)
+		return &models.Channel{ID: chID, ServerID: &srv, Type: "category"}, nil
+	}
+	var treeCalled bool
+	store.deleteChannelTreeFn = func(_ context.Context, chID, srvID string) ([]string, []string, error) {
+		treeCalled = true
+		assert.Equal(t, categoryID, chID)
+		assert.Equal(t, srv, srvID)
+		// Children-first, root-last shape — matches the Pool
+		// implementation contract.
+		return []string{childA, childB, categoryID}, []string{"key-a", "key-b"}, nil
+	}
+	router := channelsCrudRouter(store)
+	req := httptest.NewRequest(http.MethodDelete, "/"+categoryID, nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusOK, rr.Code)
+	require.True(t, treeCalled, "handler must delegate cascade to DeleteChannelTree")
+	var body struct {
+		DeletedChannelIDs []string `json:"deletedChannelIds"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
+	assert.Equal(t, []string{childA, childB, categoryID}, body.DeletedChannelIDs)
 }
 
 func TestDeleteChannel_NotAdmin_Returns403(t *testing.T) {

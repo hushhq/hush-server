@@ -163,6 +163,13 @@ type Store interface {
 	// guards already check ch.ServerID == serverID. Returns pgx.ErrNoRows
 	// when no row matched, so callers can map cross-guild attempts to 404.
 	DeleteChannel(ctx context.Context, channelID, serverID string) error
+	// DeleteChannelTree atomically removes a channel and, when the
+	// target is a category, every channel parented to it. Returns the
+	// ids actually removed (children first, root last) and the
+	// attachment storage_keys that the caller must asynchronously
+	// purge from the blob backend. Returns pgx.ErrNoRows when the
+	// root does not exist or belongs to another server.
+	DeleteChannelTree(ctx context.Context, channelID, serverID string) (deletedIDs []string, storageKeys []string, err error)
 	// MoveChannel updates parent/position iff the channel and any non-nil
 	// parent both belong to serverID. Returns pgx.ErrNoRows on cross-guild
 	// mismatch.

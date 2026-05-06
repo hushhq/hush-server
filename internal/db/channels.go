@@ -23,6 +23,151 @@ func (p *Pool) CreateChannel(ctx context.Context, serverID string, encryptedMeta
 	return scanChannel(row)
 }
 
+// DeleteChannelTree atomically removes a channel and, when the target
+// is a category, every channel parented to it. Snapshots the
+// attachment storage keys for every removed channel inside the same
+// transaction so the caller can schedule async blob cleanup without a
+// race against the cascade.
+//
+// Returns:
+//   - deletedIDs: ids actually removed (may be empty if a concurrent
+//     admin already deleted the row); the slice always contains the
+//     root id last when it was deleted, so callers that rely on
+//     stable ordering get a deterministic shape.
+//   - storageKeys: every not-yet-tombstoned attachment storage_key
+//     across the removed channels. Order is unspecified.
+//   - error: pgx.ErrNoRows when the root channel did not exist or
+//     belonged to a different server (cross-guild attempt). All other
+//     errors are wrapped.
+//
+// Children must be removed in the same SQL statement because the
+// schema declares `parent_id ON DELETE SET NULL`: deleting the
+// category first would silently reparent the children to root, which
+// is the opposite of what the user-visible "delete category"
+// affordance promises.
+func (p *Pool) DeleteChannelTree(ctx context.Context, channelID, serverID string) (deletedIDs []string, storageKeys []string, err error) {
+	tx, err := p.Begin(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	// Confirm the root exists in this server before doing anything else
+	// so cross-guild attempts surface as 404 (pgx.ErrNoRows) and never
+	// leak attachment metadata.
+	var rootType string
+	if err := tx.QueryRow(ctx,
+		`SELECT type FROM channels WHERE id = $1 AND server_id = $2`,
+		channelID, serverID,
+	).Scan(&rootType); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil, pgx.ErrNoRows
+		}
+		return nil, nil, fmt.Errorf("lookup root: %w", err)
+	}
+
+	// Build the target id set. For a category, include every direct
+	// child; the schema disallows nested categories at the API layer
+	// (createChannel rejects parented categories), so a single
+	// parent_id sweep is sufficient.
+	targetIDs := []string{channelID}
+	if rootType == "category" {
+		rows, err := tx.Query(ctx,
+			`SELECT id FROM channels WHERE parent_id = $1 AND server_id = $2`,
+			channelID, serverID,
+		)
+		if err != nil {
+			return nil, nil, fmt.Errorf("list children: %w", err)
+		}
+		var children []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return nil, nil, fmt.Errorf("scan child: %w", err)
+			}
+			children = append(children, id)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, nil, fmt.Errorf("iterate children: %w", err)
+		}
+		// Children first, root last — gives callers (logging,
+		// broadcasts) a stable order.
+		targetIDs = append(children, channelID)
+	}
+
+	// Snapshot attachment storage keys before the cascade fires.
+	// The explicit `::uuid[]` cast guards against pgx inferring text[]
+	// from a Go []string and tripping `operator does not exist:
+	// uuid = text` on the channel_id comparison. Same cast on the
+	// DELETE below for the same reason.
+	keyRows, err := tx.Query(ctx, `
+		SELECT storage_key FROM attachments
+		WHERE channel_id = ANY($1::uuid[]) AND deleted_at IS NULL`,
+		targetIDs,
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list attachment keys: %w", err)
+	}
+	for keyRows.Next() {
+		var key string
+		if err := keyRows.Scan(&key); err != nil {
+			keyRows.Close()
+			return nil, nil, fmt.Errorf("scan attachment key: %w", err)
+		}
+		storageKeys = append(storageKeys, key)
+	}
+	keyRows.Close()
+	if err := keyRows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("iterate attachment keys: %w", err)
+	}
+
+	// Single-statement cascade: every target row goes in one SQL
+	// round-trip. RETURNING id reports the rows actually deleted so a
+	// race with another admin (row already gone) is handled implicitly
+	// — the caller broadcasts only the ids that really vanished.
+	delRows, err := tx.Query(ctx, `
+		DELETE FROM channels
+		WHERE server_id = $1 AND id = ANY($2::uuid[])
+		RETURNING id`,
+		serverID, targetIDs,
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("delete channels: %w", err)
+	}
+	deletedSet := make(map[string]struct{}, len(targetIDs))
+	for delRows.Next() {
+		var id string
+		if err := delRows.Scan(&id); err != nil {
+			delRows.Close()
+			return nil, nil, fmt.Errorf("scan deleted id: %w", err)
+		}
+		deletedSet[id] = struct{}{}
+	}
+	delRows.Close()
+	if err := delRows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("iterate deleted ids: %w", err)
+	}
+
+	// Postgres does not guarantee that RETURNING preserves the order
+	// of the input array, so reproject the deleted set onto targetIDs
+	// to enforce the documented children-first / root-last contract.
+	// Callers (logging, broadcast loop) rely on this stable ordering;
+	// the underlying SQL wouldn't.
+	deletedIDs = make([]string, 0, len(deletedSet))
+	for _, id := range targetIDs {
+		if _, ok := deletedSet[id]; ok {
+			deletedIDs = append(deletedIDs, id)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, nil, fmt.Errorf("commit: %w", err)
+	}
+	return deletedIDs, storageKeys, nil
+}
+
 // ListChannels returns all channels for the given guild ordered by position.
 func (p *Pool) ListChannels(ctx context.Context, serverID string) ([]models.Channel, error) {
 	rows, err := p.Query(ctx, `

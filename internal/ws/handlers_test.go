@@ -197,6 +197,9 @@ func (m *messageStoreMock) ListChannels(context.Context, string) ([]models.Chann
 func (m *messageStoreMock) GetChannelByID(context.Context, string) (*models.Channel, error) {
 	return nil, nil
 }
+func (m *messageStoreMock) DeleteChannelTree(context.Context, string, string) ([]string, []string, error) {
+	return nil, nil, nil
+}
 func (m *messageStoreMock) GetChannelByTypeAndPosition(context.Context, string, string, int) (*models.Channel, error) {
 	return nil, nil
 }

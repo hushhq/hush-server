@@ -100,6 +100,7 @@ type mockStore struct {
 	getChannelByIDFn              func(ctx context.Context, channelID string) (*models.Channel, error)
 	getChannelByTypeAndPositionFn func(ctx context.Context, serverID, channelType string, position int) (*models.Channel, error)
 	deleteChannelFn               func(ctx context.Context, channelID, serverID string) error
+	deleteChannelTreeFn           func(ctx context.Context, channelID, serverID string) ([]string, []string, error)
 	moveChannelFn                 func(ctx context.Context, channelID, serverID string, parentID *string, position int) error
 
 	// Attachments
@@ -694,6 +695,13 @@ func (m *mockStore) GetChannelByID(ctx context.Context, channelID string) (*mode
 	return nil, nil
 }
 
+func (m *mockStore) DeleteChannelTree(ctx context.Context, channelID, serverID string) ([]string, []string, error) {
+	if m.deleteChannelTreeFn != nil {
+		return m.deleteChannelTreeFn(ctx, channelID, serverID)
+	}
+	return []string{channelID}, nil, nil
+}
+
 func (m *mockStore) GetChannelByTypeAndPosition(ctx context.Context, serverID, channelType string, position int) (*models.Channel, error) {
 	if m.getChannelByTypeAndPositionFn != nil {
 		return m.getChannelByTypeAndPositionFn(ctx, serverID, channelType, position)
@@ -721,6 +729,7 @@ func (m *mockStore) SoftDeleteAttachment(ctx context.Context, attachmentID, owne
 	}
 	return nil, nil
 }
+
 
 func (m *mockStore) ListServerTemplates(ctx context.Context) ([]models.ServerTemplate, error) {
 	if m.listServerTemplatesFn != nil {
