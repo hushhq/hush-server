@@ -20,11 +20,13 @@ var _ db.Store = (*messageStoreMock)(nil)
 
 // messageStoreMock implements db.Store for message handler tests. Only message methods are used.
 type messageStoreMock struct {
-	insertMessageFn      func(ctx context.Context, channelID string, senderID *string, federatedSenderID *string, recipientID *string, ciphertext []byte) (*models.Message, error)
-	getMessagesFn        func(ctx context.Context, channelID, recipientID string, before time.Time, limit int) ([]models.Message, error)
-	getMessagesAfterFn   func(ctx context.Context, channelID, recipientID string, after time.Time, limit int) ([]models.Message, error)
-	isChannelMemberFn    func(ctx context.Context, channelID, userID string) (bool, error)
-	markChannelReadFn    func(ctx context.Context, channelID, userID, messageID string) error
+	insertMessageFn                     func(ctx context.Context, channelID string, senderID *string, federatedSenderID *string, recipientID *string, ciphertext []byte) (*models.Message, error)
+	getMessagesFn                       func(ctx context.Context, channelID, recipientID string, before time.Time, limit int) ([]models.Message, error)
+	getMessagesAfterFn                  func(ctx context.Context, channelID, recipientID string, after time.Time, limit int) ([]models.Message, error)
+	isChannelMemberFn                   func(ctx context.Context, channelID, userID string) (bool, error)
+	markChannelReadFn                   func(ctx context.Context, channelID, userID, messageID string) error
+	getServerMemberLevelFn              func(ctx context.Context, serverID, userID string) (int, error)
+	getServerMemberLevelByFederatedIDFn func(ctx context.Context, serverID, federatedIdentityID string) (int, error)
 }
 
 // Ping stub.
@@ -64,7 +66,7 @@ func (m *messageStoreMock) BackfillRootDeviceKey(context.Context, string, string
 func (m *messageStoreMock) ListDeviceKeys(context.Context, string) ([]models.DeviceKey, error) {
 	return nil, nil
 }
-func (m *messageStoreMock) RevokeDeviceKey(context.Context, string, string) error      { return nil }
+func (m *messageStoreMock) RevokeDeviceKey(context.Context, string, string) error { return nil }
 func (m *messageStoreMock) IsDeviceActive(context.Context, string, string) (bool, error) {
 	return true, nil
 }
@@ -76,7 +78,7 @@ func (m *messageStoreMock) CreateSession(context.Context, string, string, string
 func (m *messageStoreMock) GetSessionByTokenHash(context.Context, string) (*models.Session, error) {
 	return nil, nil
 }
-func (m *messageStoreMock) DeleteSessionByID(context.Context, string) error  { return nil }
+func (m *messageStoreMock) DeleteSessionByID(context.Context, string) error     { return nil }
 func (m *messageStoreMock) PurgeExpiredSessions(context.Context) (int64, error) { return 0, nil }
 func (m *messageStoreMock) PurgeStaleAdminSessions(context.Context, time.Duration) (int64, error) {
 	return 0, nil
@@ -203,8 +205,10 @@ func (m *messageStoreMock) DeleteChannelTree(context.Context, string, string) ([
 func (m *messageStoreMock) GetChannelByTypeAndPosition(context.Context, string, string, int) (*models.Channel, error) {
 	return nil, nil
 }
-func (m *messageStoreMock) DeleteChannel(context.Context, string, string) error             { return nil }
-func (m *messageStoreMock) MoveChannel(context.Context, string, string, *string, int) error { return nil }
+func (m *messageStoreMock) DeleteChannel(context.Context, string, string) error { return nil }
+func (m *messageStoreMock) MoveChannel(context.Context, string, string, *string, int) error {
+	return nil
+}
 func (m *messageStoreMock) InsertAttachment(context.Context, string, string, string, string, int64) (*models.Attachment, error) {
 	return nil, nil
 }
@@ -268,7 +272,10 @@ func (m *messageStoreMock) ListGuildBillingStats(context.Context) ([]models.Guil
 // AddServerMember uses permissionLevel int instead of role string.
 func (m *messageStoreMock) AddServerMember(context.Context, string, string, int) error { return nil }
 func (m *messageStoreMock) RemoveServerMember(context.Context, string, string) error   { return nil }
-func (m *messageStoreMock) GetServerMemberLevel(context.Context, string, string) (int, error) {
+func (m *messageStoreMock) GetServerMemberLevel(ctx context.Context, serverID, userID string) (int, error) {
+	if m.getServerMemberLevelFn != nil {
+		return m.getServerMemberLevelFn(ctx, serverID, userID)
+	}
 	return 0, nil
 }
 func (m *messageStoreMock) UpdateServerMemberLevel(context.Context, string, string, int) error {
@@ -453,7 +460,10 @@ func (m *messageStoreMock) AddFederatedServerMember(context.Context, string, str
 func (m *messageStoreMock) RemoveFederatedServerMember(context.Context, string, string) error {
 	return nil
 }
-func (m *messageStoreMock) GetServerMemberLevelByFederatedID(context.Context, string, string) (int, error) {
+func (m *messageStoreMock) GetServerMemberLevelByFederatedID(ctx context.Context, serverID, federatedIdentityID string) (int, error) {
+	if m.getServerMemberLevelByFederatedIDFn != nil {
+		return m.getServerMemberLevelByFederatedIDFn(ctx, serverID, federatedIdentityID)
+	}
 	return 0, nil
 }
 
@@ -504,8 +514,8 @@ func (m *messageStoreMock) UpsertChunkBlob(context.Context, string, []byte) erro
 func (m *messageStoreMock) GetChunkBlob(context.Context, string) ([]byte, error) {
 	return nil, nil
 }
-func (m *messageStoreMock) DeleteChunkBlob(context.Context, string) error            { return nil }
-func (m *messageStoreMock) ChunkBlobExists(context.Context, string) (bool, error)    { return false, nil }
+func (m *messageStoreMock) DeleteChunkBlob(context.Context, string) error         { return nil }
+func (m *messageStoreMock) ChunkBlobExists(context.Context, string) (bool, error) { return false, nil }
 
 // drainUntilType reads from c.send until a message with the given type is received or timeout.
 func drainUntilType(t *testing.T, c *Client, wantType string, timeout time.Duration) []byte {

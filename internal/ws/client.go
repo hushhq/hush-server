@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"time"
@@ -106,16 +107,20 @@ func (c *Client) handleMessage(raw []byte) {
 	}
 	switch msg.Type {
 	case "subscribe":
-		if msg.ChannelID != "" {
+		if msg.ChannelID != "" && c.canAccessChannel(msg.ChannelID) {
 			c.hub.Subscribe(c, msg.ChannelID)
+		} else if msg.ChannelID != "" {
+			sendError(c, "forbidden", "not a channel member")
 		}
 	case "unsubscribe":
 		if msg.ChannelID != "" {
 			c.hub.Unsubscribe(c, msg.ChannelID)
 		}
 	case "subscribe.server":
-		if msg.ServerID != "" {
+		if msg.ServerID != "" && c.canAccessServer(msg.ServerID) {
 			c.hub.SubscribeToServer(c, msg.ServerID)
+		} else if msg.ServerID != "" {
+			sendError(c, "forbidden", "not a server member")
 		}
 	case "unsubscribe.server":
 		if msg.ServerID != "" {
@@ -128,8 +133,10 @@ func (c *Client) handleMessage(raw []byte) {
 		}
 	case "voice.mute_state":
 		// Broadcast mute/deafen state to the guild so other participants see overlays.
-		if msg.ServerID != "" {
+		if msg.ServerID != "" && c.canAccessServer(msg.ServerID) {
 			c.hub.BroadcastToServer(msg.ServerID, raw)
+		} else if msg.ServerID != "" {
+			sendError(c, "forbidden", "not a server member")
 		}
 	case "message.send", "message.history", "typing.start", "typing.stop":
 		if c.handler != nil {
@@ -138,6 +145,38 @@ func (c *Client) handleMessage(raw []byte) {
 		// media.key was removed in M.3-01: frame keys are now derived locally via
 		// MLS export_secret. Sending key bytes over the wire violates the MLS security model.
 	}
+}
+
+func (c *Client) canAccessServer(serverID string) bool {
+	if c.handler == nil || c.handler.store == nil {
+		return false
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
+	defer cancel()
+
+	if c.federatedIdentityID != "" {
+		_, err := c.handler.store.GetServerMemberLevelByFederatedID(ctx, serverID, c.federatedIdentityID)
+		return err == nil
+	}
+	if c.userID == "" {
+		return false
+	}
+
+	_, err := c.handler.store.GetServerMemberLevel(ctx, serverID, c.userID)
+	return err == nil
+}
+
+func (c *Client) canAccessChannel(channelID string) bool {
+	if c.handler == nil || c.handler.store == nil || c.userID == "" {
+		return false
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
+	defer cancel()
+
+	ok, err := c.handler.store.IsChannelMember(ctx, channelID, c.userID)
+	return err == nil && ok
 }
 
 func (c *Client) writePump() {

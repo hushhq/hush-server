@@ -1,7 +1,9 @@
 package ws
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 )
@@ -57,4 +59,119 @@ func TestClient_MediaKey_RemovedInM3(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 		// Expected: media.key is silently ignored (handler removed).
 	}
+}
+
+func TestClient_SubscribeChannel_AllowsChannelMember(t *testing.T) {
+	hub := NewHub()
+	store := &messageStoreMock{
+		isChannelMemberFn: func(_ctx context.Context, channelID, userID string) (bool, error) {
+			if channelID != "channel-1" || userID != "user-1" {
+				t.Fatalf("membership checked with channelID=%q userID=%q", channelID, userID)
+			}
+			return true, nil
+		},
+	}
+	handler := NewMessageHandler(store, hub)
+	client := NewClient(nil, hub, "user-1", "device-1", "", handler)
+
+	client.handleMessage([]byte(`{"type":"subscribe","channel_id":"channel-1"}`))
+
+	hub.mu.RLock()
+	_, isSubscribed := hub.channels["channel-1"][client.id]
+	hub.mu.RUnlock()
+	if !isSubscribed {
+		t.Fatal("expected channel member to be subscribed")
+	}
+}
+
+func TestClient_SubscribeChannel_RejectsNonMember(t *testing.T) {
+	hub := NewHub()
+	store := &messageStoreMock{
+		isChannelMemberFn: func(_ctx context.Context, channelID, userID string) (bool, error) {
+			if channelID != "channel-1" || userID != "user-1" {
+				t.Fatalf("membership checked with channelID=%q userID=%q", channelID, userID)
+			}
+			return false, nil
+		},
+	}
+	handler := NewMessageHandler(store, hub)
+	client := NewClient(nil, hub, "user-1", "device-1", "", handler)
+
+	client.handleMessage([]byte(`{"type":"subscribe","channel_id":"channel-1"}`))
+
+	hub.mu.RLock()
+	_, isSubscribed := hub.channels["channel-1"][client.id]
+	hub.mu.RUnlock()
+	if isSubscribed {
+		t.Fatal("expected non-member not to be subscribed")
+	}
+
+	messages := drainAllClientMessages(client, 20*time.Millisecond)
+	if !hasErrorCode(messages, "forbidden") {
+		t.Fatalf("expected forbidden error, got %q", messages)
+	}
+}
+
+func TestClient_SubscribeServer_AllowsServerMember(t *testing.T) {
+	hub := NewHub()
+	store := &messageStoreMock{
+		getServerMemberLevelFn: func(_ctx context.Context, serverID, userID string) (int, error) {
+			if serverID != "server-1" || userID != "user-1" {
+				t.Fatalf("membership checked with serverID=%q userID=%q", serverID, userID)
+			}
+			return 1, nil
+		},
+	}
+	handler := NewMessageHandler(store, hub)
+	client := NewClient(nil, hub, "user-1", "device-1", "", handler)
+
+	client.handleMessage([]byte(`{"type":"subscribe.server","server_id":"server-1"}`))
+
+	hub.mu.RLock()
+	_, isSubscribed := hub.servers["server-1"][client.id]
+	hub.mu.RUnlock()
+	if !isSubscribed {
+		t.Fatal("expected server member to be subscribed")
+	}
+}
+
+func TestClient_SubscribeServer_RejectsNonMember(t *testing.T) {
+	hub := NewHub()
+	store := &messageStoreMock{
+		getServerMemberLevelFn: func(_ctx context.Context, serverID, userID string) (int, error) {
+			if serverID != "server-1" || userID != "user-1" {
+				t.Fatalf("membership checked with serverID=%q userID=%q", serverID, userID)
+			}
+			return 0, errors.New("not a member")
+		},
+	}
+	handler := NewMessageHandler(store, hub)
+	client := NewClient(nil, hub, "user-1", "device-1", "", handler)
+
+	client.handleMessage([]byte(`{"type":"subscribe.server","server_id":"server-1"}`))
+
+	hub.mu.RLock()
+	_, isSubscribed := hub.servers["server-1"][client.id]
+	hub.mu.RUnlock()
+	if isSubscribed {
+		t.Fatal("expected non-member not to be subscribed")
+	}
+
+	messages := drainAllClientMessages(client, 20*time.Millisecond)
+	if !hasErrorCode(messages, "forbidden") {
+		t.Fatalf("expected forbidden error, got %q", messages)
+	}
+}
+
+func hasErrorCode(messages [][]byte, expectedCode string) bool {
+	for _, raw := range messages {
+		var msg struct {
+			Type string `json:"type"`
+			Code string `json:"code"`
+		}
+		if err := json.Unmarshal(raw, &msg); err == nil && msg.Type == "error" && msg.Code == expectedCode {
+			return true
+		}
+	}
+	return false
 }
