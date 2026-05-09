@@ -281,6 +281,10 @@ func (h *inviteHandler) claimInvite(w http.ResponseWriter, r *http.Request) {
 			"member":    member,
 		})
 		h.hub.BroadcastToServer(serverID, msg)
+		// Also notify every connected session of the joining user so
+		// their guild list refreshes + subscribes to the new server's
+		// hub room. BroadcastToServer hits existing members only.
+		h.hub.BroadcastToUser(userID, msg)
 	}
 
 	// Emit system message: the joining actor is the federated ID or local user ID.

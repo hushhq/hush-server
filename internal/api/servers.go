@@ -162,6 +162,21 @@ func (h *serversHandler) createServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Notify every connected session of this user (other browser tabs,
+	// other devices) that a new server has joined their list, so their
+	// `useInstances.js` member_joined handler refreshes the guild
+	// snapshot and subscribes to the new server's hub room. Without
+	// this fan-out, the only client that learns about the new server
+	// is the one that issued the POST.
+	if h.hub != nil {
+		userMsg, _ := json.Marshal(map[string]interface{}{
+			"type":      "member_joined",
+			"server_id": server.ID,
+			"user_id":   userID,
+		})
+		h.hub.BroadcastToUser(userID, userMsg)
+	}
+
 	// Resolve the channel template: explicit templateId > default template > hardcoded default.
 	var template []models.TemplateChannel
 	if req.TemplateID != nil {
@@ -595,6 +610,13 @@ func (h *serversHandler) joinServer(w http.ResponseWriter, r *http.Request) {
 			"user_id":   userID,
 		})
 		h.hub.BroadcastToServer(serverID, msg)
+		// Also notify every connected session of the joining user
+		// (other browser tabs / devices) so they refresh their guild
+		// list and subscribe to this server's hub room. The
+		// BroadcastToServer above only reaches existing members, NOT
+		// the new member's other sessions, since those sessions have
+		// no prior subscription to this guild.
+		h.hub.BroadcastToUser(userID, msg)
 	}
 
 	EmitSystemMessage(r.Context(), h.store, h.hub, serverID, "member_joined", userID, nil, "", nil)

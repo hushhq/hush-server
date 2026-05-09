@@ -74,7 +74,14 @@ Chat messages are stored as MLS ciphertext blobs. The server never processes pla
 
 ## 4. Security Headers
 
-The default Caddy self-host proxy sets the following headers on all responses:
+The default Caddy self-host proxy terminates TLS and routes API, WebSocket,
+LiveKit, admin-dashboard, and storage traffic. The backend-only self-host path
+does not serve the Hush web client, so browser application headers belong to the
+client origin you use (`https://app.gethush.live` by default, or your own
+`hush-web` deployment).
+
+For direct browser visits to the instance root, the generated Caddy fallback
+responds with:
 
 | Header | Value | Purpose |
 |-|-|-|
@@ -82,6 +89,10 @@ The default Caddy self-host proxy sets the following headers on all responses:
 | `X-Frame-Options` | `DENY` | Mitigate clickjacking |
 | `Cross-Origin-Opener-Policy` | `same-origin` | Window isolation |
 | `Strict-Transport-Security` | `max-age=31536000` | HSTS (production with `--domain`) |
+
+If you self-host `hush-web` on your own domain, configure equivalent browser
+security headers on that frontend origin. Do not add COEP unless you have tested
+the full browser stack you serve.
 
 **Note on COEP:** `Cross-Origin-Embedder-Policy: require-corp` is intentionally not set. The LiveKit E2EE layer uses Insertable Streams with Transferable objects, not SharedArrayBuffer. Enabling COEP would break browser extensions and cross-origin resources without benefit.
 
@@ -155,12 +166,13 @@ Hush implements a signed Merkle tree of key operations per instance.
 | Item | Action |
 |-|-|
 | **CORS** | Set `CORS_ORIGIN` to your frontend origin. Never use `*` in production. |
-| **HSTS** | Use `--domain` with `setup.sh`; the default Caddy path sets HSTS automatically. If you use nginx, configure equivalent HSTS there. |
+| **HSTS** | Use `--domain` with `setup.sh`. If you serve `hush-web` yourself, configure HSTS on that frontend origin too. |
 | **Secrets** | Do not use default values. `setup.sh` generates all secrets. See §6 for rotation classification. |
 | **Transparency key** | Never rotate `TRANSPARENCY_LOG_PRIVATE_KEY` after first log entry. Back it up offline and separately from the database backup. |
 | **`.env` backup** | Back up `.env` immediately after `setup.sh`. A database backup without its matching `.env` is inoperable. |
 | **Database access** | PostgreSQL should not be exposed to the public internet. Use Docker networking or firewall rules. |
 | **Redis access** | Same as PostgreSQL — internal network only. |
+| **Device-link storage** | In domain mode, create `storage.<DOMAIN>` DNS before relying on the bundled MinIO bulk plane. If you use external S3/R2, apply the CORS policy from `docs/RUNBOOK.md`. |
 | **Dependencies** | Run `go mod verify` and check for CVEs before production deployment. |
 | **Restore tested** | Verify restore procedure on a non-production copy before you need it. See `docs/RUNBOOK.md`. |
 

@@ -1,6 +1,10 @@
 # Operator Runbook
 
-This document contains step-by-step procedures for self-hosters. It assumes `setup.sh` has already been run and the stack is operational.
+This document contains step-by-step procedures for self-hosters. It assumes
+`./scripts/setup.sh` has already been run from the `hush-server` repository and
+the stack is operational. `setup.sh` starts Docker Compose itself; do not follow
+it with a second manual `docker compose up -d` unless you are intentionally
+restarting services.
 
 For security model details, see [SECURITY.md](../SECURITY.md).
 For release and deployment paths, see [RELEASE.md](../RELEASE.md).
@@ -36,6 +40,9 @@ Run this checklist immediately after `setup.sh` and after any secret rotation.
 
 [ ] The backup location and access method is documented for any other operator
     who might need to perform a restore
+
+[ ] Domain mode only: storage.<DOMAIN> has an A record pointing at this server
+    if you want full device-link bulk transfer through bundled MinIO
 ```
 
 **Why `.env` and database backup must be stored together (but separately from each other):**
@@ -99,6 +106,7 @@ env_continuity_required=POSTGRES_PASSWORD,TRANSPARENCY_LOG_PRIVATE_KEY,SERVICE_I
 |-|-|-|
 | PostgreSQL database | Yes | Full dump with DROP/CREATE statements |
 | Redis data | No | Ephemeral (session cache, rate-limiting counters reset safely) |
+| MinIO `minio_data` volume | No | Short-lived device-link archive chunks only; back up separately if you need in-flight archive continuity |
 | `.env` | No | Must be backed up separately |
 | `livekit/livekit.yaml` | No | Template only; regenerated from `.env` on restart |
 | TLS certificates | No | Managed by Caddy; re-obtained automatically from Let's Encrypt |
@@ -359,6 +367,16 @@ storage.<DOMAIN>   A   <server public IP>
 before clients can use the bulk plane. Caddy will obtain a Let's
 Encrypt certificate for `storage.<DOMAIN>` on first request to it.
 
+To verify the profile is active after setup:
+
+```bash
+docker compose -f docker-compose.prod.yml -f docker-compose.caddy.yml \
+  --profile s3-storage ps minio minio-bootstrap
+```
+
+`minio` should be running. `minio-bootstrap` is a one-shot container and may
+show as exited successfully after applying the bucket CORS policy.
+
 ### 6.2 External S3 / R2 (recommended for production)
 
 Provision the bucket out-of-band:
@@ -403,7 +421,7 @@ Provision the bucket out-of-band:
    STORAGE_S3_USE_SSL=true
    ```
 
-6. Restart the stack: `docker compose -f docker-compose.prod.yml -f
+6. Restart the API: `docker compose -f docker-compose.prod.yml -f
    docker-compose.caddy.yml up -d hush-api`. **Do not** pass
    `--profile s3-storage` — the bundled MinIO is not used.
 
@@ -466,8 +484,13 @@ To rotate:
 
 1. Generate new values (`openssl rand -hex 24`).
 2. Update all four env vars in `.env`.
-3. `docker compose --profile s3-storage -f docker-compose.prod.yml -f
-    docker-compose.caddy.yml up -d minio hush-api`.
+3. Restart MinIO, the bootstrap one-shot, and the API:
+
+   ```bash
+   docker compose -f docker-compose.prod.yml -f docker-compose.caddy.yml \
+     --profile s3-storage up -d minio minio-bootstrap hush-api
+   ```
+
 4. The bootstrap container is idempotent on re-run; it will re-apply
    CORS but will not re-create the bucket if it already exists.
 
