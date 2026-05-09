@@ -77,7 +77,8 @@ services:
   # One-shot: creates the bucket and applies the CORS policy required
   # by the browser client. Idempotent — `mc mb` reports an OK no-op
   # if the bucket already exists; `mc cors set` overwrites the policy
-  # in place.
+  # in place. Link-device archives and chat attachments intentionally
+  # use separate buckets.
   minio-bootstrap:
     image: quay.io/minio/mc:RELEASE.2024-09-16T17-43-14Z
     container_name: hush-minio-bootstrap
@@ -90,6 +91,7 @@ services:
       - MINIO_ROOT_USER=${MINIO_ROOT_USER}
       - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
       - STORAGE_S3_BUCKET=${STORAGE_S3_BUCKET:-hush-link-archive}
+      - ATTACHMENT_STORAGE_S3_BUCKET=${ATTACHMENT_STORAGE_S3_BUCKET:-hush-attachments}
       - STORAGE_BROWSER_ORIGIN=${STORAGE_BROWSER_ORIGIN:-https://app.gethush.live}
     command:
       - -c
@@ -98,9 +100,14 @@ services:
         until mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null 2>&1; do
           sleep 2
         done
-        if ! mc ls "local/$$STORAGE_S3_BUCKET" >/dev/null 2>&1; then
-          mc mb "local/$$STORAGE_S3_BUCKET"
-        fi
+        for bucket in "$$STORAGE_S3_BUCKET" "$$ATTACHMENT_STORAGE_S3_BUCKET"; do
+          if [ -z "$$bucket" ]; then
+            continue
+          fi
+          if ! mc ls "local/$$bucket" >/dev/null 2>&1; then
+            mc mb "local/$$bucket"
+          fi
+        done
         # CORS policy: the browser client (origin from STORAGE_BROWSER_ORIGIN)
         # PUTs and GETs ciphertext directly to the bucket, declaring the
         # SHA-256 via x-amz-checksum-sha256 and verifying the same
@@ -123,8 +130,16 @@ services:
           </CORSRule>
         </CORSConfiguration>
         XML
-        mc cors set "local/$$STORAGE_S3_BUCKET" /tmp/cors.xml
-        echo "minio-bootstrap: bucket $$STORAGE_S3_BUCKET ready, CORS allowed origin $$STORAGE_BROWSER_ORIGIN"
+        for bucket in "$$STORAGE_S3_BUCKET" "$$ATTACHMENT_STORAGE_S3_BUCKET"; do
+          if [ -z "$$bucket" ]; then
+            continue
+          fi
+          if mc cors set "local/$$bucket" /tmp/cors.xml; then
+            echo "minio-bootstrap: bucket $$bucket ready, CORS allowed origin $$STORAGE_BROWSER_ORIGIN"
+          else
+            echo "minio-bootstrap: bucket $$bucket ready, CORS policy apply failed; same-origin proxying still works" >&2
+          fi
+        done
     restart: "no"
     networks:
       - hush-network
@@ -158,6 +173,13 @@ services:
       - STORAGE_S3_ACCESS_KEY=${STORAGE_S3_ACCESS_KEY:-}
       - STORAGE_S3_SECRET_KEY=${STORAGE_S3_SECRET_KEY:-}
       - STORAGE_S3_USE_SSL=${STORAGE_S3_USE_SSL:-true}
+      - ATTACHMENT_STORAGE_BACKEND=${ATTACHMENT_STORAGE_BACKEND:-${STORAGE_BACKEND:-postgres_bytea}}
+      - ATTACHMENT_STORAGE_S3_ENDPOINT=${ATTACHMENT_STORAGE_S3_ENDPOINT:-${STORAGE_S3_ENDPOINT:-}}
+      - ATTACHMENT_STORAGE_S3_REGION=${ATTACHMENT_STORAGE_S3_REGION:-${STORAGE_S3_REGION:-us-east-1}}
+      - ATTACHMENT_STORAGE_S3_BUCKET=${ATTACHMENT_STORAGE_S3_BUCKET:-hush-attachments}
+      - ATTACHMENT_STORAGE_S3_ACCESS_KEY=${ATTACHMENT_STORAGE_S3_ACCESS_KEY:-${STORAGE_S3_ACCESS_KEY:-}}
+      - ATTACHMENT_STORAGE_S3_SECRET_KEY=${ATTACHMENT_STORAGE_S3_SECRET_KEY:-${STORAGE_S3_SECRET_KEY:-}}
+      - ATTACHMENT_STORAGE_S3_USE_SSL=${ATTACHMENT_STORAGE_S3_USE_SSL:-${STORAGE_S3_USE_SSL:-true}}
       - LINK_ARCHIVE_USER_QUOTA=${LINK_ARCHIVE_USER_QUOTA:-1}
       - LINK_ARCHIVE_STAGING_BYTES_CAP=${LINK_ARCHIVE_STAGING_BYTES_CAP:-8589934592}
     depends_on:

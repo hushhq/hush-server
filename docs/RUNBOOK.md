@@ -354,9 +354,10 @@ automatically:
   `minio-bootstrap` containers are brought up alongside the rest of
   the stack.
 - The `minio-bootstrap` one-shot creates the `hush-link-archive`
-  bucket (idempotent) and applies the bucket CORS policy that
-  permits the browser client to PUT/GET ciphertext directly with the
-  `x-amz-checksum-sha256` header.
+  bucket for device-link archives and the `hush-attachments` bucket
+  for chat attachments (both idempotent), then applies the bucket CORS
+  policy that permits the browser client to PUT/GET ciphertext
+  directly with the `x-amz-checksum-sha256` header.
 
 **One operator step is still required:** create a DNS A record
 
@@ -381,10 +382,11 @@ show as exited successfully after applying the bucket CORS policy.
 
 Provision the bucket out-of-band:
 
-1. Create a bucket. Recommended name: `hush-link-archive`. Region:
-   wherever your API is.
+1. Create two buckets. Recommended names: `hush-link-archive` for
+   device-link archives and `hush-attachments` for chat attachments.
+   Region: wherever your API is.
 2. Create an IAM user / role with PUT, GET, HEAD, DELETE on that
-   bucket.
+   bucket pair.
 3. Enable native SHA-256 object checksums (default on AWS S3 since
    2022; MinIO supports the same since RELEASE.2022-09-25).
 4. Apply the CORS policy (replace origin):
@@ -419,6 +421,14 @@ Provision the bucket out-of-band:
    STORAGE_S3_ACCESS_KEY=<from IAM>
    STORAGE_S3_SECRET_KEY=<from IAM>
    STORAGE_S3_USE_SSL=true
+
+   ATTACHMENT_STORAGE_BACKEND=s3
+   ATTACHMENT_STORAGE_S3_ENDPOINT=s3.us-east-1.amazonaws.com
+   ATTACHMENT_STORAGE_S3_REGION=us-east-1
+   ATTACHMENT_STORAGE_S3_BUCKET=hush-attachments
+   ATTACHMENT_STORAGE_S3_ACCESS_KEY=<from IAM>
+   ATTACHMENT_STORAGE_S3_SECRET_KEY=<from IAM>
+   ATTACHMENT_STORAGE_S3_USE_SSL=true
    ```
 
 6. Restart the API: `docker compose -f docker-compose.prod.yml -f

@@ -301,11 +301,11 @@ func main() {
 
 		// Storage backend for attachment presign URLs. Lazy-built per
 		// request via the closure so a transient backend outage does not
-		// require a server restart. Returns nil when STORAGE_BACKEND is
-		// the default postgres_bytea — attachments require an
-		// S3-compatible backend to produce native presigned URLs.
+		// require a server restart. Returns nil when the attachment
+		// storage config resolves to postgres_bytea — attachments require
+		// an S3-compatible backend to produce native presigned URLs.
 		attachmentBackend := func() (storage.Backend, error) {
-			cfg, err := storage.LoadConfig()
+			cfg, err := storage.LoadAttachmentConfig()
 			if err != nil {
 				return nil, err
 			}
