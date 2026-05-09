@@ -350,9 +350,10 @@ func main() {
 			startedAt,
 		))
 
+		voiceState := api.NewVoiceState()
 		r.Get("/ws", ws.Handler(wsHub, cfg.JWTSecret, pool, cfg.CORSOrigin, cfg.WSAllowedOrigins...))
-		r.Mount("/api/livekit", api.LiveKitRoutes(pool, cfg.JWTSecret, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret))
-		r.Post("/api/livekit/webhook", api.LiveKitWebhookHandler(wsHub, pool, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret))
+		r.Mount("/api/livekit", api.LiveKitRoutesWithVoiceState(pool, cfg.JWTSecret, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret, voiceState))
+		r.Post("/api/livekit/webhook", api.LiveKitWebhookHandlerWithState(wsHub, pool, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret, voiceState))
 	}
 
 	// Admin dashboard SPA — embedded static files served at /admin/.

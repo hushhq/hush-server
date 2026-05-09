@@ -30,6 +30,52 @@ func postLiveKitToken(handler http.Handler, roomName, participantName, token str
 	return postServerJSON(handler, "/token", body, token)
 }
 
+func TestLiveKitVoiceState_ReturnsCurrentVoiceParticipantsForServer(t *testing.T) {
+	userID := uuid.New().String()
+	serverID := uuid.New().String()
+	voiceA := uuid.New().String()
+	voiceB := uuid.New().String()
+	textID := uuid.New().String()
+	state := NewVoiceState()
+	state.join("channel-"+voiceA, "user-alice", "Alice")
+	state.join("channel-"+voiceA, "user-bob", "Bob")
+	state.join("channel-"+voiceB, "user-caro", "Caro")
+	state.join("channel-"+textID, "user-text", "Text")
+
+	store := &mockStore{
+		getServerMemberLevelFn: func(_ context.Context, sid, uid string) (int, error) {
+			if sid == serverID && uid == userID {
+				return models.PermissionLevelMember, nil
+			}
+			return 0, errNotFoundLikeMember
+		},
+		listChannelsFn: func(_ context.Context, sid string) ([]models.Channel, error) {
+			require.Equal(t, serverID, sid)
+			return []models.Channel{
+				{ID: voiceA, Type: "voice"},
+				{ID: voiceB, Type: "voice"},
+				{ID: textID, Type: "text"},
+			}, nil
+		},
+	}
+	token := makeAuth(store, userID)
+	router := LiveKitRoutesWithVoiceState(store, testJWTSecret, "test-key", "test-secret", state)
+
+	req := httptest.NewRequest(http.MethodGet, "/voice-state?serverId="+serverID, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	var body struct {
+		ParticipantsByChannel map[string][]voiceParticipant `json:"participantsByChannel"`
+	}
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&body))
+	require.Len(t, body.ParticipantsByChannel[voiceA], 2)
+	require.Len(t, body.ParticipantsByChannel[voiceB], 1)
+	assert.NotContains(t, body.ParticipantsByChannel, textID)
+}
+
 // ---------- Muted user tests ----------
 
 // TestLiveKitToken_MutedUser verifies that a muted user receives 403 with
@@ -44,7 +90,7 @@ func TestLiveKitToken_MutedUser(t *testing.T) {
 		getChannelByIDFn: func(_ context.Context, id string) (*models.Channel, error) {
 			if id == channelID {
 				return &models.Channel{
-					ID:       channelID,
+					ID: channelID,
 					// Name field removed - channel names are in EncryptedMetadata.
 					Type:     "voice",
 					ServerID: ptrString(serverID),
@@ -89,7 +135,7 @@ func TestLiveKitToken_NonMutedUser(t *testing.T) {
 		getChannelByIDFn: func(_ context.Context, id string) (*models.Channel, error) {
 			if id == channelID {
 				return &models.Channel{
-					ID:       channelID,
+					ID: channelID,
 					// Name field removed - channel names are in EncryptedMetadata.
 					Type:     "voice",
 					ServerID: ptrString(serverID),

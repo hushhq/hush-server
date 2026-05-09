@@ -48,7 +48,7 @@ func (b *voiceGroupTestBroadcaster) messagesOfType(msgType string) []map[string]
 // simulateParticipantLeave runs the last-participant-leave logic that the webhook handler
 // executes internally, so tests can verify voice group cleanup without signing webhook events.
 func simulateParticipantLeave(
-	state *voiceState,
+	state *VoiceState,
 	store *mockStore,
 	broadcaster *voiceGroupTestBroadcaster,
 	roomName, identity, serverID string,

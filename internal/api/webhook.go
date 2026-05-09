@@ -23,17 +23,23 @@ type voiceParticipant struct {
 	DisplayName string `json:"displayName"`
 }
 
-// voiceState tracks participants per LiveKit room (in-memory, rebuilt from webhooks).
-type voiceState struct {
+// VoiceState tracks participants per LiveKit room (in-memory, rebuilt from webhooks).
+type VoiceState struct {
 	mu    sync.RWMutex
 	rooms map[string]map[string]voiceParticipant // roomName -> identity -> participant
 }
 
-func newVoiceState() *voiceState {
-	return &voiceState{rooms: make(map[string]map[string]voiceParticipant)}
+// NewVoiceState returns an empty voice-state tracker shared by the LiveKit
+// webhook handler and the authenticated snapshot endpoint.
+func NewVoiceState() *VoiceState {
+	return &VoiceState{rooms: make(map[string]map[string]voiceParticipant)}
 }
 
-func (vs *voiceState) join(roomName, identity, displayName string) []voiceParticipant {
+func newVoiceState() *VoiceState {
+	return NewVoiceState()
+}
+
+func (vs *VoiceState) join(roomName, identity, displayName string) []voiceParticipant {
 	vs.mu.Lock()
 	defer vs.mu.Unlock()
 	if vs.rooms[roomName] == nil {
@@ -43,7 +49,7 @@ func (vs *voiceState) join(roomName, identity, displayName string) []voicePartic
 	return vs.listLocked(roomName)
 }
 
-func (vs *voiceState) leave(roomName, identity string) []voiceParticipant {
+func (vs *VoiceState) leave(roomName, identity string) []voiceParticipant {
 	vs.mu.Lock()
 	defer vs.mu.Unlock()
 	if m := vs.rooms[roomName]; m != nil {
@@ -55,11 +61,34 @@ func (vs *voiceState) leave(roomName, identity string) []voiceParticipant {
 	return vs.listLocked(roomName)
 }
 
-func (vs *voiceState) listLocked(roomName string) []voiceParticipant {
+func (vs *VoiceState) listLocked(roomName string) []voiceParticipant {
 	m := vs.rooms[roomName]
 	result := make([]voiceParticipant, 0, len(m))
 	for _, p := range m {
 		result = append(result, p)
+	}
+	return result
+}
+
+func (vs *VoiceState) snapshotByChannel(channelIDs map[string]struct{}) map[string][]voiceParticipant {
+	vs.mu.RLock()
+	defer vs.mu.RUnlock()
+	result := make(map[string][]voiceParticipant)
+	for roomName, participants := range vs.rooms {
+		channelID, ok := parseRoomName(roomName)
+		if !ok {
+			continue
+		}
+		if _, ok := channelIDs[channelID]; !ok {
+			continue
+		}
+		rows := make([]voiceParticipant, 0, len(participants))
+		for _, p := range participants {
+			rows = append(rows, p)
+		}
+		if len(rows) > 0 {
+			result[channelID] = rows
+		}
 	}
 	return result
 }
@@ -88,8 +117,17 @@ const webhookChannelLookupTimeout = 5 * time.Second
 // to the guild's WS subscribers via BroadcastToServer.
 // Falls back to BroadcastToAll if the channel's server ID cannot be resolved.
 func LiveKitWebhookHandler(hub *ws.Hub, store db.Store, apiKey, apiSecret string) http.HandlerFunc {
+	return LiveKitWebhookHandlerWithState(hub, store, apiKey, apiSecret, NewVoiceState())
+}
+
+// LiveKitWebhookHandlerWithState returns an HTTP handler backed by the supplied
+// VoiceState tracker. Production passes the same tracker to LiveKitRoutes so
+// clients can fetch a bootstrap snapshot after login.
+func LiveKitWebhookHandlerWithState(hub *ws.Hub, store db.Store, apiKey, apiSecret string, state *VoiceState) http.HandlerFunc {
 	provider := auth.NewSimpleKeyProvider(apiKey, apiSecret)
-	state := newVoiceState()
+	if state == nil {
+		state = NewVoiceState()
+	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		event, err := webhook.ReceiveWebhookEvent(r, provider)
