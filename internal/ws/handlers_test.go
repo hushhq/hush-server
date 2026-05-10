@@ -181,7 +181,7 @@ func (m *messageStoreMock) IsChannelMember(ctx context.Context, channelID, userI
 func (m *messageStoreMock) GetInstanceConfig(context.Context) (*models.InstanceConfig, error) {
 	return nil, nil
 }
-func (m *messageStoreMock) UpdateInstanceConfig(context.Context, *string, *string, *string, *string, *string, *int, *int, *int, *string) error {
+func (m *messageStoreMock) UpdateInstanceConfig(context.Context, *string, *string, *string, *string, *string, *int, *int, *int, *string, *int64, *int64, *int) error {
 	return nil
 }
 func (m *messageStoreMock) GetUserRole(context.Context, string) (string, error)  { return "member", nil }
@@ -217,6 +217,18 @@ func (m *messageStoreMock) GetAttachmentByID(context.Context, string) (*models.A
 }
 func (m *messageStoreMock) SoftDeleteAttachment(context.Context, string, string) (*models.Attachment, error) {
 	return nil, nil
+}
+func (m *messageStoreMock) SoftDeleteAttachmentsByID(context.Context, []string) ([]models.Attachment, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) ListAttachmentsForGuildQuota(context.Context, string) (string, []models.Attachment, error) {
+	return "", nil, nil
+}
+func (m *messageStoreMock) ListExpiredAttachments(context.Context, int, int) ([]models.Attachment, error) {
+	return nil, nil
+}
+func (m *messageStoreMock) PurgeExpiredMessages(context.Context, int) (int64, error) {
+	return 0, nil
 }
 func (m *messageStoreMock) ListServerTemplates(context.Context) ([]models.ServerTemplate, error) {
 	return nil, nil

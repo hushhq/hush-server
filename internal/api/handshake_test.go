@@ -16,7 +16,7 @@ import (
 
 func TestInstanceCache_ZeroValue_ReturnsDefaults(t *testing.T) {
 	cache := NewInstanceCache()
-	name, iconURL, regMode, scp, vkrh, tURL, lPub, _, screenCap := cache.snapshot()
+	name, iconURL, regMode, scp, vkrh, tURL, lPub, _, screenCap, maxAttachmentBytes := cache.snapshot()
 	assert.Equal(t, "", name)
 	assert.Nil(t, iconURL)
 	assert.Equal(t, "", regMode)
@@ -25,6 +25,7 @@ func TestInstanceCache_ZeroValue_ReturnsDefaults(t *testing.T) {
 	assert.Nil(t, tURL, "zero-value cache must have nil transparencyURL")
 	assert.Nil(t, lPub, "zero-value cache must have nil logPublicKey")
 	assert.Equal(t, "1080p", screenCap)
+	assert.Equal(t, int64(MaxAttachmentBytes), maxAttachmentBytes)
 }
 
 func TestInstanceCache_Set_ReflectsValues(t *testing.T) {
@@ -32,7 +33,7 @@ func TestInstanceCache_Set_ReflectsValues(t *testing.T) {
 	icon := "https://example.com/icon.png"
 	cache.Set("My Hush", &icon, "invite_only", "admin_only", 4, "open")
 
-	name, iconURL, regMode, scp, vkrh, _, _, _, screenCap := cache.snapshot()
+	name, iconURL, regMode, scp, vkrh, _, _, _, screenCap, _ := cache.snapshot()
 	assert.Equal(t, "My Hush", name)
 	require.NotNil(t, iconURL)
 	assert.Equal(t, "https://example.com/icon.png", *iconURL)
@@ -46,7 +47,7 @@ func TestInstanceCache_Set_NilIconURL(t *testing.T) {
 	cache := NewInstanceCache()
 	cache.Set("Test", nil, "open", "any_member", 2, "open")
 
-	_, iconURL, _, _, _, _, _, _, _ := cache.snapshot()
+	_, iconURL, _, _, _, _, _, _, _, _ := cache.snapshot()
 	assert.Nil(t, iconURL)
 }
 
@@ -89,6 +90,7 @@ func TestHandshake_ContainsAllRequiredFields(t *testing.T) {
 	// Capabilities
 	assert.Contains(t, resp, "capabilities")
 	assert.Equal(t, "1080p", resp["screen_share_resolution_cap"])
+	assert.Equal(t, float64(MaxAttachmentBytes), resp["max_attachment_bytes"])
 
 	// Instance identity
 	assert.Contains(t, resp, "name")
@@ -259,6 +261,22 @@ func TestHandshake_ScreenShareResolutionCap(t *testing.T) {
 	var body map[string]interface{}
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&body))
 	assert.Equal(t, "720p", body["screen_share_resolution_cap"])
+}
+
+func TestHandshake_MaxAttachmentBytes(t *testing.T) {
+	cache := NewInstanceCache()
+	cache.SetAttachmentPolicy(4 * 1024 * 1024)
+
+	handler := HandshakeHandler(cache, true)
+	req := httptest.NewRequest(http.MethodGet, "/api/handshake", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	var body map[string]interface{}
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&body))
+	assert.Equal(t, float64(4*1024*1024), body["max_attachment_bytes"])
 }
 
 // TestHandshake_ServerCreationPolicy verifies that a non-default serverCreationPolicy

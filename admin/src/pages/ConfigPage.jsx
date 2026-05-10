@@ -134,6 +134,19 @@ const PAGE_STYLES = {
   },
 };
 
+const BYTES_PER_MIB = 1024 * 1024;
+
+function bytesToMiB(value) {
+  return value != null ? String(Math.round(value / BYTES_PER_MIB)) : '';
+}
+
+function parseMiB(value) {
+  const trimmed = value.trim();
+  if (!trimmed) return 0;
+  const parsed = parseInt(trimmed, 10);
+  return Number.isNaN(parsed) ? null : parsed * BYTES_PER_MIB;
+}
+
 const CHANNEL_TYPE_ICONS = {
   system: '🛡',
   text: '#',
@@ -158,6 +171,9 @@ function InstanceConfigSection() {
   const [maxMembersPerServer, setMaxMembersPerServer] = useState('');
   const [maxRegisteredUsers, setMaxRegisteredUsers] = useState('');
   const [screenShareResolutionCap, setScreenShareResolutionCap] = useState('1080p');
+  const [maxAttachmentMiB, setMaxAttachmentMiB] = useState('25');
+  const [maxGuildAttachmentStorageMiB, setMaxGuildAttachmentStorageMiB] = useState('');
+  const [messageRetentionDays, setMessageRetentionDays] = useState('90');
   const [name, setName] = useState('');
   const [iconUrl, setIconUrl] = useState('');
   const [saving, setSaving] = useState(false);
@@ -176,6 +192,9 @@ function InstanceConfigSection() {
       setMaxMembersPerServer(data.maxMembersPerServer != null ? String(data.maxMembersPerServer) : '');
       setMaxRegisteredUsers(data.maxRegisteredUsers != null ? String(data.maxRegisteredUsers) : '');
       setScreenShareResolutionCap(data.screenShareResolutionCap || '1080p');
+      setMaxAttachmentMiB(bytesToMiB(data.maxAttachmentBytes ?? 25 * BYTES_PER_MIB));
+      setMaxGuildAttachmentStorageMiB(bytesToMiB(data.maxGuildAttachmentStorageBytes));
+      setMessageRetentionDays(data.messageRetentionDays != null ? String(data.messageRetentionDays) : '90');
       setName(data.name || '');
       setIconUrl(data.iconUrl || '');
     }).catch((e) => {
@@ -207,6 +226,18 @@ function InstanceConfigSection() {
         if (!isNaN(parsedMaxUsers)) updates.maxRegisteredUsers = parsedMaxUsers;
       }
       updates.screenShareResolutionCap = screenShareResolutionCap;
+      const parsedMaxAttachmentBytes = parseMiB(maxAttachmentMiB);
+      if (parsedMaxAttachmentBytes != null && parsedMaxAttachmentBytes > 0) {
+        updates.maxAttachmentBytes = parsedMaxAttachmentBytes;
+      }
+      const parsedGuildStorageBytes = parseMiB(maxGuildAttachmentStorageMiB);
+      if (parsedGuildStorageBytes != null) {
+        updates.maxGuildAttachmentStorageBytes = parsedGuildStorageBytes;
+      }
+      const parsedRetentionDays = parseInt(messageRetentionDays, 10);
+      if (!Number.isNaN(parsedRetentionDays)) {
+        updates.messageRetentionDays = parsedRetentionDays;
+      }
       await updateConfig(updates);
       setSuccess('Configuration saved. Changes apply to clients on next connection.');
       setTimeout(() => setSuccess(''), 4000);
@@ -354,6 +385,52 @@ function InstanceConfigSection() {
         </select>
         <div style={PAGE_STYLES.note}>
           Controls the client screen-share quality choices exposed during voice calls.
+        </div>
+      </div>
+
+      <div style={PAGE_STYLES.fieldRow}>
+        <label style={PAGE_STYLES.label}>Max file size per attachment (MiB)</label>
+        <input
+          type="number"
+          className="input"
+          min="1"
+          value={maxAttachmentMiB}
+          onChange={(e) => setMaxAttachmentMiB(e.target.value)}
+          style={{ maxWidth: '200px' }}
+        />
+        <div style={PAGE_STYLES.note}>
+          Maximum encrypted object size accepted by the attachment presign endpoint.
+        </div>
+      </div>
+
+      <div style={PAGE_STYLES.fieldRow}>
+        <label style={PAGE_STYLES.label}>Max attachment storage per guild (MiB)</label>
+        <input
+          type="number"
+          className="input"
+          min="0"
+          value={maxGuildAttachmentStorageMiB}
+          onChange={(e) => setMaxGuildAttachmentStorageMiB(e.target.value)}
+          placeholder="No limit"
+          style={{ maxWidth: '200px' }}
+        />
+        <div style={PAGE_STYLES.note}>
+          Set to 0 for no limit. When a guild exceeds this quota, the oldest attachments are tombstoned first.
+        </div>
+      </div>
+
+      <div style={PAGE_STYLES.fieldRow}>
+        <label style={PAGE_STYLES.label}>Message history retention (days)</label>
+        <input
+          type="number"
+          className="input"
+          min="1"
+          value={messageRetentionDays}
+          onChange={(e) => setMessageRetentionDays(e.target.value)}
+          style={{ maxWidth: '200px' }}
+        />
+        <div style={PAGE_STYLES.note}>
+          Encrypted chat messages older than this window are purged. Default is 90 days.
         </div>
       </div>
 

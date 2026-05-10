@@ -110,6 +110,24 @@ func (p *Pool) DeleteMessage(ctx context.Context, messageID, serverID string) er
 	return nil
 }
 
+// PurgeExpiredMessages deletes encrypted chat messages older than the
+// instance-level retention window. This is intentionally coarse-grained:
+// message bodies are opaque ciphertext, so retention is enforced by row age.
+func (p *Pool) PurgeExpiredMessages(ctx context.Context, retentionDays int) (int64, error) {
+	if retentionDays <= 0 {
+		return 0, nil
+	}
+	tag, err := p.Exec(ctx, `
+		DELETE FROM messages
+		WHERE "timestamp" < now() - ($1 * interval '1 day')`,
+		retentionDays,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
 func scanMessage(row pgx.Row) (*models.Message, error) {
 	var m models.Message
 	err := row.Scan(&m.ID, &m.ChannelID, &m.SenderID, &m.FederatedSenderID, &m.RecipientID, &m.Ciphertext, &m.Timestamp)

@@ -132,6 +132,7 @@ func main() {
 				voiceKeyRotationHours = 2
 			}
 			handshakeCache.Set(icfg.Name, icfg.IconURL, icfg.RegistrationMode, icfg.GuildDiscovery, voiceKeyRotationHours, icfg.ServerCreationPolicy, icfg.ScreenShareResolutionCap)
+			handshakeCache.SetAttachmentPolicy(icfg.MaxAttachmentBytes)
 		}
 
 		// System message cleanup: prune expired messages every 6 hours.
@@ -315,6 +316,18 @@ func main() {
 			return storage.NewBackend(cfg, pool)
 		}
 
+		go func() {
+			ticker := time.NewTicker(6 * time.Hour)
+			defer ticker.Stop()
+			for range ticker.C {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+				if err := runMessageRetentionCleanup(ctx, pool, attachmentBackend); err != nil {
+					slog.Error("message retention cleanup", "err", err)
+				}
+				cancel()
+			}
+		}()
+
 		// Guild-scoped API: auth and RequireGuildMember applied inside ServerRoutes.
 		// Channels, guild invites, and moderation are all mounted under /{serverId}.
 		r.Mount("/api/servers", api.ServerRoutes(pool, wsHub, cfg.JWTSecret, roomService, attachmentBackend))
@@ -401,4 +414,49 @@ func main() {
 	}
 	<-done
 	slog.Info("server stopped")
+}
+
+func runMessageRetentionCleanup(ctx context.Context, pool *db.Pool, attachmentBackend func() (storage.Backend, error)) error {
+	cfg, err := pool.GetInstanceConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("get instance config: %w", err)
+	}
+	if cfg.MessageRetentionDays <= 0 {
+		return nil
+	}
+	expired, err := pool.ListExpiredAttachments(ctx, cfg.MessageRetentionDays, 500)
+	if err != nil {
+		return fmt.Errorf("list expired attachments: %w", err)
+	}
+	if len(expired) > 0 {
+		ids := make([]string, 0, len(expired))
+		for _, attachment := range expired {
+			ids = append(ids, attachment.ID)
+		}
+		deleted, err := pool.SoftDeleteAttachmentsByID(ctx, ids)
+		if err != nil {
+			return fmt.Errorf("soft delete expired attachments: %w", err)
+		}
+		backend, err := attachmentBackend()
+		if err != nil {
+			slog.Warn("message retention cleanup: attachment backend unavailable", "err", err)
+		} else {
+			for _, attachment := range deleted {
+				if err := backend.Delete(context.Background(), attachment.StorageKey); err != nil {
+					slog.Warn("message retention cleanup: delete attachment object", "id", attachment.ID, "err", err)
+				}
+			}
+		}
+	}
+	n, err := pool.PurgeExpiredMessages(ctx, cfg.MessageRetentionDays)
+	if err != nil {
+		return fmt.Errorf("purge expired messages: %w", err)
+	}
+	if n > 0 {
+		slog.Info("expired chat messages purged", "count", n)
+	}
+	if len(expired) > 0 {
+		slog.Info("expired chat attachments tombstoned", "count", len(expired))
+	}
+	return nil
 }

@@ -146,9 +146,25 @@ func (h *attachmentHandler) presign(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "size must be positive"})
 		return
 	}
-	if req.Size > MaxAttachmentBytes {
+	cfg, err := h.store.GetInstanceConfig(r.Context())
+	if err != nil {
+		slog.Error("attachment presign: GetInstanceConfig", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "config lookup failed"})
+		return
+	}
+	maxBytes := cfg.MaxAttachmentBytes
+	if maxBytes <= 0 {
+		maxBytes = MaxAttachmentBytes
+	}
+	if req.Size > maxBytes {
 		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{
-			"error": fmt.Sprintf("attachment exceeds %d bytes", MaxAttachmentBytes),
+			"error": fmt.Sprintf("attachment exceeds %d bytes", maxBytes),
+		})
+		return
+	}
+	if cfg.MaxGuildAttachmentStorageBytes != nil && req.Size > *cfg.MaxGuildAttachmentStorageBytes {
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{
+			"error": fmt.Sprintf("attachment exceeds guild storage quota of %d bytes", *cfg.MaxGuildAttachmentStorageBytes),
 		})
 		return
 	}
@@ -190,6 +206,16 @@ func (h *attachmentHandler) presign(w http.ResponseWriter, r *http.Request) {
 		slog.Error("attachment presign: InsertAttachment", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to record attachment"})
 		return
+	}
+	if cfg.MaxGuildAttachmentStorageBytes != nil {
+		if err := h.enforceGuildAttachmentQuota(r.Context(), backend, channelID, *cfg.MaxGuildAttachmentStorageBytes); err != nil {
+			if _, sdErr := h.store.SoftDeleteAttachment(r.Context(), row.ID, userID); sdErr != nil && !errors.Is(sdErr, pgx.ErrNoRows) {
+				slog.Warn("attachment presign: soft-delete after quota failure", "id", row.ID, "err", sdErr)
+			}
+			slog.Error("attachment presign: enforce guild attachment quota", "err", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to enforce attachment quota"})
+			return
+		}
 	}
 	// Re-key the storage path under the freshly-minted row id so that
 	// every blob is namespaced by both channel and attachment id; this
@@ -246,6 +272,10 @@ func (h *attachmentHandler) download(w http.ResponseWriter, r *http.Request) {
 		}
 		slog.Error("attachment download: GetAttachmentByID", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "lookup failed"})
+		return
+	}
+	if row.DeletedAt != nil {
+		writeJSON(w, http.StatusGone, map[string]string{"error": "attachment no longer available"})
 		return
 	}
 	ok, err := h.store.IsChannelMember(r.Context(), row.ChannelID, userID)
@@ -319,6 +349,44 @@ func (h *attachmentHandler) resolveBackend() (storage.Backend, error) {
 		return nil, errors.New("no attachment backend factory configured")
 	}
 	return h.backendFactory()
+}
+
+func (h *attachmentHandler) enforceGuildAttachmentQuota(ctx context.Context, backend storage.Backend, channelID string, quotaBytes int64) error {
+	if quotaBytes <= 0 {
+		return nil
+	}
+	_, active, err := h.store.ListAttachmentsForGuildQuota(ctx, channelID)
+	if err != nil {
+		return err
+	}
+	var total int64
+	for _, attachment := range active {
+		total += attachment.Size
+	}
+	if total <= quotaBytes {
+		return nil
+	}
+	var (
+		toDeleteIDs []string
+		excess      = total - quotaBytes
+	)
+	for _, attachment := range active {
+		if excess <= 0 {
+			break
+		}
+		toDeleteIDs = append(toDeleteIDs, attachment.ID)
+		excess -= attachment.Size
+	}
+	deleted, err := h.store.SoftDeleteAttachmentsByID(ctx, toDeleteIDs)
+	if err != nil {
+		return err
+	}
+	for _, attachment := range deleted {
+		if err := backend.Delete(context.Background(), attachment.StorageKey); err != nil {
+			slog.Warn("attachment quota: backend.Delete", "id", attachment.ID, "err", err)
+		}
+	}
+	return nil
 }
 
 func methodOrDefault(m, def string) string {

@@ -19,6 +19,7 @@ type InstanceCache struct {
 	voiceKeyRotationHours    int
 	serverCreationPolicy     string
 	screenShareResolutionCap string
+	maxAttachmentBytes       int64
 	transparencyURL          *string
 	logPublicKey             *string
 }
@@ -38,6 +39,7 @@ func NewInstanceCache() *InstanceCache {
 		guildDiscovery:           "allowed",
 		serverCreationPolicy:     "open",
 		screenShareResolutionCap: "1080p",
+		maxAttachmentBytes:       MaxAttachmentBytes,
 	}
 }
 
@@ -78,6 +80,19 @@ func (c *InstanceCache) Set(name string, iconURL *string, regMode string, guildD
 	}
 }
 
+// SetAttachmentPolicy updates cache fields that affect attachment UX and
+// upload validation. Called with instance_config on startup and after admin
+// config writes.
+func (c *InstanceCache) SetAttachmentPolicy(maxAttachmentBytes int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if maxAttachmentBytes > 0 {
+		c.maxAttachmentBytes = maxAttachmentBytes
+	} else {
+		c.maxAttachmentBytes = MaxAttachmentBytes
+	}
+}
+
 // SetTransparencyInfo stores the transparency log URL and log signer public key
 // in the cache. Called once at startup after the TransparencyService is initialized.
 // Neither field is updated by the admin config endpoint - they change only on restart.
@@ -109,6 +124,7 @@ func (c *InstanceCache) snapshot() (
 	logPublicKey *string,
 	serverCreationPolicy string,
 	screenShareResolutionCap string,
+	maxAttachmentBytes int64,
 ) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -143,7 +159,11 @@ func (c *InstanceCache) snapshot() (
 	if ssrc == "" {
 		ssrc = "1080p"
 	}
-	return c.name, ico, c.registrationMode, gd, vkrh, tURL, lPub, scp, ssrc
+	mab := c.maxAttachmentBytes
+	if mab <= 0 {
+		mab = MaxAttachmentBytes
+	}
+	return c.name, ico, c.registrationMode, gd, vkrh, tURL, lPub, scp, ssrc, mab
 }
 
 // handshakeResponse is the JSON shape returned by GET /api/handshake.
@@ -157,6 +177,7 @@ type handshakeResponse struct {
 	// Values: "open" (default), "paid" (subscription required), "disabled" (no new guilds).
 	ServerCreationPolicy     string          `json:"server_creation_policy"`
 	ScreenShareResolutionCap string          `json:"screen_share_resolution_cap"`
+	MaxAttachmentBytes       int64           `json:"max_attachment_bytes"`
 	Capabilities             map[string]bool `json:"capabilities"`
 	Name                     string          `json:"name"`
 	IconURL                  *string         `json:"iconUrl,omitempty"`
@@ -176,7 +197,7 @@ type handshakeResponse struct {
 // only from the in-memory cache and version constants, never from the database.
 func HandshakeHandler(cache *InstanceCache, voiceEnabled bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		name, iconURL, regMode, guildDiscovery, voiceKeyRotationHours, transparencyURL, logPublicKey, serverCreationPolicy, screenShareResolutionCap := cache.snapshot()
+		name, iconURL, regMode, guildDiscovery, voiceKeyRotationHours, transparencyURL, logPublicKey, serverCreationPolicy, screenShareResolutionCap, maxAttachmentBytes := cache.snapshot()
 
 		resp := handshakeResponse{
 			ServerVersion:            version.ServerVersion,
@@ -186,6 +207,7 @@ func HandshakeHandler(cache *InstanceCache, voiceEnabled bool) http.HandlerFunc 
 			GuildDiscovery:           guildDiscovery,
 			ServerCreationPolicy:     serverCreationPolicy,
 			ScreenShareResolutionCap: screenShareResolutionCap,
+			MaxAttachmentBytes:       maxAttachmentBytes,
 			Capabilities: map[string]bool{
 				"e2ee.chat":      true,
 				"e2ee.media":     true,

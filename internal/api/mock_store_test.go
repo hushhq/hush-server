@@ -89,7 +89,7 @@ type mockStore struct {
 
 	// Instance
 	getInstanceConfigFn    func(ctx context.Context) (*models.InstanceConfig, error)
-	updateInstanceConfigFn func(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string, serverCreationPolicy *string, maxServersPerUser *int, maxMembersPerServer *int, maxRegisteredUsers *int, screenShareResolutionCap *string) error
+	updateInstanceConfigFn func(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string, serverCreationPolicy *string, maxServersPerUser *int, maxMembersPerServer *int, maxRegisteredUsers *int, screenShareResolutionCap *string, maxAttachmentBytes *int64, maxGuildAttachmentStorageBytes *int64, messageRetentionDays *int) error
 	getUserRoleFn          func(ctx context.Context, userID string) (string, error)
 	updateUserRoleFn       func(ctx context.Context, userID, role string) error
 	listMembersFn          func(ctx context.Context) ([]models.Member, error)
@@ -104,9 +104,13 @@ type mockStore struct {
 	moveChannelFn                 func(ctx context.Context, channelID, serverID string, parentID *string, position int) error
 
 	// Attachments
-	insertAttachmentFn     func(ctx context.Context, channelID, ownerID, storageKey, contentType string, size int64) (*models.Attachment, error)
-	getAttachmentByIDFn    func(ctx context.Context, attachmentID string) (*models.Attachment, error)
-	softDeleteAttachmentFn func(ctx context.Context, attachmentID, ownerID string) (*models.Attachment, error)
+	insertAttachmentFn             func(ctx context.Context, channelID, ownerID, storageKey, contentType string, size int64) (*models.Attachment, error)
+	getAttachmentByIDFn            func(ctx context.Context, attachmentID string) (*models.Attachment, error)
+	softDeleteAttachmentFn         func(ctx context.Context, attachmentID, ownerID string) (*models.Attachment, error)
+	softDeleteAttachmentsByIDFn    func(ctx context.Context, attachmentIDs []string) ([]models.Attachment, error)
+	listAttachmentsForGuildQuotaFn func(ctx context.Context, channelID string) (string, []models.Attachment, error)
+	listExpiredAttachmentsFn       func(ctx context.Context, retentionDays int, limit int) ([]models.Attachment, error)
+	purgeExpiredMessagesFn         func(ctx context.Context, retentionDays int) (int64, error)
 
 	// Server templates
 	listServerTemplatesFn      func(ctx context.Context) ([]models.ServerTemplate, error)
@@ -642,12 +646,14 @@ func (m *mockStore) GetInstanceConfig(ctx context.Context) (*models.InstanceConf
 		RegistrationMode:         "open",
 		ServerCreationPolicy:     "open",
 		ScreenShareResolutionCap: "1080p",
+		MaxAttachmentBytes:       MaxAttachmentBytes,
+		MessageRetentionDays:     90,
 	}, nil
 }
 
-func (m *mockStore) UpdateInstanceConfig(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string, serverCreationPolicy *string, maxServersPerUser *int, maxMembersPerServer *int, maxRegisteredUsers *int, screenShareResolutionCap *string) error {
+func (m *mockStore) UpdateInstanceConfig(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string, serverCreationPolicy *string, maxServersPerUser *int, maxMembersPerServer *int, maxRegisteredUsers *int, screenShareResolutionCap *string, maxAttachmentBytes *int64, maxGuildAttachmentStorageBytes *int64, messageRetentionDays *int) error {
 	if m.updateInstanceConfigFn != nil {
-		return m.updateInstanceConfigFn(ctx, name, iconURL, registrationMode, guildDiscovery, serverCreationPolicy, maxServersPerUser, maxMembersPerServer, maxRegisteredUsers, screenShareResolutionCap)
+		return m.updateInstanceConfigFn(ctx, name, iconURL, registrationMode, guildDiscovery, serverCreationPolicy, maxServersPerUser, maxMembersPerServer, maxRegisteredUsers, screenShareResolutionCap, maxAttachmentBytes, maxGuildAttachmentStorageBytes, messageRetentionDays)
 	}
 	return nil
 }
@@ -729,6 +735,34 @@ func (m *mockStore) SoftDeleteAttachment(ctx context.Context, attachmentID, owne
 		return m.softDeleteAttachmentFn(ctx, attachmentID, ownerID)
 	}
 	return nil, nil
+}
+
+func (m *mockStore) SoftDeleteAttachmentsByID(ctx context.Context, attachmentIDs []string) ([]models.Attachment, error) {
+	if m.softDeleteAttachmentsByIDFn != nil {
+		return m.softDeleteAttachmentsByIDFn(ctx, attachmentIDs)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) ListAttachmentsForGuildQuota(ctx context.Context, channelID string) (string, []models.Attachment, error) {
+	if m.listAttachmentsForGuildQuotaFn != nil {
+		return m.listAttachmentsForGuildQuotaFn(ctx, channelID)
+	}
+	return "server-1", nil, nil
+}
+
+func (m *mockStore) ListExpiredAttachments(ctx context.Context, retentionDays int, limit int) ([]models.Attachment, error) {
+	if m.listExpiredAttachmentsFn != nil {
+		return m.listExpiredAttachmentsFn(ctx, retentionDays, limit)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) PurgeExpiredMessages(ctx context.Context, retentionDays int) (int64, error) {
+	if m.purgeExpiredMessagesFn != nil {
+		return m.purgeExpiredMessagesFn(ctx, retentionDays)
+	}
+	return 0, nil
 }
 
 func (m *mockStore) ListServerTemplates(ctx context.Context) ([]models.ServerTemplate, error) {

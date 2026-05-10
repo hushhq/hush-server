@@ -26,10 +26,11 @@ import (
 // presign + delete tests. Any unused method panics so a regression
 // that calls the wrong path is loud.
 type fakeBackend struct {
-	presignPutFn    func(ctx context.Context, key string, ttl time.Duration) (storage.PresignedURL, error)
-	presignGetFn    func(ctx context.Context, key string, ttl time.Duration) (storage.PresignedURL, error)
-	deleteFn        func(ctx context.Context, key string) error
-	deleteCalledKey string
+	presignPutFn     func(ctx context.Context, key string, ttl time.Duration) (storage.PresignedURL, error)
+	presignGetFn     func(ctx context.Context, key string, ttl time.Duration) (storage.PresignedURL, error)
+	deleteFn         func(ctx context.Context, key string) error
+	deleteCalledKey  string
+	deleteCalledKeys []string
 }
 
 func (b *fakeBackend) Kind() storage.BackendKind { return storage.BackendS3 }
@@ -41,6 +42,7 @@ func (b *fakeBackend) Get(context.Context, string) (io.ReadCloser, int64, error)
 }
 func (b *fakeBackend) Delete(ctx context.Context, key string) error {
 	b.deleteCalledKey = key
+	b.deleteCalledKeys = append(b.deleteCalledKeys, key)
 	if b.deleteFn != nil {
 		return b.deleteFn(ctx, key)
 	}
@@ -149,6 +151,104 @@ func TestAttachmentPresign_RejectsOversize(t *testing.T) {
 	router.ServeHTTP(rr, req)
 
 	assert.Equal(t, http.StatusRequestEntityTooLarge, rr.Code)
+}
+
+func TestAttachmentPresign_UsesInstanceMaxAttachmentBytes(t *testing.T) {
+	store := &mockStore{}
+	store.getInstanceConfigFn = func(context.Context) (*models.InstanceConfig, error) {
+		return &models.InstanceConfig{
+			MaxAttachmentBytes:   2048,
+			MessageRetentionDays: 90,
+		}, nil
+	}
+	store.isChannelMemberFn = func(context.Context, string, string) (bool, error) { return true, nil }
+	channelID := uuid.NewString()
+	userID := uuid.NewString()
+	router := attachmentRouterForChannel(store, &fakeBackend{}, userID)
+
+	body := strings.NewReader(`{"size":4096,"contentType":"image/png"}`)
+	req := httptest.NewRequest(http.MethodPost, "/"+channelID+"/attachments/presign", body)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusRequestEntityTooLarge, rr.Code)
+}
+
+func TestAttachmentPresign_EnforcesGuildQuotaByTombstoningOldest(t *testing.T) {
+	channelID := uuid.NewString()
+	userID := uuid.NewString()
+	oldID := uuid.NewString()
+	oldKey := "attachments/" + channelID + "/old"
+	newID := uuid.NewString()
+	newKey := "attachments/" + channelID + "/new"
+	store := &mockStore{}
+	quota := int64(100)
+	store.getInstanceConfigFn = func(context.Context) (*models.InstanceConfig, error) {
+		return &models.InstanceConfig{
+			MaxAttachmentBytes:             MaxAttachmentBytes,
+			MaxGuildAttachmentStorageBytes: &quota,
+			MessageRetentionDays:           90,
+		}, nil
+	}
+	store.isChannelMemberFn = func(context.Context, string, string) (bool, error) { return true, nil }
+	store.insertAttachmentFn = func(context.Context, string, string, string, string, int64) (*models.Attachment, error) {
+		return &models.Attachment{
+			ID:          newID,
+			ChannelID:   channelID,
+			OwnerID:     userID,
+			StorageKey:  newKey,
+			Size:        50,
+			ContentType: "image/png",
+			CreatedAt:   time.Now(),
+		}, nil
+	}
+	store.listAttachmentsForGuildQuotaFn = func(context.Context, string) (string, []models.Attachment, error) {
+		return "server-1", []models.Attachment{
+			{
+				ID:          oldID,
+				ChannelID:   channelID,
+				OwnerID:     userID,
+				StorageKey:  oldKey,
+				Size:        75,
+				ContentType: "image/png",
+				CreatedAt:   time.Now().Add(-time.Hour),
+			},
+			{
+				ID:          newID,
+				ChannelID:   channelID,
+				OwnerID:     userID,
+				StorageKey:  newKey,
+				Size:        50,
+				ContentType: "image/png",
+				CreatedAt:   time.Now(),
+			},
+		}, nil
+	}
+	var tombstoned []string
+	store.softDeleteAttachmentsByIDFn = func(_ context.Context, ids []string) ([]models.Attachment, error) {
+		tombstoned = append([]string(nil), ids...)
+		return []models.Attachment{{
+			ID:         oldID,
+			ChannelID:  channelID,
+			OwnerID:    userID,
+			StorageKey: oldKey,
+			Size:       75,
+			CreatedAt:  time.Now().Add(-time.Hour),
+		}}, nil
+	}
+	backend := &fakeBackend{}
+	router := attachmentRouterForChannel(store, backend, userID)
+
+	body := strings.NewReader(`{"size":50,"contentType":"image/png"}`)
+	req := httptest.NewRequest(http.MethodPost, "/"+channelID+"/attachments/presign", body)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+	assert.Equal(t, []string{oldID}, tombstoned)
+	assert.Equal(t, []string{oldKey}, backend.deleteCalledKeys)
 }
 
 func TestAttachmentPresign_RejectsDisallowedMime(t *testing.T) {
@@ -278,4 +378,39 @@ func TestAttachmentDownload_NotChannelMember_Returns403(t *testing.T) {
 	mux.ServeHTTP(rr, req)
 
 	assert.Equal(t, http.StatusForbidden, rr.Code)
+}
+
+func TestAttachmentDownload_DeletedAttachmentReturnsGone(t *testing.T) {
+	deletedAt := time.Now()
+	row := &models.Attachment{
+		ID:          uuid.NewString(),
+		ChannelID:   uuid.NewString(),
+		OwnerID:     uuid.NewString(),
+		StorageKey:  "attachments/x/y",
+		ContentType: "image/png",
+		Size:        1,
+		DeletedAt:   &deletedAt,
+	}
+	store := &mockStore{}
+	store.getAttachmentByIDFn = func(context.Context, string) (*models.Attachment, error) {
+		return row, nil
+	}
+	backend := &fakeBackend{}
+	factory := AttachmentBackendFactory(func() (storage.Backend, error) { return backend, nil })
+	h := &attachmentHandler{store: store, backendFactory: factory}
+
+	userID := uuid.NewString()
+	mux := chi.NewRouter()
+	mux.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, r.WithContext(withUserID(r.Context(), userID)))
+		})
+	})
+	mux.Get("/{id}/download", h.download)
+
+	req := httptest.NewRequest(http.MethodGet, "/"+row.ID+"/download", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusGone, rr.Code)
 }

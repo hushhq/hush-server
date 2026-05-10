@@ -330,17 +330,20 @@ type ServerTemplate struct {
 // OwnerID is removed: instance ownership is API key auth.
 // ServerCreationPolicy controls whether authenticated users may create guilds.
 type InstanceConfig struct {
-	ID                       string    `json:"id"`
-	Name                     string    `json:"name"`
-	IconURL                  *string   `json:"iconUrl"`
-	RegistrationMode         string    `json:"registrationMode"`
-	GuildDiscovery           string    `json:"guildDiscovery"`
-	ServerCreationPolicy     string    `json:"serverCreationPolicy"`
-	MaxServersPerUser        *int      `json:"maxServersPerUser,omitempty"`
-	MaxMembersPerServer      *int      `json:"maxMembersPerServer,omitempty"`
-	MaxRegisteredUsers       *int      `json:"maxRegisteredUsers,omitempty"`
-	ScreenShareResolutionCap string    `json:"screenShareResolutionCap"`
-	CreatedAt                time.Time `json:"createdAt"`
+	ID                             string    `json:"id"`
+	Name                           string    `json:"name"`
+	IconURL                        *string   `json:"iconUrl"`
+	RegistrationMode               string    `json:"registrationMode"`
+	GuildDiscovery                 string    `json:"guildDiscovery"`
+	ServerCreationPolicy           string    `json:"serverCreationPolicy"`
+	MaxServersPerUser              *int      `json:"maxServersPerUser,omitempty"`
+	MaxMembersPerServer            *int      `json:"maxMembersPerServer,omitempty"`
+	MaxRegisteredUsers             *int      `json:"maxRegisteredUsers,omitempty"`
+	ScreenShareResolutionCap       string    `json:"screenShareResolutionCap"`
+	MaxAttachmentBytes             int64     `json:"maxAttachmentBytes"`
+	MaxGuildAttachmentStorageBytes *int64    `json:"maxGuildAttachmentStorageBytes,omitempty"`
+	MessageRetentionDays           int       `json:"messageRetentionDays"`
+	CreatedAt                      time.Time `json:"createdAt"`
 }
 
 // Member is a user with their instance role, used for member list responses.

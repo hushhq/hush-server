@@ -40,7 +40,7 @@ type adminStore interface {
 	ListGuildBillingStats(ctx context.Context) ([]models.GuildBillingStats, error)
 	ListMembers(ctx context.Context) ([]models.Member, error)
 	GetInstanceConfig(ctx context.Context) (*models.InstanceConfig, error)
-	UpdateInstanceConfig(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string, serverCreationPolicy *string, maxServersPerUser *int, maxMembersPerServer *int, maxRegisteredUsers *int, screenShareResolutionCap *string) error
+	UpdateInstanceConfig(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string, serverCreationPolicy *string, maxServersPerUser *int, maxMembersPerServer *int, maxRegisteredUsers *int, screenShareResolutionCap *string, maxAttachmentBytes *int64, maxGuildAttachmentStorageBytes *int64, messageRetentionDays *int) error
 	GetVoiceKeyRotationHours(ctx context.Context) (int, error)
 	ListServerTemplates(ctx context.Context) ([]models.ServerTemplate, error)
 	GetServerTemplateByID(ctx context.Context, id string) (*models.ServerTemplate, error)
@@ -230,16 +230,19 @@ func (h *adminHandler) health(w http.ResponseWriter, r *http.Request) {
 
 // adminConfigResponse is the response for GET /api/admin/config.
 type adminConfigResponse struct {
-	ID                       string  `json:"id"`
-	Name                     string  `json:"name"`
-	IconURL                  *string `json:"iconUrl"`
-	RegistrationMode         string  `json:"registrationMode"`
-	GuildDiscovery           string  `json:"guildDiscovery"`
-	ServerCreationPolicy     string  `json:"serverCreationPolicy"`
-	MaxServersPerUser        *int    `json:"maxServersPerUser,omitempty"`
-	MaxMembersPerServer      *int    `json:"maxMembersPerServer,omitempty"`
-	MaxRegisteredUsers       *int    `json:"maxRegisteredUsers,omitempty"`
-	ScreenShareResolutionCap string  `json:"screenShareResolutionCap"`
+	ID                             string  `json:"id"`
+	Name                           string  `json:"name"`
+	IconURL                        *string `json:"iconUrl"`
+	RegistrationMode               string  `json:"registrationMode"`
+	GuildDiscovery                 string  `json:"guildDiscovery"`
+	ServerCreationPolicy           string  `json:"serverCreationPolicy"`
+	MaxServersPerUser              *int    `json:"maxServersPerUser,omitempty"`
+	MaxMembersPerServer            *int    `json:"maxMembersPerServer,omitempty"`
+	MaxRegisteredUsers             *int    `json:"maxRegisteredUsers,omitempty"`
+	ScreenShareResolutionCap       string  `json:"screenShareResolutionCap"`
+	MaxAttachmentBytes             int64   `json:"maxAttachmentBytes"`
+	MaxGuildAttachmentStorageBytes *int64  `json:"maxGuildAttachmentStorageBytes,omitempty"`
+	MessageRetentionDays           int     `json:"messageRetentionDays"`
 }
 
 // getConfig handles GET /api/admin/config.
@@ -251,30 +254,36 @@ func (h *adminHandler) getConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, adminConfigResponse{
-		ID:                       cfg.ID,
-		Name:                     cfg.Name,
-		IconURL:                  cfg.IconURL,
-		RegistrationMode:         cfg.RegistrationMode,
-		GuildDiscovery:           cfg.GuildDiscovery,
-		ServerCreationPolicy:     cfg.ServerCreationPolicy,
-		MaxServersPerUser:        cfg.MaxServersPerUser,
-		MaxMembersPerServer:      cfg.MaxMembersPerServer,
-		MaxRegisteredUsers:       cfg.MaxRegisteredUsers,
-		ScreenShareResolutionCap: cfg.ScreenShareResolutionCap,
+		ID:                             cfg.ID,
+		Name:                           cfg.Name,
+		IconURL:                        cfg.IconURL,
+		RegistrationMode:               cfg.RegistrationMode,
+		GuildDiscovery:                 cfg.GuildDiscovery,
+		ServerCreationPolicy:           cfg.ServerCreationPolicy,
+		MaxServersPerUser:              cfg.MaxServersPerUser,
+		MaxMembersPerServer:            cfg.MaxMembersPerServer,
+		MaxRegisteredUsers:             cfg.MaxRegisteredUsers,
+		ScreenShareResolutionCap:       cfg.ScreenShareResolutionCap,
+		MaxAttachmentBytes:             cfg.MaxAttachmentBytes,
+		MaxGuildAttachmentStorageBytes: cfg.MaxGuildAttachmentStorageBytes,
+		MessageRetentionDays:           cfg.MessageRetentionDays,
 	})
 }
 
 // adminUpdateConfigRequest is the body for PUT /api/admin/config.
 type adminUpdateConfigRequest struct {
-	Name                     *string `json:"name"`
-	IconURL                  *string `json:"iconUrl"`
-	RegistrationMode         *string `json:"registrationMode"`
-	GuildDiscovery           *string `json:"guildDiscovery"`
-	ServerCreationPolicy     *string `json:"serverCreationPolicy"`
-	MaxServersPerUser        *int    `json:"maxServersPerUser,omitempty"`
-	MaxMembersPerServer      *int    `json:"maxMembersPerServer,omitempty"`
-	MaxRegisteredUsers       *int    `json:"maxRegisteredUsers,omitempty"`
-	ScreenShareResolutionCap *string `json:"screenShareResolutionCap,omitempty"`
+	Name                           *string `json:"name"`
+	IconURL                        *string `json:"iconUrl"`
+	RegistrationMode               *string `json:"registrationMode"`
+	GuildDiscovery                 *string `json:"guildDiscovery"`
+	ServerCreationPolicy           *string `json:"serverCreationPolicy"`
+	MaxServersPerUser              *int    `json:"maxServersPerUser,omitempty"`
+	MaxMembersPerServer            *int    `json:"maxMembersPerServer,omitempty"`
+	MaxRegisteredUsers             *int    `json:"maxRegisteredUsers,omitempty"`
+	ScreenShareResolutionCap       *string `json:"screenShareResolutionCap,omitempty"`
+	MaxAttachmentBytes             *int64  `json:"maxAttachmentBytes,omitempty"`
+	MaxGuildAttachmentStorageBytes *int64  `json:"maxGuildAttachmentStorageBytes,omitempty"`
+	MessageRetentionDays           *int    `json:"messageRetentionDays,omitempty"`
 }
 
 // updateConfig handles PUT /api/admin/config.
@@ -338,8 +347,20 @@ func (h *adminHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if req.MaxAttachmentBytes != nil && *req.MaxAttachmentBytes < 1 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "maxAttachmentBytes must be at least 1"})
+		return
+	}
+	if req.MaxGuildAttachmentStorageBytes != nil && *req.MaxGuildAttachmentStorageBytes < 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "maxGuildAttachmentStorageBytes must be 0 (no limit) or at least 1"})
+		return
+	}
+	if req.MessageRetentionDays != nil && *req.MessageRetentionDays < 1 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "messageRetentionDays must be at least 1"})
+		return
+	}
 
-	if err := h.store.UpdateInstanceConfig(r.Context(), req.Name, req.IconURL, req.RegistrationMode, req.GuildDiscovery, req.ServerCreationPolicy, req.MaxServersPerUser, req.MaxMembersPerServer, req.MaxRegisteredUsers, req.ScreenShareResolutionCap); err != nil {
+	if err := h.store.UpdateInstanceConfig(r.Context(), req.Name, req.IconURL, req.RegistrationMode, req.GuildDiscovery, req.ServerCreationPolicy, req.MaxServersPerUser, req.MaxMembersPerServer, req.MaxRegisteredUsers, req.ScreenShareResolutionCap, req.MaxAttachmentBytes, req.MaxGuildAttachmentStorageBytes, req.MessageRetentionDays); err != nil {
 		slog.Error("admin updateConfig", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update config"})
 		return
@@ -358,6 +379,7 @@ func (h *adminHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 			voiceKeyRotationHours = 2
 		}
 		h.cache.Set(newCfg.Name, newCfg.IconURL, newCfg.RegistrationMode, newCfg.GuildDiscovery, voiceKeyRotationHours, newCfg.ServerCreationPolicy, newCfg.ScreenShareResolutionCap)
+		h.cache.SetAttachmentPolicy(newCfg.MaxAttachmentBytes)
 	}
 
 	w.WriteHeader(http.StatusNoContent)

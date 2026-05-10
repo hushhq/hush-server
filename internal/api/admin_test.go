@@ -199,16 +199,21 @@ func TestAdminListGuilds_ReturnsStatsWithoutNames(t *testing.T) {
 
 func TestAdminGetConfig_Returns200WithGuildDiscovery(t *testing.T) {
 	maxRegisteredUsers := 500
+	maxAttachmentBytes := int64(50 * 1024 * 1024)
+	maxGuildAttachmentStorageBytes := int64(5 * 1024 * 1024 * 1024)
 	req, store := authenticatedAdminRequest(http.MethodGet, "/config", nil, "owner")
 	store.getInstanceConfigFn = func(_ context.Context) (*models.InstanceConfig, error) {
 		return &models.InstanceConfig{
-			ID:                       "cfg-1",
-			Name:                     "Hush Instance",
-			RegistrationMode:         "invite_only",
-			GuildDiscovery:           "allowed",
-			ServerCreationPolicy:     "open",
-			MaxRegisteredUsers:       &maxRegisteredUsers,
-			ScreenShareResolutionCap: "720p",
+			ID:                             "cfg-1",
+			Name:                           "Hush Instance",
+			RegistrationMode:               "invite_only",
+			GuildDiscovery:                 "allowed",
+			ServerCreationPolicy:           "open",
+			MaxRegisteredUsers:             &maxRegisteredUsers,
+			ScreenShareResolutionCap:       "720p",
+			MaxAttachmentBytes:             maxAttachmentBytes,
+			MaxGuildAttachmentStorageBytes: &maxGuildAttachmentStorageBytes,
+			MessageRetentionDays:           90,
 		}, nil
 	}
 	router := adminRouter(store)
@@ -223,6 +228,10 @@ func TestAdminGetConfig_Returns200WithGuildDiscovery(t *testing.T) {
 	require.NotNil(t, response.MaxRegisteredUsers)
 	assert.Equal(t, 500, *response.MaxRegisteredUsers)
 	assert.Equal(t, "720p", response.ScreenShareResolutionCap)
+	assert.Equal(t, maxAttachmentBytes, response.MaxAttachmentBytes)
+	require.NotNil(t, response.MaxGuildAttachmentStorageBytes)
+	assert.Equal(t, maxGuildAttachmentStorageBytes, *response.MaxGuildAttachmentStorageBytes)
+	assert.Equal(t, 90, response.MessageRetentionDays)
 }
 
 func TestAdminUpdateConfig_RejectsCrossOriginWrites(t *testing.T) {
@@ -237,29 +246,44 @@ func TestAdminUpdateConfig_RejectsCrossOriginWrites(t *testing.T) {
 func TestAdminUpdateConfig_GuildDiscoveryReturns204(t *testing.T) {
 	maxRegisteredUsers := 250
 	screenShareResolutionCap := "720p"
+	maxAttachmentBytes := int64(30 * 1024 * 1024)
+	maxGuildAttachmentStorageBytes := int64(1024 * 1024 * 1024)
+	messageRetentionDays := 120
 	req, store := authenticatedAdminRequest(http.MethodPut, "/config", adminUpdateConfigRequest{
-		GuildDiscovery:           func() *string { value := "required"; return &value }(),
-		MaxRegisteredUsers:       &maxRegisteredUsers,
-		ScreenShareResolutionCap: &screenShareResolutionCap,
+		GuildDiscovery:                 func() *string { value := "required"; return &value }(),
+		MaxRegisteredUsers:             &maxRegisteredUsers,
+		ScreenShareResolutionCap:       &screenShareResolutionCap,
+		MaxAttachmentBytes:             &maxAttachmentBytes,
+		MaxGuildAttachmentStorageBytes: &maxGuildAttachmentStorageBytes,
+		MessageRetentionDays:           &messageRetentionDays,
 	}, "owner")
 	var updatedGuildDiscovery *string
 	var updatedMaxRegisteredUsers *int
 	var updatedScreenShareResolutionCap *string
-	store.updateInstanceConfigFn = func(_ context.Context, _, _, _, guildDiscovery, _ *string, _ *int, _ *int, maxUsers *int, resolutionCap *string) error {
+	var updatedMaxAttachmentBytes *int64
+	var updatedMaxGuildAttachmentStorageBytes *int64
+	var updatedMessageRetentionDays *int
+	store.updateInstanceConfigFn = func(_ context.Context, _, _, _, guildDiscovery, _ *string, _ *int, _ *int, maxUsers *int, resolutionCap *string, attachmentBytes *int64, guildStorageBytes *int64, retentionDays *int) error {
 		updatedGuildDiscovery = guildDiscovery
 		updatedMaxRegisteredUsers = maxUsers
 		updatedScreenShareResolutionCap = resolutionCap
+		updatedMaxAttachmentBytes = attachmentBytes
+		updatedMaxGuildAttachmentStorageBytes = guildStorageBytes
+		updatedMessageRetentionDays = retentionDays
 		return nil
 	}
 	store.getInstanceConfigFn = func(_ context.Context) (*models.InstanceConfig, error) {
 		return &models.InstanceConfig{
-			ID:                       "cfg-1",
-			Name:                     "Hush",
-			RegistrationMode:         "open",
-			GuildDiscovery:           "required",
-			ServerCreationPolicy:     "open",
-			MaxRegisteredUsers:       &maxRegisteredUsers,
-			ScreenShareResolutionCap: "720p",
+			ID:                             "cfg-1",
+			Name:                           "Hush",
+			RegistrationMode:               "open",
+			GuildDiscovery:                 "required",
+			ServerCreationPolicy:           "open",
+			MaxRegisteredUsers:             &maxRegisteredUsers,
+			ScreenShareResolutionCap:       "720p",
+			MaxAttachmentBytes:             maxAttachmentBytes,
+			MaxGuildAttachmentStorageBytes: &maxGuildAttachmentStorageBytes,
+			MessageRetentionDays:           messageRetentionDays,
 		}, nil
 	}
 	store.getVoiceKeyRotationHoursFn = func(_ context.Context) (int, error) {
@@ -275,6 +299,12 @@ func TestAdminUpdateConfig_GuildDiscoveryReturns204(t *testing.T) {
 	assert.Equal(t, 250, *updatedMaxRegisteredUsers)
 	require.NotNil(t, updatedScreenShareResolutionCap)
 	assert.Equal(t, "720p", *updatedScreenShareResolutionCap)
+	require.NotNil(t, updatedMaxAttachmentBytes)
+	assert.Equal(t, maxAttachmentBytes, *updatedMaxAttachmentBytes)
+	require.NotNil(t, updatedMaxGuildAttachmentStorageBytes)
+	assert.Equal(t, maxGuildAttachmentStorageBytes, *updatedMaxGuildAttachmentStorageBytes)
+	require.NotNil(t, updatedMessageRetentionDays)
+	assert.Equal(t, messageRetentionDays, *updatedMessageRetentionDays)
 }
 
 func TestAdminUpdateConfig_RejectsInvalidScreenShareResolutionCap(t *testing.T) {

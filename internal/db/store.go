@@ -146,7 +146,7 @@ type Store interface {
 	GetInstanceConfig(ctx context.Context) (*models.InstanceConfig, error)
 	// UpdateInstanceConfig updates only the non-nil fields. serverCreationPolicy must be
 	// one of "open", "paid", or "disabled" when non-nil.
-	UpdateInstanceConfig(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string, serverCreationPolicy *string, maxServersPerUser *int, maxMembersPerServer *int, maxRegisteredUsers *int, screenShareResolutionCap *string) error
+	UpdateInstanceConfig(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string, serverCreationPolicy *string, maxServersPerUser *int, maxMembersPerServer *int, maxRegisteredUsers *int, screenShareResolutionCap *string, maxAttachmentBytes *int64, maxGuildAttachmentStorageBytes *int64, messageRetentionDays *int) error
 	GetUserRole(ctx context.Context, userID string) (string, error)
 	UpdateUserRole(ctx context.Context, userID, role string) error
 	ListMembers(ctx context.Context) ([]models.Member, error)
@@ -179,6 +179,10 @@ type Store interface {
 	InsertAttachment(ctx context.Context, channelID, ownerID, storageKey, contentType string, size int64) (*models.Attachment, error)
 	GetAttachmentByID(ctx context.Context, attachmentID string) (*models.Attachment, error)
 	SoftDeleteAttachment(ctx context.Context, attachmentID, ownerID string) (*models.Attachment, error)
+	SoftDeleteAttachmentsByID(ctx context.Context, attachmentIDs []string) ([]models.Attachment, error)
+	ListAttachmentsForGuildQuota(ctx context.Context, channelID string) (serverID string, active []models.Attachment, err error)
+	ListExpiredAttachments(ctx context.Context, retentionDays int, limit int) ([]models.Attachment, error)
+	PurgeExpiredMessages(ctx context.Context, retentionDays int) (int64, error)
 
 	// Server templates
 	ListServerTemplates(ctx context.Context) ([]models.ServerTemplate, error)
