@@ -16,7 +16,7 @@ import (
 
 func TestInstanceCache_ZeroValue_ReturnsDefaults(t *testing.T) {
 	cache := NewInstanceCache()
-	name, iconURL, regMode, scp, vkrh, tURL, lPub, _ := cache.snapshot()
+	name, iconURL, regMode, scp, vkrh, tURL, lPub, _, screenCap := cache.snapshot()
 	assert.Equal(t, "", name)
 	assert.Nil(t, iconURL)
 	assert.Equal(t, "", regMode)
@@ -24,6 +24,7 @@ func TestInstanceCache_ZeroValue_ReturnsDefaults(t *testing.T) {
 	assert.Equal(t, voiceKeyRotationHoursDefault, vkrh, "zero-value cache must use default voice key rotation hours")
 	assert.Nil(t, tURL, "zero-value cache must have nil transparencyURL")
 	assert.Nil(t, lPub, "zero-value cache must have nil logPublicKey")
+	assert.Equal(t, "1080p", screenCap)
 }
 
 func TestInstanceCache_Set_ReflectsValues(t *testing.T) {
@@ -31,20 +32,21 @@ func TestInstanceCache_Set_ReflectsValues(t *testing.T) {
 	icon := "https://example.com/icon.png"
 	cache.Set("My Hush", &icon, "invite_only", "admin_only", 4, "open")
 
-	name, iconURL, regMode, scp, vkrh, _, _, _ := cache.snapshot()
+	name, iconURL, regMode, scp, vkrh, _, _, _, screenCap := cache.snapshot()
 	assert.Equal(t, "My Hush", name)
 	require.NotNil(t, iconURL)
 	assert.Equal(t, "https://example.com/icon.png", *iconURL)
 	assert.Equal(t, "invite_only", regMode)
 	assert.Equal(t, "admin_only", scp)
 	assert.Equal(t, 4, vkrh)
+	assert.Equal(t, "1080p", screenCap)
 }
 
 func TestInstanceCache_Set_NilIconURL(t *testing.T) {
 	cache := NewInstanceCache()
 	cache.Set("Test", nil, "open", "any_member", 2, "open")
 
-	_, iconURL, _, _, _, _, _, _ := cache.snapshot()
+	_, iconURL, _, _, _, _, _, _, _ := cache.snapshot()
 	assert.Nil(t, iconURL)
 }
 
@@ -86,6 +88,7 @@ func TestHandshake_ContainsAllRequiredFields(t *testing.T) {
 
 	// Capabilities
 	assert.Contains(t, resp, "capabilities")
+	assert.Equal(t, "1080p", resp["screen_share_resolution_cap"])
 
 	// Instance identity
 	assert.Contains(t, resp, "name")
@@ -240,6 +243,22 @@ func TestHandshake_VoiceKeyRotationHours_DefaultIs2(t *testing.T) {
 	var resp handshakeResponse
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
 	assert.Equal(t, voiceKeyRotationHoursDefault, resp.VoiceKeyRotationHours, "default voice_key_rotation_hours must be 2")
+}
+
+func TestHandshake_ScreenShareResolutionCap(t *testing.T) {
+	cache := NewInstanceCache()
+	cache.Set("Test Instance", nil, "open", "allowed", 2, "open", "720p")
+
+	handler := HandshakeHandler(cache, true)
+	req := httptest.NewRequest(http.MethodGet, "/api/handshake", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	var body map[string]interface{}
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&body))
+	assert.Equal(t, "720p", body["screen_share_resolution_cap"])
 }
 
 // TestHandshake_ServerCreationPolicy verifies that a non-default serverCreationPolicy

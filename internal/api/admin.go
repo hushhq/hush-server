@@ -40,7 +40,7 @@ type adminStore interface {
 	ListGuildBillingStats(ctx context.Context) ([]models.GuildBillingStats, error)
 	ListMembers(ctx context.Context) ([]models.Member, error)
 	GetInstanceConfig(ctx context.Context) (*models.InstanceConfig, error)
-	UpdateInstanceConfig(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string, serverCreationPolicy *string, maxServersPerUser *int, maxMembersPerServer *int) error
+	UpdateInstanceConfig(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string, serverCreationPolicy *string, maxServersPerUser *int, maxMembersPerServer *int, maxRegisteredUsers *int, screenShareResolutionCap *string) error
 	GetVoiceKeyRotationHours(ctx context.Context) (int, error)
 	ListServerTemplates(ctx context.Context) ([]models.ServerTemplate, error)
 	GetServerTemplateByID(ctx context.Context, id string) (*models.ServerTemplate, error)
@@ -230,14 +230,16 @@ func (h *adminHandler) health(w http.ResponseWriter, r *http.Request) {
 
 // adminConfigResponse is the response for GET /api/admin/config.
 type adminConfigResponse struct {
-	ID                   string  `json:"id"`
-	Name                 string  `json:"name"`
-	IconURL              *string `json:"iconUrl"`
-	RegistrationMode     string  `json:"registrationMode"`
-	GuildDiscovery       string  `json:"guildDiscovery"`
-	ServerCreationPolicy string  `json:"serverCreationPolicy"`
-	MaxServersPerUser    *int    `json:"maxServersPerUser,omitempty"`
-	MaxMembersPerServer  *int    `json:"maxMembersPerServer,omitempty"`
+	ID                       string  `json:"id"`
+	Name                     string  `json:"name"`
+	IconURL                  *string `json:"iconUrl"`
+	RegistrationMode         string  `json:"registrationMode"`
+	GuildDiscovery           string  `json:"guildDiscovery"`
+	ServerCreationPolicy     string  `json:"serverCreationPolicy"`
+	MaxServersPerUser        *int    `json:"maxServersPerUser,omitempty"`
+	MaxMembersPerServer      *int    `json:"maxMembersPerServer,omitempty"`
+	MaxRegisteredUsers       *int    `json:"maxRegisteredUsers,omitempty"`
+	ScreenShareResolutionCap string  `json:"screenShareResolutionCap"`
 }
 
 // getConfig handles GET /api/admin/config.
@@ -249,26 +251,30 @@ func (h *adminHandler) getConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, adminConfigResponse{
-		ID:                   cfg.ID,
-		Name:                 cfg.Name,
-		IconURL:              cfg.IconURL,
-		RegistrationMode:     cfg.RegistrationMode,
-		GuildDiscovery:       cfg.GuildDiscovery,
-		ServerCreationPolicy: cfg.ServerCreationPolicy,
-		MaxServersPerUser:    cfg.MaxServersPerUser,
-		MaxMembersPerServer:  cfg.MaxMembersPerServer,
+		ID:                       cfg.ID,
+		Name:                     cfg.Name,
+		IconURL:                  cfg.IconURL,
+		RegistrationMode:         cfg.RegistrationMode,
+		GuildDiscovery:           cfg.GuildDiscovery,
+		ServerCreationPolicy:     cfg.ServerCreationPolicy,
+		MaxServersPerUser:        cfg.MaxServersPerUser,
+		MaxMembersPerServer:      cfg.MaxMembersPerServer,
+		MaxRegisteredUsers:       cfg.MaxRegisteredUsers,
+		ScreenShareResolutionCap: cfg.ScreenShareResolutionCap,
 	})
 }
 
 // adminUpdateConfigRequest is the body for PUT /api/admin/config.
 type adminUpdateConfigRequest struct {
-	Name                 *string `json:"name"`
-	IconURL              *string `json:"iconUrl"`
-	RegistrationMode     *string `json:"registrationMode"`
-	GuildDiscovery       *string `json:"guildDiscovery"`
-	ServerCreationPolicy *string `json:"serverCreationPolicy"`
-	MaxServersPerUser    *int    `json:"maxServersPerUser,omitempty"`
-	MaxMembersPerServer  *int    `json:"maxMembersPerServer,omitempty"`
+	Name                     *string `json:"name"`
+	IconURL                  *string `json:"iconUrl"`
+	RegistrationMode         *string `json:"registrationMode"`
+	GuildDiscovery           *string `json:"guildDiscovery"`
+	ServerCreationPolicy     *string `json:"serverCreationPolicy"`
+	MaxServersPerUser        *int    `json:"maxServersPerUser,omitempty"`
+	MaxMembersPerServer      *int    `json:"maxMembersPerServer,omitempty"`
+	MaxRegisteredUsers       *int    `json:"maxRegisteredUsers,omitempty"`
+	ScreenShareResolutionCap *string `json:"screenShareResolutionCap,omitempty"`
 }
 
 // updateConfig handles PUT /api/admin/config.
@@ -320,8 +326,20 @@ func (h *adminHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "maxMembersPerServer must be 0 (no limit) or at least 1"})
 		return
 	}
+	if req.MaxRegisteredUsers != nil && *req.MaxRegisteredUsers < 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "maxRegisteredUsers must be 0 (no limit) or at least 1"})
+		return
+	}
+	if req.ScreenShareResolutionCap != nil {
+		switch *req.ScreenShareResolutionCap {
+		case "1080p", "720p":
+		default:
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "screenShareResolutionCap must be 1080p or 720p"})
+			return
+		}
+	}
 
-	if err := h.store.UpdateInstanceConfig(r.Context(), req.Name, req.IconURL, req.RegistrationMode, req.GuildDiscovery, req.ServerCreationPolicy, req.MaxServersPerUser, req.MaxMembersPerServer); err != nil {
+	if err := h.store.UpdateInstanceConfig(r.Context(), req.Name, req.IconURL, req.RegistrationMode, req.GuildDiscovery, req.ServerCreationPolicy, req.MaxServersPerUser, req.MaxMembersPerServer, req.MaxRegisteredUsers, req.ScreenShareResolutionCap); err != nil {
 		slog.Error("admin updateConfig", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update config"})
 		return
@@ -339,7 +357,7 @@ func (h *adminHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("admin updateConfig: failed to read voice_key_rotation_hours, using default", "err", vkrhErr)
 			voiceKeyRotationHours = 2
 		}
-		h.cache.Set(newCfg.Name, newCfg.IconURL, newCfg.RegistrationMode, newCfg.GuildDiscovery, voiceKeyRotationHours, newCfg.ServerCreationPolicy)
+		h.cache.Set(newCfg.Name, newCfg.IconURL, newCfg.RegistrationMode, newCfg.GuildDiscovery, voiceKeyRotationHours, newCfg.ServerCreationPolicy, newCfg.ScreenShareResolutionCap)
 	}
 
 	w.WriteHeader(http.StatusNoContent)

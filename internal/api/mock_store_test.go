@@ -82,14 +82,14 @@ type mockStore struct {
 	upsertDeviceFn         func(ctx context.Context, userID, deviceID, label string) error
 
 	// Messages
-	insertMessageFn      func(ctx context.Context, channelID string, senderID *string, federatedSenderID *string, recipientID *string, ciphertext []byte) (*models.Message, error)
-	getMessagesFn        func(ctx context.Context, channelID, recipientID string, before time.Time, limit int) ([]models.Message, error)
-	getMessagesAfterFn   func(ctx context.Context, channelID, recipientID string, after time.Time, limit int) ([]models.Message, error)
-	isChannelMemberFn    func(ctx context.Context, channelID, userID string) (bool, error)
+	insertMessageFn    func(ctx context.Context, channelID string, senderID *string, federatedSenderID *string, recipientID *string, ciphertext []byte) (*models.Message, error)
+	getMessagesFn      func(ctx context.Context, channelID, recipientID string, before time.Time, limit int) ([]models.Message, error)
+	getMessagesAfterFn func(ctx context.Context, channelID, recipientID string, after time.Time, limit int) ([]models.Message, error)
+	isChannelMemberFn  func(ctx context.Context, channelID, userID string) (bool, error)
 
 	// Instance
 	getInstanceConfigFn    func(ctx context.Context) (*models.InstanceConfig, error)
-	updateInstanceConfigFn func(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string, serverCreationPolicy *string, maxServersPerUser *int, maxMembersPerServer *int) error
+	updateInstanceConfigFn func(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string, serverCreationPolicy *string, maxServersPerUser *int, maxMembersPerServer *int, maxRegisteredUsers *int, screenShareResolutionCap *string) error
 	getUserRoleFn          func(ctx context.Context, userID string) (string, error)
 	updateUserRoleFn       func(ctx context.Context, userID, role string) error
 	listMembersFn          func(ctx context.Context) ([]models.Member, error)
@@ -219,26 +219,26 @@ type mockStore struct {
 	markChannelReadFn func(ctx context.Context, channelID, userID, messageID string) error
 
 	// Link archive methods (chunked device-link transfer).
-	insertLinkArchiveFn                 func(ctx context.Context, in db.LinkArchiveInsert) (*db.LinkArchive, error)
-	countActiveLinkArchivesForUserFn    func(ctx context.Context, userID string) (int, error)
+	insertLinkArchiveFn                   func(ctx context.Context, in db.LinkArchiveInsert) (*db.LinkArchive, error)
+	countActiveLinkArchivesForUserFn      func(ctx context.Context, userID string) (int, error)
 	listSupersedableLinkArchivesForUserFn func(ctx context.Context, userID string, lastTouchBefore time.Time) ([]string, error)
-	sumActiveLinkArchiveBytesFn         func(ctx context.Context) (int64, error)
-	transitionLinkArchiveStateFn        func(ctx context.Context, archiveID, nextState string, allowedFrom []string) error
-	getLinkArchiveByIDFn                func(ctx context.Context, archiveID string) (*db.LinkArchive, error)
-	getLinkArchiveByUploadTokenHashFn   func(ctx context.Context, archiveID string, tokenHash []byte) (*db.LinkArchive, error)
-	getLinkArchiveByDownloadTokenHashFn func(ctx context.Context, archiveID string, tokenHash []byte) (*db.LinkArchive, error)
-	refreshLinkArchiveExpiryFn          func(ctx context.Context, archiveID string, ttl time.Duration) (time.Time, error)
-	insertLinkArchiveChunkFn            func(ctx context.Context, in db.LinkArchiveChunkInsert) error
-	getLinkArchiveChunkPointerFn        func(ctx context.Context, archiveID string, idx int) (string, string, error)
-	listLinkArchiveChunkRowsFn          func(ctx context.Context, archiveID string) ([]db.LinkArchiveChunkRow, error)
-	markLinkArchiveFinalizedFn          func(ctx context.Context, archiveID string) error
-	deleteLinkArchiveFn                 func(ctx context.Context, archiveID string) error
-	listGcEligibleLinkArchivesFn        func(ctx context.Context, limit int) ([]string, error)
-	purgeExpiredLinkArchivesFn          func(ctx context.Context) (int64, error)
-	upsertChunkBlobFn                   func(ctx context.Context, storageKey string, bytes []byte) error
-	getChunkBlobFn                      func(ctx context.Context, storageKey string) ([]byte, error)
-	deleteChunkBlobFn                   func(ctx context.Context, storageKey string) error
-	chunkBlobExistsFn                   func(ctx context.Context, storageKey string) (bool, error)
+	sumActiveLinkArchiveBytesFn           func(ctx context.Context) (int64, error)
+	transitionLinkArchiveStateFn          func(ctx context.Context, archiveID, nextState string, allowedFrom []string) error
+	getLinkArchiveByIDFn                  func(ctx context.Context, archiveID string) (*db.LinkArchive, error)
+	getLinkArchiveByUploadTokenHashFn     func(ctx context.Context, archiveID string, tokenHash []byte) (*db.LinkArchive, error)
+	getLinkArchiveByDownloadTokenHashFn   func(ctx context.Context, archiveID string, tokenHash []byte) (*db.LinkArchive, error)
+	refreshLinkArchiveExpiryFn            func(ctx context.Context, archiveID string, ttl time.Duration) (time.Time, error)
+	insertLinkArchiveChunkFn              func(ctx context.Context, in db.LinkArchiveChunkInsert) error
+	getLinkArchiveChunkPointerFn          func(ctx context.Context, archiveID string, idx int) (string, string, error)
+	listLinkArchiveChunkRowsFn            func(ctx context.Context, archiveID string) ([]db.LinkArchiveChunkRow, error)
+	markLinkArchiveFinalizedFn            func(ctx context.Context, archiveID string) error
+	deleteLinkArchiveFn                   func(ctx context.Context, archiveID string) error
+	listGcEligibleLinkArchivesFn          func(ctx context.Context, limit int) ([]string, error)
+	purgeExpiredLinkArchivesFn            func(ctx context.Context) (int64, error)
+	upsertChunkBlobFn                     func(ctx context.Context, storageKey string, bytes []byte) error
+	getChunkBlobFn                        func(ctx context.Context, storageKey string) ([]byte, error)
+	deleteChunkBlobFn                     func(ctx context.Context, storageKey string) error
+	chunkBlobExistsFn                     func(ctx context.Context, storageKey string) (bool, error)
 }
 
 func (m *mockStore) Ping(ctx context.Context) error {
@@ -637,16 +637,17 @@ func (m *mockStore) GetInstanceConfig(ctx context.Context) (*models.InstanceConf
 		return m.getInstanceConfigFn(ctx)
 	}
 	return &models.InstanceConfig{
-		ID:                   "inst-1",
-		Name:                 "Test Instance",
-		RegistrationMode:     "open",
-		ServerCreationPolicy: "open",
+		ID:                       "inst-1",
+		Name:                     "Test Instance",
+		RegistrationMode:         "open",
+		ServerCreationPolicy:     "open",
+		ScreenShareResolutionCap: "1080p",
 	}, nil
 }
 
-func (m *mockStore) UpdateInstanceConfig(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string, serverCreationPolicy *string, maxServersPerUser *int, maxMembersPerServer *int) error {
+func (m *mockStore) UpdateInstanceConfig(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string, serverCreationPolicy *string, maxServersPerUser *int, maxMembersPerServer *int, maxRegisteredUsers *int, screenShareResolutionCap *string) error {
 	if m.updateInstanceConfigFn != nil {
-		return m.updateInstanceConfigFn(ctx, name, iconURL, registrationMode, guildDiscovery, serverCreationPolicy, maxServersPerUser, maxMembersPerServer)
+		return m.updateInstanceConfigFn(ctx, name, iconURL, registrationMode, guildDiscovery, serverCreationPolicy, maxServersPerUser, maxMembersPerServer, maxRegisteredUsers, screenShareResolutionCap)
 	}
 	return nil
 }
@@ -729,7 +730,6 @@ func (m *mockStore) SoftDeleteAttachment(ctx context.Context, attachmentID, owne
 	}
 	return nil, nil
 }
-
 
 func (m *mockStore) ListServerTemplates(ctx context.Context) ([]models.ServerTemplate, error) {
 	if m.listServerTemplatesFn != nil {

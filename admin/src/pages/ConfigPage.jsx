@@ -156,6 +156,8 @@ function InstanceConfigSection() {
   const [serverCreationPolicy, setServerCreationPolicy] = useState('open');
   const [maxServersPerUser, setMaxServersPerUser] = useState('');
   const [maxMembersPerServer, setMaxMembersPerServer] = useState('');
+  const [maxRegisteredUsers, setMaxRegisteredUsers] = useState('');
+  const [screenShareResolutionCap, setScreenShareResolutionCap] = useState('1080p');
   const [name, setName] = useState('');
   const [iconUrl, setIconUrl] = useState('');
   const [saving, setSaving] = useState(false);
@@ -172,6 +174,8 @@ function InstanceConfigSection() {
       setServerCreationPolicy(data.serverCreationPolicy || 'open');
       setMaxServersPerUser(data.maxServersPerUser != null ? String(data.maxServersPerUser) : '');
       setMaxMembersPerServer(data.maxMembersPerServer != null ? String(data.maxMembersPerServer) : '');
+      setMaxRegisteredUsers(data.maxRegisteredUsers != null ? String(data.maxRegisteredUsers) : '');
+      setScreenShareResolutionCap(data.screenShareResolutionCap || '1080p');
       setName(data.name || '');
       setIconUrl(data.iconUrl || '');
     }).catch((e) => {
@@ -196,6 +200,13 @@ function InstanceConfigSection() {
       if (!isNaN(parsedMaxServers)) updates.maxServersPerUser = parsedMaxServers;
       const parsedMaxMembers = parseInt(maxMembersPerServer, 10);
       if (!isNaN(parsedMaxMembers)) updates.maxMembersPerServer = parsedMaxMembers;
+      if (maxRegisteredUsers.trim() === '') {
+        updates.maxRegisteredUsers = 0;
+      } else {
+        const parsedMaxUsers = parseInt(maxRegisteredUsers, 10);
+        if (!isNaN(parsedMaxUsers)) updates.maxRegisteredUsers = parsedMaxUsers;
+      }
+      updates.screenShareResolutionCap = screenShareResolutionCap;
       await updateConfig(updates);
       setSuccess('Configuration saved. Changes apply to clients on next connection.');
       setTimeout(() => setSuccess(''), 4000);
@@ -300,6 +311,22 @@ function InstanceConfigSection() {
       </div>
 
       <div style={PAGE_STYLES.fieldRow}>
+        <label style={PAGE_STYLES.label}>Max registered users</label>
+        <input
+          type="number"
+          className="input"
+          min="0"
+          value={maxRegisteredUsers}
+          onChange={(e) => setMaxRegisteredUsers(e.target.value)}
+          placeholder="No limit"
+          style={{ maxWidth: '200px' }}
+        />
+        <div style={PAGE_STYLES.note}>
+          Maximum number of app users that can register on this instance. Set to 0 to remove the limit.
+        </div>
+      </div>
+
+      <div style={PAGE_STYLES.fieldRow}>
         <label style={PAGE_STYLES.label}>Max members per server</label>
         <input
           type="number"
@@ -312,6 +339,21 @@ function InstanceConfigSection() {
         />
         <div style={PAGE_STYLES.note}>
           Maximum number of members allowed in a single server. Set to 0 to remove the limit.
+        </div>
+      </div>
+
+      <div style={PAGE_STYLES.fieldRow}>
+        <label style={PAGE_STYLES.label}>Screen share resolution</label>
+        <select
+          className="select"
+          value={screenShareResolutionCap}
+          onChange={(e) => setScreenShareResolutionCap(e.target.value)}
+        >
+          <option value="1080p">No limit - user can choose up to 1080p</option>
+          <option value="720p">Cap at 720p - hide quality picker</option>
+        </select>
+        <div style={PAGE_STYLES.note}>
+          Controls the client screen-share quality choices exposed during voice calls.
         </div>
       </div>
 

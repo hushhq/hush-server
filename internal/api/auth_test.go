@@ -16,6 +16,7 @@ import (
 	"time"
 
 	internalauth "github.com/hushhq/hush-server/internal/auth"
+	"github.com/hushhq/hush-server/internal/db"
 	"github.com/hushhq/hush-server/internal/models"
 
 	"github.com/google/uuid"
@@ -313,6 +314,25 @@ func TestRegister_DuplicatePublicKey_Returns409(t *testing.T) {
 	assert.Contains(t, resp["error"], "Public key already registered")
 }
 
+func TestRegister_InstanceUserLimitReached_Returns403(t *testing.T) {
+	pubBase64, _ := generateEd25519KeyPair(t)
+	store := &mockStore{
+		createUserWithPublicKeyFn: func(_ context.Context, _, _ string, _ []byte) (*models.User, error) {
+			return nil, db.ErrInstanceUserLimitReached
+		},
+	}
+	router := newTestRouter(store)
+
+	rr := postJSON(router, "/register", models.RegisterRequest{
+		Username:  "alice",
+		PublicKey: pubBase64,
+	})
+
+	assert.Equal(t, http.StatusForbidden, rr.Code)
+	resp := decodeErrorResponse(t, rr)
+	assert.Equal(t, "Registration limit reached", resp["error"])
+}
+
 func TestRegister_AccountRecovery_ExistingPublicKey_ReturnsAuthResponse(t *testing.T) {
 	pubBase64, _ := generateEd25519KeyPair(t)
 	existingUser := newTestUser("alice")
@@ -449,9 +469,9 @@ func TestRegister_BannedUsername_Returns403(t *testing.T) {
 	if rr.Code == http.StatusOK {
 		// Confirm the ban check was not called - proving the implementation gap.
 		assert.False(t, banCheckCalled, "GetActiveInstanceBan was unexpectedly called on register path")
-		t.Fatalf("IMPLEMENTATION GAP (IROLE-03): register() returned 200 for a banned username; "+
-			"expected 403. GetUserByUsername + GetActiveInstanceBan are not called in register(). "+
-			"Fix: add ban check in auth.go register() before CreateUserWithPublicKey. "+
+		t.Fatalf("IMPLEMENTATION GAP (IROLE-03): register() returned 200 for a banned username; " +
+			"expected 403. GetUserByUsername + GetActiveInstanceBan are not called in register(). " +
+			"Fix: add ban check in auth.go register() before CreateUserWithPublicKey. " +
 			"See 0G-01-PLAN.md Task 2 auth.go section.")
 	}
 	assert.Equal(t, http.StatusForbidden, rr.Code)

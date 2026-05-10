@@ -198,14 +198,17 @@ func TestAdminListGuilds_ReturnsStatsWithoutNames(t *testing.T) {
 }
 
 func TestAdminGetConfig_Returns200WithGuildDiscovery(t *testing.T) {
+	maxRegisteredUsers := 500
 	req, store := authenticatedAdminRequest(http.MethodGet, "/config", nil, "owner")
 	store.getInstanceConfigFn = func(_ context.Context) (*models.InstanceConfig, error) {
 		return &models.InstanceConfig{
-			ID:                   "cfg-1",
-			Name:                 "Hush Instance",
-			RegistrationMode:     "invite_only",
-			GuildDiscovery:       "allowed",
-			ServerCreationPolicy: "open",
+			ID:                       "cfg-1",
+			Name:                     "Hush Instance",
+			RegistrationMode:         "invite_only",
+			GuildDiscovery:           "allowed",
+			ServerCreationPolicy:     "open",
+			MaxRegisteredUsers:       &maxRegisteredUsers,
+			ScreenShareResolutionCap: "720p",
 		}, nil
 	}
 	router := adminRouter(store)
@@ -217,6 +220,9 @@ func TestAdminGetConfig_Returns200WithGuildDiscovery(t *testing.T) {
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&response))
 	assert.Equal(t, "invite_only", response.RegistrationMode)
 	assert.Equal(t, "allowed", response.GuildDiscovery)
+	require.NotNil(t, response.MaxRegisteredUsers)
+	assert.Equal(t, 500, *response.MaxRegisteredUsers)
+	assert.Equal(t, "720p", response.ScreenShareResolutionCap)
 }
 
 func TestAdminUpdateConfig_RejectsCrossOriginWrites(t *testing.T) {
@@ -229,21 +235,31 @@ func TestAdminUpdateConfig_RejectsCrossOriginWrites(t *testing.T) {
 }
 
 func TestAdminUpdateConfig_GuildDiscoveryReturns204(t *testing.T) {
+	maxRegisteredUsers := 250
+	screenShareResolutionCap := "720p"
 	req, store := authenticatedAdminRequest(http.MethodPut, "/config", adminUpdateConfigRequest{
-		GuildDiscovery: func() *string { value := "required"; return &value }(),
+		GuildDiscovery:           func() *string { value := "required"; return &value }(),
+		MaxRegisteredUsers:       &maxRegisteredUsers,
+		ScreenShareResolutionCap: &screenShareResolutionCap,
 	}, "owner")
 	var updatedGuildDiscovery *string
-	store.updateInstanceConfigFn = func(_ context.Context, _, _, _, guildDiscovery, _ *string, _ *int, _ *int) error {
+	var updatedMaxRegisteredUsers *int
+	var updatedScreenShareResolutionCap *string
+	store.updateInstanceConfigFn = func(_ context.Context, _, _, _, guildDiscovery, _ *string, _ *int, _ *int, maxUsers *int, resolutionCap *string) error {
 		updatedGuildDiscovery = guildDiscovery
+		updatedMaxRegisteredUsers = maxUsers
+		updatedScreenShareResolutionCap = resolutionCap
 		return nil
 	}
 	store.getInstanceConfigFn = func(_ context.Context) (*models.InstanceConfig, error) {
 		return &models.InstanceConfig{
-			ID:                   "cfg-1",
-			Name:                 "Hush",
-			RegistrationMode:     "open",
-			GuildDiscovery:       "required",
-			ServerCreationPolicy: "open",
+			ID:                       "cfg-1",
+			Name:                     "Hush",
+			RegistrationMode:         "open",
+			GuildDiscovery:           "required",
+			ServerCreationPolicy:     "open",
+			MaxRegisteredUsers:       &maxRegisteredUsers,
+			ScreenShareResolutionCap: "720p",
 		}, nil
 	}
 	store.getVoiceKeyRotationHoursFn = func(_ context.Context) (int, error) {
@@ -255,6 +271,21 @@ func TestAdminUpdateConfig_GuildDiscoveryReturns204(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, rr.Code)
 	require.NotNil(t, updatedGuildDiscovery)
 	assert.Equal(t, "required", *updatedGuildDiscovery)
+	require.NotNil(t, updatedMaxRegisteredUsers)
+	assert.Equal(t, 250, *updatedMaxRegisteredUsers)
+	require.NotNil(t, updatedScreenShareResolutionCap)
+	assert.Equal(t, "720p", *updatedScreenShareResolutionCap)
+}
+
+func TestAdminUpdateConfig_RejectsInvalidScreenShareResolutionCap(t *testing.T) {
+	value := "4k"
+	req, store := authenticatedAdminRequest(http.MethodPut, "/config", adminUpdateConfigRequest{
+		ScreenShareResolutionCap: &value,
+	}, "owner")
+	router := adminRouter(store)
+
+	rr := doAdmin(router, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
 
 func TestAdminListAdmins_RequiresOwnerRole(t *testing.T) {

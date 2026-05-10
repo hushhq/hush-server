@@ -270,6 +270,10 @@ func (h *authHandler) register(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.store.CreateUserWithPublicKey(r.Context(), req.Username, req.DisplayName, publicKeyBytes)
 	if err != nil {
+		if errors.Is(err, db.ErrInstanceUserLimitReached) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "Registration limit reached"})
+			return
+		}
 		errStr := err.Error()
 		if strings.Contains(errStr, "duplicate key") || strings.Contains(errStr, "unique constraint") {
 			if strings.Contains(errStr, "root_public_key") {

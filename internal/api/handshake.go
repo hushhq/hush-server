@@ -11,15 +11,16 @@ import (
 // handshake handler never hits the database. It is populated on server startup
 // and refreshed whenever the instance config is updated via PUT /api/instance.
 type InstanceCache struct {
-	mu                    sync.RWMutex
-	name                  string
-	iconURL               *string
-	registrationMode      string
-	guildDiscovery        string
-	voiceKeyRotationHours int
-	serverCreationPolicy  string
-	transparencyURL       *string
-	logPublicKey          *string
+	mu                       sync.RWMutex
+	name                     string
+	iconURL                  *string
+	registrationMode         string
+	guildDiscovery           string
+	voiceKeyRotationHours    int
+	serverCreationPolicy     string
+	screenShareResolutionCap string
+	transparencyURL          *string
+	logPublicKey             *string
 }
 
 // voiceKeyRotationHoursDefault is the default voice group key rotation interval.
@@ -33,9 +34,10 @@ const voiceKeyRotationHoursDefault = 2
 // serverCreationPolicy defaults to "open".
 func NewInstanceCache() *InstanceCache {
 	return &InstanceCache{
-		voiceKeyRotationHours: voiceKeyRotationHoursDefault,
-		guildDiscovery:        "allowed",
-		serverCreationPolicy:  "open",
+		voiceKeyRotationHours:    voiceKeyRotationHoursDefault,
+		guildDiscovery:           "allowed",
+		serverCreationPolicy:     "open",
+		screenShareResolutionCap: "1080p",
 	}
 }
 
@@ -47,7 +49,7 @@ func NewInstanceCache() *InstanceCache {
 //
 // This method does not touch transparency fields (transparencyURL, logPublicKey).
 // Use SetTransparencyInfo to update those separately after the log signer is loaded.
-func (c *InstanceCache) Set(name string, iconURL *string, regMode string, guildDiscovery string, voiceKeyRotationHours int, serverCreationPolicy string) {
+func (c *InstanceCache) Set(name string, iconURL *string, regMode string, guildDiscovery string, voiceKeyRotationHours int, serverCreationPolicy string, screenShareResolutionCap ...string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.name = name
@@ -68,6 +70,11 @@ func (c *InstanceCache) Set(name string, iconURL *string, regMode string, guildD
 		c.serverCreationPolicy = serverCreationPolicy
 	} else {
 		c.serverCreationPolicy = "open"
+	}
+	if len(screenShareResolutionCap) > 0 && screenShareResolutionCap[0] != "" {
+		c.screenShareResolutionCap = screenShareResolutionCap[0]
+	} else {
+		c.screenShareResolutionCap = "1080p"
 	}
 }
 
@@ -101,6 +108,7 @@ func (c *InstanceCache) snapshot() (
 	transparencyURL *string,
 	logPublicKey *string,
 	serverCreationPolicy string,
+	screenShareResolutionCap string,
 ) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -131,24 +139,29 @@ func (c *InstanceCache) snapshot() (
 	if scp == "" {
 		scp = "open"
 	}
-	return c.name, ico, c.registrationMode, gd, vkrh, tURL, lPub, scp
+	ssrc := c.screenShareResolutionCap
+	if ssrc == "" {
+		ssrc = "1080p"
+	}
+	return c.name, ico, c.registrationMode, gd, vkrh, tURL, lPub, scp, ssrc
 }
 
 // handshakeResponse is the JSON shape returned by GET /api/handshake.
 type handshakeResponse struct {
-	ServerVersion          string          `json:"server_version"`
-	APIVersion             string          `json:"api_version"`
-	MinClientVersion       string          `json:"min_client_version"`
-	KeyPackageLowThreshold int             `json:"key_package_low_threshold"`
-	GuildDiscovery         string          `json:"guild_discovery"`
+	ServerVersion          string `json:"server_version"`
+	APIVersion             string `json:"api_version"`
+	MinClientVersion       string `json:"min_client_version"`
+	KeyPackageLowThreshold int    `json:"key_package_low_threshold"`
+	GuildDiscovery         string `json:"guild_discovery"`
 	// ServerCreationPolicy controls whether authenticated users may create guilds.
 	// Values: "open" (default), "paid" (subscription required), "disabled" (no new guilds).
-	ServerCreationPolicy   string          `json:"server_creation_policy"`
-	Capabilities           map[string]bool `json:"capabilities"`
-	Name                   string          `json:"name"`
-	IconURL                *string         `json:"iconUrl,omitempty"`
-	RegistrationMode       string          `json:"registrationMode"`
-	VoiceKeyRotationHours  int             `json:"voice_key_rotation_hours"`
+	ServerCreationPolicy     string          `json:"server_creation_policy"`
+	ScreenShareResolutionCap string          `json:"screen_share_resolution_cap"`
+	Capabilities             map[string]bool `json:"capabilities"`
+	Name                     string          `json:"name"`
+	IconURL                  *string         `json:"iconUrl,omitempty"`
+	RegistrationMode         string          `json:"registrationMode"`
+	VoiceKeyRotationHours    int             `json:"voice_key_rotation_hours"`
 	// TransparencyURL is the base URL of the instance's transparency log API.
 	// Omitted when transparency logging is not configured for this instance.
 	TransparencyURL *string `json:"transparency_url,omitempty"`
@@ -163,15 +176,16 @@ type handshakeResponse struct {
 // only from the in-memory cache and version constants, never from the database.
 func HandshakeHandler(cache *InstanceCache, voiceEnabled bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		name, iconURL, regMode, guildDiscovery, voiceKeyRotationHours, transparencyURL, logPublicKey, serverCreationPolicy := cache.snapshot()
+		name, iconURL, regMode, guildDiscovery, voiceKeyRotationHours, transparencyURL, logPublicKey, serverCreationPolicy, screenShareResolutionCap := cache.snapshot()
 
 		resp := handshakeResponse{
-			ServerVersion:          version.ServerVersion,
-			APIVersion:             version.APIVersion,
-			MinClientVersion:       version.MinClientVersion,
-			KeyPackageLowThreshold: version.KeyPackageLowThreshold,
-			GuildDiscovery:         guildDiscovery,
-			ServerCreationPolicy:   serverCreationPolicy,
+			ServerVersion:            version.ServerVersion,
+			APIVersion:               version.APIVersion,
+			MinClientVersion:         version.MinClientVersion,
+			KeyPackageLowThreshold:   version.KeyPackageLowThreshold,
+			GuildDiscovery:           guildDiscovery,
+			ServerCreationPolicy:     serverCreationPolicy,
+			ScreenShareResolutionCap: screenShareResolutionCap,
 			Capabilities: map[string]bool{
 				"e2ee.chat":      true,
 				"e2ee.media":     true,
