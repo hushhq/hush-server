@@ -15,6 +15,7 @@ The Hush server is designed to be a blind relay. It routes and stores encrypted 
 | Data | Format | Purpose |
 |-|-|-|
 | Chat messages | MLS ciphertext (BYTEA) | Storage and routing to channel subscribers |
+| Attachment records | UUIDs, channel UUID, owner UUID, storage key, ciphertext size, content type, timestamps | Presigned upload/download and cleanup |
 | Guild/channel metadata | AES-256-GCM ciphertext (BYTEA) | Stored as `encrypted_metadata`; opaque to server |
 | Sender UUID | UUID | Message routing |
 | Timestamp | UTC timestamp | Message ordering |
@@ -33,6 +34,9 @@ The Hush server is designed to be a blind relay. It routes and stores encrypted 
 | Plaintext message content | Encrypted with MLS before transmission |
 | Guild names | Encrypted with MLS-derived AES-256-GCM before transmission |
 | Channel names | Encrypted with MLS-derived AES-256-GCM before transmission |
+| Attachment plaintext bytes | Encrypted client-side before upload to object storage |
+| Attachment encryption keys or IVs | Stored only inside the MLS-encrypted message envelope |
+| Original attachment filenames | Stored only inside the MLS-encrypted message envelope |
 | Role labels | Exist only in encrypted guild metadata |
 | Private keys or mnemonics | Never transmitted; client-generated and client-held |
 | Voice/video frame content | LiveKit SFU forwards encrypted frames; frame keys are never sent to the server |
@@ -43,7 +47,55 @@ The admin dashboard uses local instance-admin accounts authenticated by secure s
 
 ---
 
-## 2. Rate Limiting
+## 2. Chat and Attachment Encryption
+
+Chat messages and attachments use the same end-to-end trust boundary, but they are not encrypted in the same physical place.
+
+In plain terms: a chat message is small enough to go directly through the MLS group. The client turns the message into MLS ciphertext, and the server stores only that ciphertext. An attachment can be much larger, so the client encrypts the file separately, uploads the encrypted bytes to storage, and sends only a small encrypted reference through the MLS group. That reference contains the attachment id, display filename, MIME type, and the one-time AES key and IV needed to open the file.
+
+This creates two planes:
+
+| Plane | What is encrypted | Where ciphertext is stored | Who has the key |
+|-|-|-|-|
+| Chat control plane | Message envelope JSON | PostgreSQL `messages.ciphertext` | Current MLS group members |
+| Attachment data plane | File bytes | Attachment storage backend, usually MinIO/S3 | MLS group members who can decrypt the message envelope |
+
+### Attachment flow
+
+1. The client generates a fresh AES-GCM-256 key and 96-bit IV for each file.
+2. The client encrypts the whole file locally. The storage backend receives only ciphertext bytes.
+3. The client asks the server for a short-lived presigned upload URL. The server validates channel membership, ciphertext size, and declared content type, then records an attachment row with a storage key.
+4. The client uploads the ciphertext directly to the configured storage backend.
+5. The client places an `AttachmentRef` in the message envelope. The `AttachmentRef` includes the attachment id, filename for display, ciphertext size, MIME type, AES key, and IV.
+6. The message envelope is encrypted as an MLS application message and stored by the server as opaque ciphertext.
+7. A recipient decrypts the MLS message, reads the `AttachmentRef`, requests a presigned download URL, downloads ciphertext, and decrypts locally with AES-GCM.
+
+The server can authorize and route attachment access, but it cannot decrypt attachment contents because it never receives the AES key or IV.
+
+### Forward secrecy boundary
+
+Attachment keys are independent random per-file keys. They are not derived from the MLS epoch exporter. MLS protects the delivery of the `AttachmentRef`, but once a client has decrypted and cached the message envelope, that client may retain the attachment key according to the local client persistence policy.
+
+This means:
+
+- MLS epoch rotation does not rotate existing attachment keys.
+- Removing a member prevents access to future MLS messages, but it does not revoke attachment keys already delivered to that member.
+- Server or object-storage compromise exposes attachment ciphertext and metadata, not plaintext.
+- Endpoint compromise can expose any plaintext or attachment keys already decrypted or cached on that endpoint.
+
+Hush does use MLS `export_secret` for other epoch-bound domains such as voice frame keys and encrypted metadata. Attachments intentionally use the separate per-file-key model described above. A future format could wrap per-file keys with an MLS-exported key encryption key, but that is not the current attachment format.
+
+### Storage integrity and cleanup
+
+AES-GCM authenticates attachment ciphertext during local decryption. If the stored object is tampered with or the wrong key/IV is used, decryption fails instead of producing modified plaintext.
+
+Attachment uploads currently do not have a server-side post-upload confirmation step. The link-device archive flow has an S3 checksum confirmation endpoint; chat attachments do not. Attachment deletion is best-effort at the storage backend after the database row is soft-deleted. If backend deletion fails, the row remains hidden from users and the object may require later operator cleanup.
+
+See [docs/ATTACHMENTS.md](docs/ATTACHMENTS.md) for the full attachment security design.
+
+---
+
+## 3. Rate Limiting
 
 | Endpoint | Limit |
 |-|-|
@@ -56,7 +108,7 @@ Rate limiting is implemented server-side using Redis counters. Exceeding limits 
 
 ---
 
-## 3. Input Validation
+## 4. Input Validation
 
 API request bodies are validated server-side in the Go backend before any database operation.
 
@@ -65,6 +117,8 @@ API request bodies are validated server-side in the Go backend before any databa
 | `username` | Non-empty string, max 64 chars |
 | `publicKey` | Valid Ed25519 public key (32 bytes) |
 | `encrypted_metadata` | Accepted as opaque BYTEA; server never parses contents |
+| Attachment size | Positive ciphertext size, capped at 25 MiB |
+| Attachment content type | Declared type must match the server allowlist; advisory only because bytes are encrypted |
 | `permission_level` | Integer 0–3 |
 | Admin session cookie | Required for `/api/admin/*` after bootstrap/login; stored as `HttpOnly` and validated server-side |
 
@@ -72,7 +126,7 @@ Chat messages are stored as MLS ciphertext blobs. The server never processes pla
 
 ---
 
-## 4. Security Headers
+## 5. Security Headers
 
 The default Caddy self-host proxy terminates TLS and routes API, WebSocket,
 LiveKit, admin-dashboard, and storage traffic. The backend-only self-host path
@@ -98,7 +152,7 @@ the full browser stack you serve.
 
 ---
 
-## 5. WebSocket Security
+## 6. WebSocket Security
 
 - WebSocket upgrade is gated by a valid JWT session token.
 - Each WebSocket connection is subscribed to only the guilds the authenticated user is a member of; this is enforced at upgrade time via a membership check.
@@ -106,7 +160,7 @@ the full browser stack you serve.
 
 ---
 
-## 6. Secrets Lifecycle
+## 7. Secrets Lifecycle
 
 Not all secrets in `.env` have the same rotation safety. This table defines the operational classification:
 
@@ -157,7 +211,7 @@ Hush implements a signed Merkle tree of key operations per instance.
 - Leaf nodes are signed with an Ed25519 key seeded from `TRANSPARENCY_LOG_PRIVATE_KEY`.
 - Clients verify inclusion proofs at login and on key changes via `GET /api/transparency/verify`.
 
-**Operational note:** `TRANSPARENCY_LOG_PRIVATE_KEY` must never change after the first log entry. Rotating it invalidates all existing proofs. Back it up separately from other `.env` values. See §6 (Secrets Lifecycle) for the full rotation classification.
+**Operational note:** `TRANSPARENCY_LOG_PRIVATE_KEY` must never change after the first log entry. Rotating it invalidates all existing proofs. Back it up separately from other `.env` values. See §7 (Secrets Lifecycle) for the full rotation classification.
 
 ---
 
@@ -167,7 +221,7 @@ Hush implements a signed Merkle tree of key operations per instance.
 |-|-|
 | **CORS** | Set `CORS_ORIGIN` to your frontend origin. Never use `*` in production. |
 | **HSTS** | Use `--domain` with `setup.sh`. If you serve `hush-web` yourself, configure HSTS on that frontend origin too. |
-| **Secrets** | Do not use default values. `setup.sh` generates all secrets. See §6 for rotation classification. |
+| **Secrets** | Do not use default values. `setup.sh` generates all secrets. See §7 for rotation classification. |
 | **Transparency key** | Never rotate `TRANSPARENCY_LOG_PRIVATE_KEY` after first log entry. Back it up offline and separately from the database backup. |
 | **`.env` backup** | Back up `.env` immediately after `setup.sh`. A database backup without its matching `.env` is inoperable. |
 | **Database access** | PostgreSQL should not be exposed to the public internet. Use Docker networking or firewall rules. |
