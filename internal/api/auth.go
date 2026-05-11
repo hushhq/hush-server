@@ -187,9 +187,6 @@ func (h *authHandler) register(w http.ResponseWriter, r *http.Request) {
 	req.Username = strings.TrimSpace(req.Username)
 	req.DisplayName = strings.TrimSpace(req.DisplayName)
 	req.Label = strings.TrimSpace(req.Label)
-	if req.DisplayName == "" {
-		req.DisplayName = req.Username
-	}
 	if err := validateUsername(req.Username); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return

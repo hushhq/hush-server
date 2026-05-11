@@ -202,6 +202,8 @@ func TestRegister_Success(t *testing.T) {
 
 	store := &mockStore{
 		createUserWithPublicKeyFn: func(_ context.Context, username, displayName string, _ []byte) (*models.User, error) {
+			assert.Equal(t, "alice", username)
+			assert.Equal(t, "", displayName)
 			return user, nil
 		},
 	}
