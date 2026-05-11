@@ -22,6 +22,7 @@ type Config struct {
 	LiveKitAPIKey            string
 	LiveKitAPISecret         string
 	LiveKitURL               string
+	LiveKitPublicURL         string
 	// TransparencyLogPrivateKey is the hex-encoded 32-byte Ed25519 seed for the
 	// transparency log signing keypair. If empty in dev mode, an ephemeral key
 	// is generated with a warning. Required in production.
@@ -76,6 +77,7 @@ func Load() Config {
 		LiveKitAPIKey:             os.Getenv("LIVEKIT_API_KEY"),
 		LiveKitAPISecret:          os.Getenv("LIVEKIT_API_SECRET"),
 		LiveKitURL:                os.Getenv("LIVEKIT_URL"),
+		LiveKitPublicURL:          os.Getenv("LIVEKIT_PUBLIC_URL"),
 		TransparencyLogPrivateKey: os.Getenv("TRANSPARENCY_LOG_PRIVATE_KEY"),
 		GiphyAPIKey:               os.Getenv("GIPHY_API_KEY"),
 	}

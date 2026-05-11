@@ -41,7 +41,7 @@ Run this checklist immediately after `setup.sh` and after any secret rotation.
 [ ] The backup location and access method is documented for any other operator
     who might need to perform a restore
 
-[ ] Domain mode only: storage.<DOMAIN> has an A record pointing at this server
+[ ] Domain mode only: <DOMAIN>, <RTC_DOMAIN>, and storage.<DOMAIN> have A records pointing at this server
     if you want full device-link bulk transfer through bundled MinIO
 ```
 
@@ -343,11 +343,16 @@ hits the same proxy body-size limits as the prior in-API path.
 
 ### 6.1 Self-host MinIO (domain mode, recommended)
 
-`setup.sh --domain chat.example.com --email …` does the following
+`setup.sh --domain chat.example.com --rtc-domain rtc.example.com --email …`
+does the following
 automatically:
 
 - Generates `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` and writes them
   to `.env`.
+- Sets `RTC_DOMAIN=rtc.example.com` and
+  `LIVEKIT_PUBLIC_URL=wss://rtc.example.com/`. Browser clients receive
+  that URL from `/api/livekit/token` and connect to the dedicated
+  LiveKit signaling hostname.
 - Sets `STORAGE_BACKEND=s3` plus the `STORAGE_S3_*` block pointing at
   `storage.<DOMAIN>` (TLS via Caddy + Let's Encrypt).
 - Adds the `--profile s3-storage` flag so the `minio` and
@@ -359,14 +364,27 @@ automatically:
   policy that permits the browser client to PUT/GET ciphertext
   directly with the `x-amz-checksum-sha256` header.
 
-**One operator step is still required:** create a DNS A record
+**One operator step is still required before setup:** create DNS A
+records for the app, RTC, and storage hosts:
 
 ```
-storage.<DOMAIN>   A   <server public IP>
+chat.example.com          A   <server public IP>
+rtc.example.com           A   <server public IP>
+storage.chat.example.com  A   <server public IP>
 ```
 
-before clients can use the bulk plane. Caddy will obtain a Let's
-Encrypt certificate for `storage.<DOMAIN>` on first request to it.
+If you use Cloudflare, the app host may be proxied. The RTC host must
+be DNS-only so LiveKit WebSocket signaling does not traverse the
+Cloudflare-proxied app path. Caddy obtains Let's Encrypt certificates
+for all three names when the stack starts or on first request.
+
+Verify the RTC hostname reaches LiveKit:
+
+```bash
+curl -i 'https://rtc.example.com/rtc/v1/validate?access_token=dummy'
+```
+
+The expected response is `401 Unauthorized`, not `404` or `502`.
 
 To verify the profile is active after setup:
 

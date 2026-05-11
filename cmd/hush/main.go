@@ -365,7 +365,14 @@ func main() {
 
 		voiceState := api.NewVoiceState()
 		r.Get("/ws", ws.Handler(wsHub, cfg.JWTSecret, pool, cfg.CORSOrigin, cfg.WSAllowedOrigins...))
-		r.Mount("/api/livekit", api.LiveKitRoutesWithVoiceState(pool, cfg.JWTSecret, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret, voiceState))
+		r.Mount("/api/livekit", api.LiveKitRoutesWithVoiceStateAndPublicURL(
+			pool,
+			cfg.JWTSecret,
+			cfg.LiveKitAPIKey,
+			cfg.LiveKitAPISecret,
+			cfg.LiveKitPublicURL,
+			voiceState,
+		))
 		r.Post("/api/livekit/webhook", api.LiveKitWebhookHandlerWithState(wsHub, pool, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret, voiceState))
 	}
 

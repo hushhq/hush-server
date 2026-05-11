@@ -24,18 +24,25 @@ var roomNameRE = regexp.MustCompile(`^[a-zA-Z0-9._=-]+$`)
 
 // LiveKitRoutes returns the route for POST /api/livekit/token (mount at /api/livekit).
 func LiveKitRoutes(store db.Store, jwtSecret string, apiKey, apiSecret string) chi.Router {
-	return LiveKitRoutesWithVoiceState(store, jwtSecret, apiKey, apiSecret, nil)
+	return LiveKitRoutesWithVoiceStateAndPublicURL(store, jwtSecret, apiKey, apiSecret, "", nil)
 }
 
 // LiveKitRoutesWithVoiceState returns the LiveKit API routes backed by the
 // supplied in-memory voice tracker. The tracker is optional for tests that only
 // exercise token issuance.
 func LiveKitRoutesWithVoiceState(store db.Store, jwtSecret string, apiKey, apiSecret string, state *VoiceState) chi.Router {
+	return LiveKitRoutesWithVoiceStateAndPublicURL(store, jwtSecret, apiKey, apiSecret, "", state)
+}
+
+// LiveKitRoutesWithVoiceStateAndPublicURL returns the LiveKit API routes backed
+// by the supplied in-memory voice tracker and optional public signaling URL.
+func LiveKitRoutesWithVoiceStateAndPublicURL(store db.Store, jwtSecret string, apiKey, apiSecret, publicURL string, state *VoiceState) chi.Router {
 	r := chi.NewRouter()
 	h := &livekitHandler{
 		store:      store,
 		apiKey:     apiKey,
 		apiSecret:  apiSecret,
+		publicURL:  strings.TrimSpace(publicURL),
 		voiceState: state,
 	}
 	r.With(RequireAuth(jwtSecret, store)).Post("/token", h.token)
@@ -47,6 +54,7 @@ type livekitHandler struct {
 	store      db.Store
 	apiKey     string
 	apiSecret  string
+	publicURL  string
 	voiceState *VoiceState
 }
 
@@ -145,7 +153,11 @@ func (h *livekitHandler) token(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "token generation failed"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"token": tokenString})
+	body := map[string]string{"token": tokenString}
+	if h.publicURL != "" {
+		body["livekitUrl"] = h.publicURL
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 func (h *livekitHandler) voiceStateSnapshot(w http.ResponseWriter, r *http.Request) {
