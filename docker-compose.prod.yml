@@ -157,9 +157,11 @@ services:
       - DATABASE_URL=postgres://${POSTGRES_USER:-hush}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-hush}?sslmode=disable
       - JWT_SECRET=${JWT_SECRET}
       - DOMAIN=${DOMAIN}
+      - RTC_DOMAIN=${RTC_DOMAIN:-}
       - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
       - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
-      - LIVEKIT_URL=wss://${DOMAIN}/livekit
+      - LIVEKIT_URL=${LIVEKIT_URL:-ws://livekit:7880}
+      - LIVEKIT_PUBLIC_URL=${LIVEKIT_PUBLIC_URL:-}
       - TRANSPARENCY_LOG_PRIVATE_KEY=${TRANSPARENCY_LOG_PRIVATE_KEY}
       - GIPHY_API_KEY=${GIPHY_API_KEY:-}
       # Storage backend for the device-link bulk transfer plane.

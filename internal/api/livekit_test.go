@@ -159,6 +159,28 @@ func TestLiveKitToken_NonMutedUser(t *testing.T) {
 	assert.NotEmpty(t, body["token"], "token must be present in 200 response")
 }
 
+func TestLiveKitToken_ReturnsPublicSignalingURL_WhenConfigured(t *testing.T) {
+	userID := uuid.New().String()
+	store := &mockStore{}
+	token := makeAuth(store, userID)
+	router := LiveKitRoutesWithVoiceStateAndPublicURL(
+		store,
+		testJWTSecret,
+		"test-key",
+		"test-secret",
+		"wss://rtc.example.com/",
+		nil,
+	)
+
+	rr := postLiveKitToken(router, "custom-room", "Alice", token)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	var body map[string]string
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&body))
+	assert.NotEmpty(t, body["token"])
+	assert.Equal(t, "wss://rtc.example.com/", body["livekitUrl"])
+}
+
 // TestLiveKitToken_NoChannelPrefix verifies that a roomName without the
 // "channel-" prefix skips the mute check and returns a token.
 func TestLiveKitToken_NoChannelPrefix(t *testing.T) {

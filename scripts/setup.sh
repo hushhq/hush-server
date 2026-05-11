@@ -4,15 +4,16 @@
 #
 # Usage:
 #   ./scripts/setup.sh                          # interactive mode
-#   ./scripts/setup.sh --domain chat.example.com --email ops@example.com
+#   ./scripts/setup.sh --domain chat.example.com --rtc-domain rtc.example.com --email ops@example.com
 #   ./scripts/setup.sh --ip 203.0.113.42        # IP-only with self-signed TLS
-#   ./scripts/setup.sh --force --domain chat.example.com --email ops@example.com
+#   ./scripts/setup.sh --force --domain chat.example.com --rtc-domain rtc.example.com --email ops@example.com
 #
 # Flags:
-#   --domain DOMAIN   Domain name pointing to this server (Let's Encrypt TLS)
-#   --ip     IP       Server IP address (self-signed TLS via Caddy internal CA)
-#   --email  EMAIL    Email for Let's Encrypt (required with --domain, ignored with --ip)
-#   --force           Overwrite existing .env without prompting
+#   --domain DOMAIN       App/API domain pointing to this server (Let's Encrypt TLS)
+#   --rtc-domain DOMAIN   LiveKit signaling domain pointing to this server
+#   --ip     IP           Server IP address (self-signed TLS via Caddy internal CA)
+#   --email  EMAIL        Email for Let's Encrypt (required with --domain, ignored with --ip)
+#   --force               Overwrite existing .env without prompting
 #
 # Modes:
 #   Domain mode (--domain): Docker Compose starts Caddy, which obtains a real
@@ -48,6 +49,19 @@ LOG_PREFIX="[hush]"
 log() { printf '%s %s\n' "$LOG_PREFIX" "$1"; }
 err() { printf '%s ERROR: %s\n' "$LOG_PREFIX" "$1" >&2; }
 die() { err "$1"; exit "${2:-1}"; }
+derive_rtc_domain() {
+  # Prefer sibling hostnames for production, e.g. chat.example.com
+  # -> rtc.example.com and app.gethush.live -> rtc.gethush.live.
+  # Public suffix parsing is intentionally not attempted in POSIX shell;
+  # operators can pass --rtc-domain when they need a different shape.
+  _domain="$1"
+  _suffix="${_domain#*.}"
+  if [ "$_suffix" = "$_domain" ]; then
+    printf 'rtc.%s' "$_domain"
+  else
+    printf 'rtc.%s' "$_suffix"
+  fi
+}
 # COMPOSE_PROFILE_ARGS is set later (after env decisions) so the s3-storage
 # profile is enabled iff the bundled MinIO is wired in. Until set it is
 # empty and compose_cmd behaves like before.
@@ -58,16 +72,18 @@ compose_cmd() { $DOCKER_COMPOSE -f "$COMPOSE_BASE_FILE" -f "$COMPOSE_PROXY_FILE"
 # Parse arguments
 # ---------------------------------------------------------------------------
 domain=""
+rtc_domain=""
 ip_addr=""
 email=""
 force=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --domain) domain="$2";  shift 2 ;;
-    --ip)     ip_addr="$2"; shift 2 ;;
-    --email)  email="$2";   shift 2 ;;
-    --force)  force=1;      shift   ;;
+    --domain)     domain="$2";     shift 2 ;;
+    --rtc-domain) rtc_domain="$2"; shift 2 ;;
+    --ip)         ip_addr="$2";    shift 2 ;;
+    --email)      email="$2";      shift 2 ;;
+    --force)      force=1;         shift   ;;
     *) die "Unknown flag: $1" 1 ;;
   esac
 done
@@ -75,6 +91,9 @@ done
 # --domain and --ip are mutually exclusive
 if [ -n "$domain" ] && [ -n "$ip_addr" ]; then
   die "Cannot use both --domain and --ip. Choose one." 1
+fi
+if [ -n "$rtc_domain" ] && [ -n "$ip_addr" ]; then
+  die "Cannot use --rtc-domain with --ip. RTC_DOMAIN is only used in domain mode." 1
 fi
 
 # ---------------------------------------------------------------------------
@@ -154,6 +173,10 @@ if [ -z "$domain" ] && [ -z "$ip_addr" ]; then
       printf '%s Enter your domain (e.g. chat.example.com): ' "$LOG_PREFIX"
       read -r domain
       [ -z "$domain" ] && die "Domain is required." 1
+      _default_rtc_domain="$(derive_rtc_domain "$domain")"
+      printf '%s Enter your RTC domain for voice/video signaling [%s]: ' "$LOG_PREFIX" "$_default_rtc_domain"
+      read -r rtc_domain
+      [ -z "$rtc_domain" ] && rtc_domain="$_default_rtc_domain"
       ;;
     *)
       printf '%s Enter your server IP address: ' "$LOG_PREFIX"
@@ -167,6 +190,13 @@ fi
 if [ -n "$domain" ]; then
   mode="domain"
   host="$domain"
+  if [ -z "$rtc_domain" ]; then
+    rtc_domain="$(derive_rtc_domain "$domain")"
+    log "RTC domain not provided; using $rtc_domain"
+  fi
+  if [ "$rtc_domain" = "$domain" ]; then
+    die "RTC domain must differ from app domain. Use a sibling host such as rtc.example.com." 1
+  fi
 
   if [ -z "$email" ]; then
     printf '%s Enter your email (for Let'\''s Encrypt certificates): ' "$LOG_PREFIX"
@@ -175,8 +205,9 @@ if [ -n "$domain" ]; then
   fi
 
   log "Mode:   domain (Let's Encrypt TLS)"
-  log "Domain: $domain"
-  log "Email:  $email"
+  log "Domain:     $domain"
+  log "RTC domain: $rtc_domain"
+  log "Email:      $email"
 else
   mode="ip"
   host="$ip_addr"
@@ -311,8 +342,10 @@ log "Writing .env..."
 # Set NODE_IP for IP-mode deployments (helps LiveKit discover the correct ICE candidate)
 if [ "$mode" = "ip" ]; then
   node_ip="$ip_addr"
+  public_livekit_url="wss://$host/livekit"
 else
   node_ip=""
+  public_livekit_url="wss://$rtc_domain/"
 fi
 
 cat > .env <<ENVEOF
@@ -320,8 +353,12 @@ cat > .env <<ENVEOF
 # DO NOT commit this file to version control.
 
 # --- Host -----------------------------------------------------------------
-# The public hostname or IP address of this server.
+# Public app/API hostname or IP address of this server.
 DOMAIN=$host
+# Public LiveKit signaling hostname. Domain-mode production uses a
+# dedicated sibling DNS record so Safari/iCloud Private Relay and
+# Cloudflare-proxied app traffic do not share the same WebSocket path.
+RTC_DOMAIN=$rtc_domain
 # Enable production-only safeguards (e.g. persistent transparency signer).
 PRODUCTION=true
 
@@ -350,6 +387,10 @@ SERVICE_IDENTITY_MASTER_KEY=$SERVICE_IDENTITY_MASTER_KEY
 # --- LiveKit (self-hosted) ------------------------------------------------
 LIVEKIT_API_KEY=$LIVEKIT_API_KEY
 LIVEKIT_API_SECRET=$LIVEKIT_API_SECRET
+# Internal URL used by hush-api for LiveKit RoomService calls.
+LIVEKIT_URL=ws://livekit:7880
+# Public URL returned to browser clients for LiveKit signaling.
+LIVEKIT_PUBLIC_URL=$public_livekit_url
 
 # --- Transparency log -----------------------------------------------------
 # Ed25519 seed (hex) - MUST NOT change after first message is logged
@@ -408,7 +449,7 @@ if [ "$mode" = "domain" ]; then
   if [ ! -f "$CADDY_TMPL" ]; then
     die "Caddy template not found: $CADDY_TMPL" 1
   fi
-  sed "s/__DOMAIN__/$domain/g; s/__EMAIL__/$email/g" "$CADDY_TMPL" > "$CADDY_OUT"
+  sed "s/__DOMAIN__/$domain/g; s/__RTC_DOMAIN__/$rtc_domain/g; s/__EMAIL__/$email/g" "$CADDY_TMPL" > "$CADDY_OUT"
 else
   CADDY_TMPL="$CADDY_IP_TMPL"
   if [ ! -f "$CADDY_TMPL" ]; then
@@ -554,6 +595,13 @@ if [ "$mode" = "domain" ]; then
   log "Open https://app.gethush.live and add this instance URL:"
   log "  https://$host"
   log "If you self-host hush-web later, update CORS_ORIGIN in .env to that origin."
+  log ""
+  log "Required DNS records:"
+  log "  $host  ->  this server's public IP"
+  log "  $rtc_domain  ->  this server's public IP"
+  log ""
+  log "If you use Cloudflare, the app domain may be proxied, but the RTC"
+  log "domain must be DNS-only so LiveKit signaling bypasses Cloudflare."
   printf '\n'
 fi
 if [ "$mode" = "ip" ]; then

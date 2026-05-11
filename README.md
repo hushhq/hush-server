@@ -24,15 +24,11 @@ clone or build `hush-web`.
 
 A domain gives you a real TLS certificate from Let's Encrypt - no browser warnings, and no friction when users from other instances connect to yours.
 
-**1. Point a domain at your server** (A record in your DNS provider):
+**1. Point the production hostnames at your server** (A records in your DNS provider):
 
 ```
-chat.example.com  ->  YOUR_SERVER_IP
-```
-
-For full device-link bulk transfer support, also point the storage subdomain:
-
-```
+chat.example.com          ->  YOUR_SERVER_IP
+rtc.example.com           ->  YOUR_SERVER_IP
 storage.chat.example.com  ->  YOUR_SERVER_IP
 ```
 
@@ -41,12 +37,20 @@ storage.chat.example.com  ->  YOUR_SERVER_IP
 ```bash
 git clone https://github.com/hushhq/hush-server
 cd hush-server
-./scripts/setup.sh --domain chat.example.com --email you@example.com
+./scripts/setup.sh \
+  --domain chat.example.com \
+  --rtc-domain rtc.example.com \
+  --email you@example.com
 ```
 
 `setup.sh` writes `.env`, generates the Caddy and LiveKit configs, builds the
 API image, pulls runtime images, starts Docker Compose, and health-checks the
 instance. Do not run a separate `docker compose up -d` after it.
+
+The RTC domain is the public LiveKit signaling endpoint. It is part of the
+production deployment contract, not an optional troubleshooting path. If you
+put the app domain behind Cloudflare, keep the RTC domain DNS-only so Safari
+with iCloud Private Relay can establish LiveKit WebSocket signaling reliably.
 
 **3. Connect with a Hush web client**
 
@@ -91,6 +95,7 @@ After setup, visit `https://YOUR_SERVER_IP` once to accept the browser certifica
 | Flag | Purpose |
 |-|-|
 | `--domain <host>` | Public hostname (Let's Encrypt TLS) |
+| `--rtc-domain <host>` | Public LiveKit signaling hostname (Let's Encrypt TLS) |
 | `--ip <address>` | Server IP (self-signed TLS, no domain needed) |
 | `--email <email>` | Let's Encrypt renewal (required with `--domain`) |
 | `--force` | Re-run on an already-configured instance (overwrites config, preserves data) |
@@ -173,12 +178,14 @@ The server reads configuration from environment variables (or `.env` in the proj
 | `ADMIN_BOOTSTRAP_SECRET` | One-time secret used only to create the first local admin owner |
 | `ADMIN_SESSION_TTL_HOURS` | Dashboard session lifetime in hours |
 | `DOMAIN` | Public instance hostname; also used to derive `CORS_ORIGIN` when omitted |
+| `RTC_DOMAIN` | Public LiveKit signaling hostname |
 | `CORS_ORIGIN` | Allowed frontend origin. For backend-only self-hosting with the official client, use `https://app.gethush.live`. Do not use `*` in production. |
 | `WS_ALLOWED_ORIGINS` | Optional comma-separated extra WebSocket origins for trusted desktop shells, for example `app://localhost`. |
 | `SERVICE_IDENTITY_MASTER_KEY` | 32-byte hex/base64 key used to wrap the instance service identity private key at rest |
 | `LIVEKIT_API_KEY` | LiveKit API key |
 | `LIVEKIT_API_SECRET` | LiveKit API secret |
-| `LIVEKIT_URL` | LiveKit signaling URL |
+| `LIVEKIT_URL` | Internal LiveKit URL used by hush-api for RoomService calls |
+| `LIVEKIT_PUBLIC_URL` | Public browser LiveKit signaling URL returned by `/api/livekit/token` |
 | `TRANSPARENCY_LOG_PRIVATE_KEY` | Hex-encoded 32-byte Ed25519 seed for key transparency log signing; never change after first log entry |
 | `STORAGE_BACKEND` | `s3` in domain mode with bundled MinIO; `postgres_bytea` in IP mode unless you configure external S3 |
 | `ATTACHMENT_STORAGE_*` | Optional chat-attachment storage override. `setup.sh` points this at bucket `hush-attachments` so attachments do not mix with link-device archives. |
@@ -271,12 +278,13 @@ The `caddy/` directory contains the templates used for that path:
 - `caddy/Caddyfile.ip.tmpl` - IP-only template with Caddy internal CA
 
 In domain mode, the generated Caddyfile serves two hostnames:
-- `https://<DOMAIN>` for API, WebSocket, LiveKit signaling, and `/admin/`
+- `https://<DOMAIN>` for API, WebSocket, legacy `/livekit/`, and `/admin/`
+- `https://<RTC_DOMAIN>` for production LiveKit signaling
 - `https://storage.<DOMAIN>` for bundled MinIO presigned upload/download URLs
 
 ### nginx
 
-If you already run nginx, use `docker-compose.prod.yml` for the backend/media services and copy `nginx/hush.conf` to `/etc/nginx/sites-available/`, replace `YOUR_DOMAIN`, and reload. The config proxies API, WebSocket, and LiveKit signaling.
+If you already run nginx, use `docker-compose.prod.yml` for the backend/media services and copy `nginx/hush.conf` to `/etc/nginx/sites-available/`, replace `YOUR_DOMAIN` and `YOUR_RTC_DOMAIN`, obtain certificates for both names, and reload. The config proxies API, WebSocket, and LiveKit signaling.
 
 The admin dashboard is embedded in the Go binary and proxied at `/admin/` by both Caddy and nginx configs. Neither bundles `hush-web`; if you want the browser client on your own domain, deploy `hush-web` separately.
 
