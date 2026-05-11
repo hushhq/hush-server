@@ -179,6 +179,11 @@ type handshakeResponse struct {
 	ScreenShareResolutionCap string          `json:"screen_share_resolution_cap"`
 	MaxAttachmentBytes       int64           `json:"max_attachment_bytes"`
 	Capabilities             map[string]bool `json:"capabilities"`
+	// CurrentMLSCiphersuite is the OpenMLS ciphersuite identifier (IANA codepoint)
+	// the server currently accepts for new KeyPackages, GroupInfo, Commits, and
+	// Welcomes. Clients MUST refuse to upload MLS state created under a different
+	// suite. Today the value is MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519 (77).
+	CurrentMLSCiphersuite int `json:"current_mls_ciphersuite"`
 	Name                     string          `json:"name"`
 	IconURL                  *string         `json:"iconUrl,omitempty"`
 	RegistrationMode         string          `json:"registrationMode"`
@@ -219,6 +224,7 @@ func HandshakeHandler(cache *InstanceCache, voiceEnabled bool) http.HandlerFunc 
 			VoiceKeyRotationHours: voiceKeyRotationHours,
 			TransparencyURL:       transparencyURL,
 			LogPublicKey:          logPublicKey,
+			CurrentMLSCiphersuite: version.CurrentMLSCiphersuite,
 		}
 
 		writeJSON(w, http.StatusOK, resp)

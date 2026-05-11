@@ -14,11 +14,30 @@ import (
 
 	"github.com/hushhq/hush-server/internal/db"
 	"github.com/hushhq/hush-server/internal/models"
+	"github.com/hushhq/hush-server/internal/version"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// injectCiphersuiteForTests stamps the active server ciphersuite onto an
+// MLS write body when the test author omitted it. The boundary validator
+// now requires every MLS write request to carry a declared ciphersuite;
+// existing tests focus on payload semantics, not on the validation rule,
+// so they get the suite filled in automatically. Tests that target the
+// validation rule itself use postMLSRaw / putMLSRaw to bypass this and
+// build the body verbatim.
+func injectCiphersuiteForTests(body interface{}) interface{} {
+	m, ok := body.(map[string]interface{})
+	if !ok {
+		return body
+	}
+	if _, present := m["ciphersuite"]; !present {
+		m["ciphersuite"] = version.CurrentMLSCiphersuite
+	}
+	return m
+}
 
 // mlsRouter builds the MLS chi router with the given store and hub.
 func mlsRouter(store *mockStore, hub MLSBroadcaster) http.Handler {
@@ -26,6 +45,13 @@ func mlsRouter(store *mockStore, hub MLSBroadcaster) http.Handler {
 }
 
 func postMLS(handler http.Handler, path, token string, body interface{}) *httptest.ResponseRecorder {
+	return postMLSRaw(handler, path, token, injectCiphersuiteForTests(body))
+}
+
+// postMLSRaw is identical to postMLS but does NOT inject the current ciphersuite.
+// Use this when the test deliberately wants to exercise the ciphersuite
+// validation rule (missing / mismatched / current).
+func postMLSRaw(handler http.Handler, path, token string, body interface{}) *httptest.ResponseRecorder {
 	var buf []byte
 	if body != nil {
 		var err error
@@ -387,6 +413,12 @@ func TestHandshake_ContainsKeyPackageLowThreshold(t *testing.T) {
 // ---------- Group info helpers ----------
 
 func putMLS(handler http.Handler, path, token string, body interface{}) *httptest.ResponseRecorder {
+	return putMLSRaw(handler, path, token, injectCiphersuiteForTests(body))
+}
+
+// putMLSRaw is identical to putMLS but does NOT inject the current ciphersuite.
+// Use it for explicit ciphersuite-validation tests.
+func putMLSRaw(handler http.Handler, path, token string, body interface{}) *httptest.ResponseRecorder {
 	b, _ := json.Marshal(body)
 	req := httptest.NewRequest(http.MethodPut, path, bytes.NewReader(b))
 	req.Header.Set("Content-Type", "application/json")

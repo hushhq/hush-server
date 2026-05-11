@@ -10,6 +10,7 @@ import (
 
 	"github.com/hushhq/hush-server/internal/db"
 	"github.com/hushhq/hush-server/internal/models"
+	"github.com/hushhq/hush-server/internal/version"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -816,6 +817,7 @@ func TestMessageHandler_HandleMLSCommit_ForbiddenWhenNotMember(t *testing.T) {
 		"commit_bytes": "Y29tbWl0",
 		"group_info":   "Z3JvdXA=",
 		"epoch":        int64(1),
+		"ciphersuite":  version.CurrentMLSCiphersuite,
 	})
 	h.Handle(c, "mls.commit", raw)
 
@@ -823,6 +825,57 @@ func TestMessageHandler_HandleMLSCommit_ForbiddenWhenNotMember(t *testing.T) {
 	var out struct{ Type, Code string }
 	require.NoError(t, json.Unmarshal(msg, &out))
 	assert.Equal(t, "forbidden", out.Code)
+}
+
+func TestMessageHandler_HandleMLSCommit_MissingCiphersuite_SendsBadRequest(t *testing.T) {
+	hub := NewHub()
+	store := &messageStoreMock{
+		isChannelMemberFn: func(context.Context, string, string) (bool, error) { return true, nil },
+	}
+	h := NewMessageHandler(store, hub)
+	c := NewClient(nil, hub, "user1", "device-1", "", h)
+	hub.Register(c)
+	defer func() { hub.Unregister(c); close(c.send) }()
+
+	raw, _ := json.Marshal(map[string]interface{}{
+		"channel_id":   "ch1",
+		"commit_bytes": "Y29tbWl0",
+		"group_info":   "Z3JvdXA=",
+		"epoch":        int64(1),
+	})
+	h.Handle(c, "mls.commit", raw)
+
+	msg := drainUntilType(t, c, "error", time.Second)
+	var out struct{ Type, Code, Message string }
+	require.NoError(t, json.Unmarshal(msg, &out))
+	assert.Equal(t, "bad_request", out.Code)
+	assert.Contains(t, out.Message, "ciphersuite",
+		"error message must mention ciphersuite so clients can self-diagnose")
+}
+
+func TestMessageHandler_HandleMLSCommit_LegacyCiphersuite_SendsMismatch(t *testing.T) {
+	hub := NewHub()
+	store := &messageStoreMock{
+		isChannelMemberFn: func(context.Context, string, string) (bool, error) { return true, nil },
+	}
+	h := NewMessageHandler(store, hub)
+	c := NewClient(nil, hub, "user1", "device-1", "", h)
+	hub.Register(c)
+	defer func() { hub.Unregister(c); close(c.send) }()
+
+	raw, _ := json.Marshal(map[string]interface{}{
+		"channel_id":   "ch1",
+		"commit_bytes": "Y29tbWl0",
+		"group_info":   "Z3JvdXA=",
+		"epoch":        int64(1),
+		"ciphersuite":  1, // legacy MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519
+	})
+	h.Handle(c, "mls.commit", raw)
+
+	msg := drainUntilType(t, c, "error", time.Second)
+	var out struct{ Type, Code, Message string }
+	require.NoError(t, json.Unmarshal(msg, &out))
+	assert.Equal(t, "mls_ciphersuite_mismatch", out.Code)
 }
 
 func TestMessageHandler_HandleMLSCommit_BroadcastsToChannel(t *testing.T) {
@@ -856,6 +909,7 @@ func TestMessageHandler_HandleMLSCommit_BroadcastsToChannel(t *testing.T) {
 		"commit_bytes": "Y29tbWl0",
 		"group_info":   "Z3JvdXA=",
 		"epoch":        int64(2),
+		"ciphersuite":  version.CurrentMLSCiphersuite,
 	})
 	h.Handle(sender, "mls.commit", raw)
 

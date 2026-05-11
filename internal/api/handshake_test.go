@@ -297,6 +297,28 @@ func TestHandshake_ServerCreationPolicy(t *testing.T) {
 	assert.Equal(t, "disabled", body["server_creation_policy"], "server_creation_policy must reflect the cached value")
 }
 
+// TestHandshake_CurrentMLSCiphersuite_XWing verifies the handshake advertises the
+// active OpenMLS ciphersuite so clients can refuse to upload state created under a
+// different suite. Today that value is MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519
+// (codepoint 0x004D = decimal 77). The constant must not drift away from this
+// without an intentional protocol-epoch migration.
+func TestHandshake_CurrentMLSCiphersuite_XWing(t *testing.T) {
+	cache := NewInstanceCache()
+	handler := HandshakeHandler(cache, true)
+	req := httptest.NewRequest(http.MethodGet, "/api/handshake", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	var resp handshakeResponse
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.Equal(t, 77, resp.CurrentMLSCiphersuite,
+		"current_mls_ciphersuite must equal OpenMLS codepoint 0x004D (77) for X-Wing")
+	assert.Equal(t, version.CurrentMLSCiphersuite, resp.CurrentMLSCiphersuite,
+		"current_mls_ciphersuite must match version.CurrentMLSCiphersuite")
+}
+
 // TestHandshake_ServerCreationPolicy_DefaultIsOpen verifies the handshake response
 // includes server_creation_policy="open" when the cache uses its default value.
 func TestHandshake_ServerCreationPolicy_DefaultIsOpen(t *testing.T) {

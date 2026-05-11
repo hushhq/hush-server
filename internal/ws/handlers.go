@@ -9,6 +9,7 @@ import (
 
 	"github.com/hushhq/hush-server/internal/db"
 	"github.com/hushhq/hush-server/internal/models"
+	"github.com/hushhq/hush-server/internal/version"
 )
 
 const (
@@ -454,9 +455,21 @@ func (h *MessageHandler) handleMLSCommit(c *Client, raw []byte) {
 		GroupInfo   string `json:"group_info"`
 		Epoch       int64  `json:"epoch"`
 		GroupType   string `json:"group_type"` // "text" or "voice"; defaults to "text"
+		// Ciphersuite must equal version.CurrentMLSCiphersuite. The server uses
+		// this to fail closed when a legacy client tries to push commit / group
+		// info bytes from an incompatible OpenMLS suite.
+		Ciphersuite int `json:"ciphersuite"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil || payload.ChannelID == "" {
 		sendError(c, "bad_request", "channel_id required")
+		return
+	}
+	if payload.Ciphersuite == 0 {
+		sendError(c, "bad_request", "ciphersuite required")
+		return
+	}
+	if payload.Ciphersuite != version.CurrentMLSCiphersuite {
+		sendError(c, "mls_ciphersuite_mismatch", "ciphersuite does not match server")
 		return
 	}
 	groupType := payload.GroupType

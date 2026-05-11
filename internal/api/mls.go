@@ -62,18 +62,23 @@ type mlsHandler struct {
 }
 
 // uploadCredentialRequest is the body for POST /api/mls/credentials.
+// Ciphersuite must equal version.CurrentMLSCiphersuite; the server refuses to
+// store credentials generated under a different OpenMLS suite.
 type uploadCredentialRequest struct {
-	DeviceID        string `json:"deviceId"`
-	CredentialBytes []byte `json:"credentialBytes"`
+	DeviceID         string `json:"deviceId"`
+	CredentialBytes  []byte `json:"credentialBytes"`
 	SigningPublicKey []byte `json:"signingPublicKey"`
+	Ciphersuite      int    `json:"ciphersuite"`
 }
 
 // uploadKeyPackagesRequest is the body for POST /api/mls/key-packages.
+// Ciphersuite must equal version.CurrentMLSCiphersuite.
 type uploadKeyPackagesRequest struct {
 	DeviceID    string    `json:"deviceId"`
 	KeyPackages [][]byte  `json:"keyPackages"`
 	ExpiresAt   time.Time `json:"expiresAt"`
 	LastResort  bool      `json:"lastResort"`
+	Ciphersuite int       `json:"ciphersuite"`
 }
 
 // uploadCredential handles POST /api/mls/credentials.
@@ -96,6 +101,9 @@ func (h *mlsHandler) uploadCredential(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(req.SigningPublicKey) == 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "signingPublicKey is required"})
+		return
+	}
+	if !validateMLSCiphersuiteHTTP(w, req.Ciphersuite) {
 		return
 	}
 
@@ -152,6 +160,9 @@ func (h *mlsHandler) uploadKeyPackages(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(req.KeyPackages) == 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "keyPackages must not be empty"})
+		return
+	}
+	if !validateMLSCiphersuiteHTTP(w, req.Ciphersuite) {
 		return
 	}
 
@@ -292,16 +303,21 @@ type getGroupInfoResponse struct {
 }
 
 // putGroupInfoRequest is the request body for PUT /api/mls/groups/:channelId/info.
+// Ciphersuite must equal version.CurrentMLSCiphersuite.
 type putGroupInfoRequest struct {
-	GroupInfo string `json:"groupInfo"`
-	Epoch     int64  `json:"epoch"`
+	GroupInfo   string `json:"groupInfo"`
+	Epoch       int64  `json:"epoch"`
+	Ciphersuite int    `json:"ciphersuite"`
 }
 
 // postCommitRequest is the request body for POST /api/mls/groups/:channelId/commit.
+// Ciphersuite must equal version.CurrentMLSCiphersuite and covers both the
+// commit bytes and any optional GroupInfo bytes carried in the same request.
 type postCommitRequest struct {
 	CommitBytes string `json:"commitBytes"`
 	GroupInfo   string `json:"groupInfo"`
 	Epoch       int64  `json:"epoch"`
+	Ciphersuite int    `json:"ciphersuite"`
 }
 
 // resolveGroupType reads the ?type= query parameter and returns "text" or "voice".
@@ -364,6 +380,9 @@ func (h *mlsHandler) putGroupInfo(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "groupInfo is required"})
 		return
 	}
+	if !validateMLSCiphersuiteHTTP(w, req.Ciphersuite) {
+		return
+	}
 
 	groupInfoBytes, err := base64.StdEncoding.DecodeString(req.GroupInfo)
 	if err != nil {
@@ -411,6 +430,9 @@ func (h *mlsHandler) postCommit(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.CommitBytes == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "commitBytes is required"})
+		return
+	}
+	if !validateMLSCiphersuiteHTTP(w, req.Ciphersuite) {
 		return
 	}
 	commitBytes, err := base64.StdEncoding.DecodeString(req.CommitBytes)
@@ -586,9 +608,11 @@ type guildGroupInfoResponse struct {
 }
 
 // guildGroupInfoRequest is the body for PUT /api/mls/guilds/:guildId/group-info.
+// Ciphersuite must equal version.CurrentMLSCiphersuite.
 type guildGroupInfoRequest struct {
-	GroupInfo string `json:"groupInfo"` // base64-encoded blob
-	Epoch     int64  `json:"epoch"`
+	GroupInfo   string `json:"groupInfo"` // base64-encoded blob
+	Epoch       int64  `json:"epoch"`
+	Ciphersuite int    `json:"ciphersuite"`
 }
 
 // getGuildGroupInfo handles GET /api/mls/guilds/:guildId/group-info.
@@ -646,6 +670,9 @@ func (h *mlsHandler) putGuildGroupInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.GroupInfo == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "groupInfo is required"})
+		return
+	}
+	if !validateMLSCiphersuiteHTTP(w, req.Ciphersuite) {
 		return
 	}
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/hushhq/hush-server/internal/version"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -42,7 +43,9 @@ func (p *Pool) GetMLSCredential(ctx context.Context, userID, deviceID string) (c
 }
 
 // InsertMLSKeyPackages stores a batch of opaque KeyPackage blobs for a user+device.
-// All packages in the batch share the same expiry time.
+// All packages in the batch share the same expiry time and are stamped with the
+// active server ciphersuite (version.CurrentMLSCiphersuite); the delivery service
+// will only hand these packages back out to consumers running the same suite.
 func (p *Pool) InsertMLSKeyPackages(ctx context.Context, userID, deviceID string, packages [][]byte, expiresAt time.Time) error {
 	if len(packages) == 0 {
 		return nil
@@ -50,9 +53,9 @@ func (p *Pool) InsertMLSKeyPackages(ctx context.Context, userID, deviceID string
 	batch := &pgx.Batch{}
 	for _, kp := range packages {
 		batch.Queue(`
-			INSERT INTO mls_key_packages (user_id, device_id, key_package_bytes, expires_at)
-			VALUES ($1, $2, $3, $4)`,
-			userID, deviceID, kp, expiresAt,
+			INSERT INTO mls_key_packages (user_id, device_id, key_package_bytes, expires_at, ciphersuite)
+			VALUES ($1, $2, $3, $4, $5)`,
+			userID, deviceID, kp, expiresAt, version.CurrentMLSCiphersuite,
 		)
 	}
 	br := p.SendBatch(ctx, batch)
@@ -66,8 +69,11 @@ func (p *Pool) InsertMLSKeyPackages(ctx context.Context, userID, deviceID string
 }
 
 // InsertMLSLastResortKeyPackage replaces the existing last-resort KeyPackage for a
-// user+device (if any) with the new one. The last-resort package uses a far-future
-// expiry (year 2099) so it is never purged by the cleanup job.
+// user+device under the active ciphersuite with the new one. The last-resort
+// package uses a far-future expiry (year 2099) so it is never purged by the
+// cleanup job. Last-resort packages from previous ciphersuites are intentionally
+// left in place: they are invisible to consume/count under the current suite
+// and serve only as audit history until the operator chooses to purge them.
 func (p *Pool) InsertMLSLastResortKeyPackage(ctx context.Context, userID, deviceID string, keyPackageBytes []byte) error {
 	tx, err := p.Begin(ctx)
 	if err != nil {
@@ -75,11 +81,15 @@ func (p *Pool) InsertMLSLastResortKeyPackage(ctx context.Context, userID, device
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	// Remove any previous last-resort package for this device.
+	// Remove any previous last-resort package for this device at the current
+	// suite. Legacy-suite last-resort packages are not touched here.
 	_, err = tx.Exec(ctx, `
 		DELETE FROM mls_key_packages
-		WHERE user_id = $1 AND device_id = $2 AND last_resort = true`,
-		userID, deviceID,
+		WHERE user_id     = $1
+		  AND device_id   = $2
+		  AND last_resort = true
+		  AND ciphersuite = $3`,
+		userID, deviceID, version.CurrentMLSCiphersuite,
 	)
 	if err != nil {
 		return err
@@ -88,9 +98,9 @@ func (p *Pool) InsertMLSLastResortKeyPackage(ctx context.Context, userID, device
 	// Far-future expiry: last-resort packages are never auto-deleted.
 	farFuture := time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)
 	_, err = tx.Exec(ctx, `
-		INSERT INTO mls_key_packages (user_id, device_id, key_package_bytes, last_resort, expires_at)
-		VALUES ($1, $2, $3, true, $4)`,
-		userID, deviceID, keyPackageBytes, farFuture,
+		INSERT INTO mls_key_packages (user_id, device_id, key_package_bytes, last_resort, expires_at, ciphersuite)
+		VALUES ($1, $2, $3, true, $4, $5)`,
+		userID, deviceID, keyPackageBytes, farFuture, version.CurrentMLSCiphersuite,
 	)
 	if err != nil {
 		return err
@@ -100,9 +110,12 @@ func (p *Pool) InsertMLSLastResortKeyPackage(ctx context.Context, userID, device
 }
 
 // ConsumeMLSKeyPackage atomically marks one unused, non-expired, non-last-resort
-// KeyPackage as consumed and returns its bytes. If no regular packages remain, it
-// falls back to the last-resort package (without marking it consumed - it is reusable).
-// Returns (nil, nil) when no package is available at all.
+// KeyPackage as consumed and returns its bytes. Only packages stamped with the
+// current server ciphersuite are eligible; legacy-suite rows are invisible to
+// this query so a client running the current protocol never receives state from
+// an incompatible suite. If no regular packages remain, the call falls back to
+// the last-resort package for the same suite (without marking it consumed - it
+// is reusable). Returns (nil, nil) when no eligible package is available.
 func (p *Pool) ConsumeMLSKeyPackage(ctx context.Context, userID, deviceID string) ([]byte, error) {
 	// Attempt to atomically consume a regular package.
 	var kpBytes []byte
@@ -111,8 +124,9 @@ func (p *Pool) ConsumeMLSKeyPackage(ctx context.Context, userID, deviceID string
 		SET consumed_at = now()
 		WHERE id = (
 			SELECT id FROM mls_key_packages
-			WHERE user_id  = $1
-			  AND device_id = $2
+			WHERE user_id    = $1
+			  AND device_id  = $2
+			  AND ciphersuite = $3
 			  AND consumed_at IS NULL
 			  AND last_resort = false
 			  AND expires_at > now()
@@ -120,7 +134,7 @@ func (p *Pool) ConsumeMLSKeyPackage(ctx context.Context, userID, deviceID string
 			FOR UPDATE SKIP LOCKED
 		)
 		RETURNING key_package_bytes`,
-		userID, deviceID,
+		userID, deviceID, version.CurrentMLSCiphersuite,
 	).Scan(&kpBytes)
 	if err == nil {
 		return kpBytes, nil
@@ -132,12 +146,13 @@ func (p *Pool) ConsumeMLSKeyPackage(ctx context.Context, userID, deviceID string
 	// No regular package available - fall back to last-resort (read-only, reusable).
 	err = p.QueryRow(ctx, `
 		SELECT key_package_bytes FROM mls_key_packages
-		WHERE user_id  = $1
-		  AND device_id = $2
+		WHERE user_id     = $1
+		  AND device_id   = $2
+		  AND ciphersuite = $3
 		  AND last_resort = true
 		  AND consumed_at IS NULL
 		LIMIT 1`,
-		userID, deviceID,
+		userID, deviceID, version.CurrentMLSCiphersuite,
 	).Scan(&kpBytes)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -146,18 +161,21 @@ func (p *Pool) ConsumeMLSKeyPackage(ctx context.Context, userID, deviceID string
 }
 
 // CountUnusedMLSKeyPackages returns the number of unconsumed, non-expired,
-// non-last-resort KeyPackages for a user+device. This count drives the
-// key_packages.low WS event and client replenishment logic.
+// non-last-resort KeyPackages stamped with the current server ciphersuite for
+// a user+device. Legacy-suite rows are excluded so the low-watermark event and
+// client replenishment logic only react to packages that are actually usable
+// under the active protocol epoch.
 func (p *Pool) CountUnusedMLSKeyPackages(ctx context.Context, userID, deviceID string) (int, error) {
 	var n int
 	err := p.QueryRow(ctx, `
 		SELECT COUNT(*) FROM mls_key_packages
-		WHERE user_id   = $1
-		  AND device_id = $2
+		WHERE user_id     = $1
+		  AND device_id   = $2
+		  AND ciphersuite = $3
 		  AND consumed_at IS NULL
 		  AND last_resort = false
 		  AND expires_at > now()`,
-		userID, deviceID,
+		userID, deviceID, version.CurrentMLSCiphersuite,
 	).Scan(&n)
 	return n, err
 }
