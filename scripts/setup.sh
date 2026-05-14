@@ -265,6 +265,9 @@ TRANSPARENCY_LOG_PRIVATE_KEY="$(_existing_env TRANSPARENCY_LOG_PRIVATE_KEY)"
 CORS_ORIGIN="$(_existing_env CORS_ORIGIN)"
 [ -z "$CORS_ORIGIN" ] && CORS_ORIGIN="https://app.gethush.live"
 
+WS_ALLOWED_ORIGINS="$(_existing_env WS_ALLOWED_ORIGINS)"
+[ -z "$WS_ALLOWED_ORIGINS" ] && WS_ALLOWED_ORIGINS="app://localhost"
+
 # Self-host MinIO credentials and the matching STORAGE_S3_* values that
 # point hush-api at it. Domain mode wires MinIO via a `storage.<domain>`
 # Caddy subdomain (DNS A record required); IP mode leaves the bulk
@@ -365,6 +368,8 @@ PRODUCTION=true
 # Browser client origin allowed to open WebSocket/API connections to this instance.
 # Default points at the official hosted web client. Change this if you self-host hush-web.
 CORS_ORIGIN=$CORS_ORIGIN
+# Extra WebSocket origins allowed for trusted desktop shells.
+WS_ALLOWED_ORIGINS=$WS_ALLOWED_ORIGINS
 
 # --- PostgreSQL -----------------------------------------------------------
 POSTGRES_USER=hush
