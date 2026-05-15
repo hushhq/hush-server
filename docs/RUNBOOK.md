@@ -339,7 +339,11 @@ S3-compatible object store. Two modes are supported:
 
 `STORAGE_BACKEND=postgres_bytea` keeps chunks in Postgres BYTEA
 without any object storage. Acceptable for tiny self-host installs;
-hits the same proxy body-size limits as the prior in-API path.
+hits the same proxy body-size limits as the prior in-API path. For
+chat attachments specifically, this routes the upload/download through
+the authenticated in-API endpoints `PUT/GET /api/attachments/{id}/blob`
+— see `docs/ATTACHMENTS.md` for the operator-facing tradeoff (blob
+traffic flows through the API process and Postgres in this mode).
 
 ### 6.1 Self-host MinIO (domain mode, recommended)
 
@@ -457,8 +461,9 @@ Provision the bucket out-of-band:
 
 The bundled MinIO is not wired in IP mode because there is no
 browser-trusted hostname for `storage.<IP>`. `setup.sh --ip` falls
-back to `STORAGE_BACKEND=postgres_bytea`. Operators who need the
-full bulk plane in IP mode should:
+back to `STORAGE_BACKEND=postgres_bytea`, which is a supported
+chat-attachment mode (the in-API blob fallback) for small or simple
+self-host setups. Operators who expect heavier media traffic should:
 
 - point `STORAGE_S3_*` at an external S3 bucket (above), or
 - separately provision DNS + a Caddy block for a hostname they own

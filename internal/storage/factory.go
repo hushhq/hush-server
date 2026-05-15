@@ -168,3 +168,30 @@ func NewBackend(cfg Config, postgresStore ChunkBlobStore) (Backend, error) {
 		return nil, fmt.Errorf("storage: unknown backend kind %q", cfg.Kind)
 	}
 }
+
+// NewAttachmentBackendFactory builds the production attachment backend
+// factory wired to env-derived config. Both supported backends — S3 and
+// postgres_bytea — are valid: the API layer routes presigned URLs for S3
+// and an in-API blob fallback (PUT/GET /api/attachments/{id}/blob) for
+// postgres_bytea. Lazy on purpose so a transient backend outage does not
+// require a server restart.
+//
+// Returns a plain func type (not a named alias) so call sites can pass
+// the factory directly to `api.AttachmentBackendFactory` parameters
+// without an explicit cross-package conversion.
+func NewAttachmentBackendFactory(pool ChunkBlobStore) func() (Backend, error) {
+	return newAttachmentBackendFactory(pool, LoadAttachmentConfig)
+}
+
+// newAttachmentBackendFactory is the testable seam: callers inject a
+// config loader so unit tests can exercise both kinds without touching
+// the process environment.
+func newAttachmentBackendFactory(pool ChunkBlobStore, load func() (Config, error)) func() (Backend, error) {
+	return func() (Backend, error) {
+		cfg, err := load()
+		if err != nil {
+			return nil, err
+		}
+		return NewBackend(cfg, pool)
+	}
+}

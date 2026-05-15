@@ -300,21 +300,12 @@ func main() {
 		// a no-op when LiveKit is not configured.
 		roomService := livekit.NewTwirpRoomService(cfg.LiveKitURL, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret)
 
-		// Storage backend for attachment presign URLs. Lazy-built per
-		// request via the closure so a transient backend outage does not
-		// require a server restart. Returns nil when the attachment
-		// storage config resolves to postgres_bytea — attachments require
-		// an S3-compatible backend to produce native presigned URLs.
-		attachmentBackend := func() (storage.Backend, error) {
-			cfg, err := storage.LoadAttachmentConfig()
-			if err != nil {
-				return nil, err
-			}
-			if cfg.Kind == storage.BackendPostgresBytea {
-				return nil, fmt.Errorf("attachments require STORAGE_BACKEND=s3 (current: %s)", cfg.Kind)
-			}
-			return storage.NewBackend(cfg, pool)
-		}
+		// Storage backend for attachment presign URLs. Both supported
+		// kinds are valid: S3-compatible storage returns native presigned
+		// URLs, postgres_bytea routes through the authenticated in-API
+		// `PUT/GET /api/attachments/{id}/blob` fallback. See
+		// docs/ATTACHMENTS.md for the operator-facing tradeoff.
+		attachmentBackend := storage.NewAttachmentBackendFactory(pool)
 
 		go func() {
 			ticker := time.NewTicker(6 * time.Hour)

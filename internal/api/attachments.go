@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -81,10 +82,12 @@ func ChannelAttachmentRoutes(store db.Store, backendFactory AttachmentBackendFac
 	return r
 }
 
-// AttachmentRoutes mounts the global download/delete endpoints:
+// AttachmentRoutes mounts the global download/delete + in-API blob endpoints:
 //
 //	GET    /{id}/download
 //	DELETE /{id}
+//	PUT    /{id}/blob      (in-API upload fallback for postgres_bytea)
+//	GET    /{id}/blob      (in-API download fallback for postgres_bytea)
 //
 // Mounted at /api/attachments. Auth applied here; channel-membership
 // for download is checked per-row inside the handler.
@@ -94,7 +97,24 @@ func AttachmentRoutes(store db.Store, backendFactory AttachmentBackendFactory, j
 	h := &attachmentHandler{store: store, backendFactory: backendFactory}
 	r.Get("/{id}/download", h.download)
 	r.Delete("/{id}", h.delete)
+	r.Put("/{id}/blob", h.putBlob)
+	r.Get("/{id}/blob", h.getBlob)
 	return r
+}
+
+// MaxInAPIAttachmentBytes caps the body size accepted by the in-API
+// upload fallback. Mirrors `MaxAttachmentBytes` so the fallback path
+// cannot exceed the policy enforced at presign time. Kept as a
+// separate constant so a future operator override can ratchet down
+// the in-API path without touching the presign cap.
+const MaxInAPIAttachmentBytes = MaxAttachmentBytes
+
+// inAPIAttachmentURL returns the path the client should PUT/GET when
+// the resolved backend has no native presigning (postgres_bytea). The
+// path lives under the same router AttachmentRoutes mounts, which
+// already requires auth and verifies channel membership per row.
+func inAPIAttachmentURL(attachmentID string) string {
+	return "/api/attachments/" + attachmentID + "/blob"
 }
 
 type attachmentHandler struct {
@@ -230,6 +250,25 @@ func (h *attachmentHandler) presign(w http.ResponseWriter, r *http.Request) {
 		_ = finalKey
 	}
 
+	// postgres_bytea has no real presigning. The interface contract is
+	// satisfied with a placeholder URL, but the placeholder defaults to
+	// the device-link archive chunk route, which is the wrong handler
+	// for attachment blobs and was the root cause of "attachment upload
+	// fails on hosted dev instances". Override with the attachment-
+	// specific in-API URL whenever the resolved backend cannot presign
+	// natively. The client recognises a relative `/api/...` URL, prefixes
+	// it with the instance origin, and attaches the bearer token.
+	if backend.Kind() == storage.BackendPostgresBytea {
+		writeJSON(w, http.StatusOK, presignResponse{
+			ID:        row.ID,
+			UploadURL: inAPIAttachmentURL(row.ID),
+			Method:    http.MethodPut,
+			Headers:   nil,
+			ExpiresAt: time.Now().Add(presignTTL),
+		})
+		return
+	}
+
 	url, err := backend.PresignPut(r.Context(), row.StorageKey, presignTTL)
 	if err != nil {
 		// Best-effort cleanup: tombstone the row so the orphan is not
@@ -298,6 +337,16 @@ func (h *attachmentHandler) download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Same fallback rationale as `presign`: postgres_bytea cannot hand out
+	// a real CDN URL, so route the client back through the in-API blob GET.
+	if backend.Kind() == storage.BackendPostgresBytea {
+		writeJSON(w, http.StatusOK, downloadResponse{
+			URL:       inAPIAttachmentURL(row.ID),
+			ExpiresAt: time.Now().Add(presignTTL),
+		})
+		return
+	}
+
 	url, err := backend.PresignGet(r.Context(), row.StorageKey, presignTTL)
 	if err != nil {
 		slog.Error("attachment download: backend.PresignGet", "err", err)
@@ -342,6 +391,153 @@ func (h *attachmentHandler) delete(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// putBlob is the in-API fallback PUT for attachment blobs when the resolved
+// storage backend has no native presigning (postgres_bytea). The request body
+// is the AES-GCM ciphertext produced by `useAttachmentUploader` on the client;
+// the server only writes it through to the backend after verifying:
+//
+//   - the caller is the uploader who created the row at presign time;
+//   - the row exists and is not soft-deleted;
+//   - the caller is still a member of the owning channel;
+//   - the declared body length matches the size persisted with the row;
+//   - the body stays within MaxInAPIAttachmentBytes regardless of declaration.
+//
+// Failures surface as JSON errors so the renderer can distinguish presign
+// from PUT failures and show actionable diagnostics.
+func (h *attachmentHandler) putBlob(w http.ResponseWriter, r *http.Request) {
+	userID := userIDFromContext(r.Context())
+	if userID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing attachment id"})
+		return
+	}
+	row, err := h.store.GetAttachmentByID(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "attachment not found"})
+			return
+		}
+		slog.Error("attachment put-blob: GetAttachmentByID", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "lookup failed"})
+		return
+	}
+	if row.DeletedAt != nil {
+		writeJSON(w, http.StatusGone, map[string]string{"error": "attachment no longer available"})
+		return
+	}
+	if row.OwnerID != userID {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "not the uploader"})
+		return
+	}
+	ok, err := h.store.IsChannelMember(r.Context(), row.ChannelID, userID)
+	if err != nil {
+		slog.Error("attachment put-blob: IsChannelMember", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "membership check failed"})
+		return
+	}
+	if !ok {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "not a channel member"})
+		return
+	}
+	backend, err := h.resolveBackend()
+	if err != nil {
+		slog.Error("attachment put-blob: backend unavailable", "err", err)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "attachment storage is not configured on this instance",
+		})
+		return
+	}
+	if row.Size <= 0 || row.Size > MaxInAPIAttachmentBytes {
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{
+			"error": "attachment size out of range",
+		})
+		return
+	}
+	// `MaxBytesReader` enforces the cap server-side regardless of the
+	// declared Content-Length so a misbehaving client cannot exhaust
+	// memory by streaming past the recorded row size.
+	body := http.MaxBytesReader(w, r.Body, row.Size)
+	defer body.Close()
+	if _, err := backend.Put(r.Context(), row.StorageKey, body, row.Size); err != nil {
+		slog.Error("attachment put-blob: backend.Put", "id", row.ID, "err", err)
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "blob write failed"})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// getBlob streams the attachment ciphertext back to a member of the owning
+// channel. The body is the opaque encrypted blob — decryption happens in the
+// renderer using the AES-GCM key carried inside the MLS message envelope.
+func (h *attachmentHandler) getBlob(w http.ResponseWriter, r *http.Request) {
+	userID := userIDFromContext(r.Context())
+	if userID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing attachment id"})
+		return
+	}
+	row, err := h.store.GetAttachmentByID(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "attachment not found"})
+			return
+		}
+		slog.Error("attachment get-blob: GetAttachmentByID", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "lookup failed"})
+		return
+	}
+	if row.DeletedAt != nil {
+		writeJSON(w, http.StatusGone, map[string]string{"error": "attachment no longer available"})
+		return
+	}
+	ok, err := h.store.IsChannelMember(r.Context(), row.ChannelID, userID)
+	if err != nil {
+		slog.Error("attachment get-blob: IsChannelMember", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "membership check failed"})
+		return
+	}
+	if !ok {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "not a channel member"})
+		return
+	}
+	backend, err := h.resolveBackend()
+	if err != nil {
+		slog.Error("attachment get-blob: backend unavailable", "err", err)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "attachment storage is not configured on this instance",
+		})
+		return
+	}
+	reader, size, err := backend.Get(r.Context(), row.StorageKey)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "attachment bytes missing"})
+			return
+		}
+		slog.Error("attachment get-blob: backend.Get", "id", row.ID, "err", err)
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "blob read failed"})
+		return
+	}
+	defer reader.Close()
+	w.Header().Set("Content-Type", "application/octet-stream")
+	if size > 0 {
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", size))
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	if _, err := io.Copy(w, reader); err != nil {
+		slog.Warn("attachment get-blob: io.Copy", "id", row.ID, "err", err)
+	}
 }
 
 func (h *attachmentHandler) resolveBackend() (storage.Backend, error) {

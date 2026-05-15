@@ -1,6 +1,17 @@
 # Attachment Security Model
 
-This document describes how Hush handles encrypted chat attachments when the server uses an S3-compatible attachment backend such as MinIO, S3, or R2.
+This document describes how Hush handles encrypted chat attachments. Two storage modes are supported and the security model is identical between them — the server never sees plaintext or attachment keys in either mode.
+
+## Storage Modes
+
+| Mode | Transport | When to use |
+|-|-|-|
+| S3-compatible (S3, R2, MinIO) | Short-lived presigned PUT/GET URLs hit object storage directly from the browser. | Production and media-heavy deployments. Scales independently from the API. |
+| `postgres_bytea` (in-API fallback) | Authenticated `PUT /api/attachments/{id}/blob` upload and `GET /api/attachments/{id}/blob` download go through the API process and Postgres. | Small or simple self-host setups that prefer not to operate object storage. |
+
+The MIME allowlist, the AES-GCM client-side encryption, and the per-channel membership checks are identical in both modes. The only differences are where the ciphertext is stored and how the client reaches it.
+
+The in-API fallback moves blob traffic through the API process and the database, so S3-compatible object storage is still recommended for production and media-heavy deployments.
 
 ## Simple Model
 
@@ -61,8 +72,12 @@ The visible MIME type is advisory. The server cannot verify plaintext file type 
 
 5. The server verifies authentication, channel membership, size, and content type.
 6. The server creates an `attachments` row with channel id, owner id, storage key, ciphertext size, content type, creation time, and optional deletion time.
-7. The server returns a short-lived presigned upload URL.
-8. The client uploads ciphertext bytes directly to object storage.
+7. The server returns a short-lived upload URL.
+
+   - When the resolved backend is S3-compatible: an absolute presigned `PUT` URL on the object-storage origin.
+   - When the resolved backend is `postgres_bytea`: a relative URL `/api/attachments/{id}/blob`. The client resolves it against the instance origin and attaches `Authorization: Bearer <jwt>` to the PUT request. The in-API handler then verifies the caller is the uploader recorded at presign time, re-checks channel membership, enforces the size cap, and forwards the ciphertext through the storage backend.
+
+8. The client uploads ciphertext bytes directly to the URL returned above.
 9. The client sends a normal MLS application message whose plaintext envelope contains the `AttachmentRef`.
 
 If presign generation fails after the database row is created, the server soft-deletes the row as best-effort cleanup.
@@ -79,8 +94,12 @@ If presign generation fails after the database row is created, the server soft-d
    ```
 
 5. The server checks that the requester is still a member of the attachment's channel.
-6. The server returns a short-lived presigned download URL.
-7. The client downloads ciphertext from object storage.
+6. The server returns a short-lived download URL.
+
+   - When the resolved backend is S3-compatible: an absolute presigned `GET` URL on the object-storage origin.
+   - When the resolved backend is `postgres_bytea`: a relative URL `/api/attachments/{id}/blob`. The client resolves it against the instance origin and attaches `Authorization: Bearer <jwt>` to the GET request. The in-API handler re-checks channel membership and streams the ciphertext from the storage backend.
+
+7. The client downloads ciphertext from the URL returned above.
 8. The client decrypts locally with `AttachmentRef.key` and `AttachmentRef.iv`.
 9. If ciphertext, key, or IV do not match, AES-GCM verification fails and the UI must show a failed attachment state.
 
@@ -165,7 +184,7 @@ For hosted or domain-mode self-host deployments:
 - use separate buckets for link-device archives and chat attachments when possible
 - treat object-storage logs as metadata-sensitive because paths, sizes, and timing can reveal behavior
 
-Chat attachments require an S3-compatible storage backend. The `postgres_bytea` fallback is used by the link-device archive path for small self-host setups; it is not the chat attachment storage plane.
+Chat attachments support either an S3-compatible storage backend (the recommended production posture) or the `postgres_bytea` in-API fallback (suitable for small or simple self-host setups that do not want to operate object storage). The backend is selected via `ATTACHMENT_STORAGE_BACKEND` with a fallback to `STORAGE_BACKEND` — see the env table below. The in-API fallback moves blob traffic through the API process and Postgres, so S3-compatible storage remains the recommended choice for media-heavy deployments.
 
 Relevant environment variables:
 
