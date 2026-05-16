@@ -848,3 +848,210 @@ func TestGuestAuth_ExpiryWithinExpectedRange(t *testing.T) {
 	assert.True(t, resp.ExpiresAt.After(minExpiry), "expiresAt too early")
 	assert.True(t, resp.ExpiresAt.Before(maxExpiry), "expiresAt too late")
 }
+
+// ----- audience-bound challenge (v2) handler tests -----
+
+// signChallengeV2 signs the canonical v2 payload for (nonce, audience) and
+// returns the base64-encoded signature, mirroring what an upgraded client
+// produces in the BIP39 challenge flow.
+func signChallengeV2(nonce, audience string, priv ed25519.PrivateKey) string {
+	sig := ed25519.Sign(priv, internalauth.BuildChallengeV2Payload(nonce, audience))
+	return base64.StdEncoding.EncodeToString(sig)
+}
+
+// postJSONWithHost is postJSON, but lets a test pin the request Host so
+// the verify handler's requestOrigin() resolves to a deterministic
+// canonical audience.
+func postJSONWithHost(handler http.Handler, path, host string, body interface{}) *httptest.ResponseRecorder {
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	req.Host = host
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	return rr
+}
+
+func newVerifyV2Router(t *testing.T) (http.Handler, string, ed25519.PrivateKey, *inMemoryNonceStore) {
+	t.Helper()
+	pubBase64, priv := generateEd25519KeyPair(t)
+	user := newTestUser("alice")
+	nonceStore := newInMemoryNonceStore()
+	store := &mockStore{
+		insertAuthNonceFn:  nonceStore.insertFn,
+		consumeAuthNonceFn: nonceStore.consumeFn,
+		getUserByPublicKeyFn: func(_ context.Context, _ []byte) (*models.User, error) {
+			return user, nil
+		},
+	}
+	return newTestRouter(store), pubBase64, priv, nonceStore
+}
+
+func TestVerifyV2_AudienceMatchesRequestOrigin_Returns200(t *testing.T) {
+	router, pubBase64, priv, _ := newVerifyV2Router(t)
+	const host = "chat.example.com"
+	audience := "http://" + host // httptest requests are non-TLS; no X-Forwarded-Proto here
+
+	rr := postJSONWithHost(router, "/challenge", host, models.ChallengeRequest{PublicKey: pubBase64})
+	require.Equal(t, http.StatusOK, rr.Code)
+	var chResp map[string]string
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&chResp))
+	nonce := chResp["nonce"]
+
+	rr = postJSONWithHost(router, "/verify", host, models.VerifyRequest{
+		PublicKey:        pubBase64,
+		Nonce:            nonce,
+		Signature:        signChallengeV2(nonce, audience, priv),
+		ChallengeVersion: 2,
+		Audience:         audience,
+	})
+
+	assert.Equal(t, http.StatusOK, rr.Code, "body=%s", rr.Body.String())
+}
+
+func TestVerifyV2_AudienceForDifferentOrigin_Returns401(t *testing.T) {
+	router, pubBase64, priv, _ := newVerifyV2Router(t)
+	const host = "home.example.com"
+
+	rr := postJSONWithHost(router, "/challenge", host, models.ChallengeRequest{PublicKey: pubBase64})
+	require.Equal(t, http.StatusOK, rr.Code)
+	var chResp map[string]string
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&chResp))
+	nonce := chResp["nonce"]
+
+	// Client was tricked into signing for evil.example, but submits the
+	// signature back to home.example. This is the cross-instance replay
+	// the v2 protocol exists to prevent.
+	evilAudience := "https://evil.example"
+	rr = postJSONWithHost(router, "/verify", host, models.VerifyRequest{
+		PublicKey:        pubBase64,
+		Nonce:            nonce,
+		Signature:        signChallengeV2(nonce, evilAudience, priv),
+		ChallengeVersion: 2,
+		Audience:         evilAudience,
+	})
+
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+}
+
+func TestVerifyV2_MissingAudience_Returns401(t *testing.T) {
+	router, pubBase64, priv, _ := newVerifyV2Router(t)
+	const host = "home.example.com"
+	audience := "http://" + host
+
+	rr := postJSONWithHost(router, "/challenge", host, models.ChallengeRequest{PublicKey: pubBase64})
+	require.Equal(t, http.StatusOK, rr.Code)
+	var chResp map[string]string
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&chResp))
+	nonce := chResp["nonce"]
+
+	// challengeVersion=2 but no audience declared — caller never proved
+	// what origin they intended to authenticate to. Must fail closed.
+	rr = postJSONWithHost(router, "/verify", host, models.VerifyRequest{
+		PublicKey:        pubBase64,
+		Nonce:            nonce,
+		Signature:        signChallengeV2(nonce, audience, priv),
+		ChallengeVersion: 2,
+		Audience:         "",
+	})
+
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+}
+
+func TestVerifyV2_DoesNotFallBackToRawNonceVerify(t *testing.T) {
+	router, pubBase64, priv, _ := newVerifyV2Router(t)
+	const host = "home.example.com"
+	audience := "http://" + host
+
+	rr := postJSONWithHost(router, "/challenge", host, models.ChallengeRequest{PublicKey: pubBase64})
+	require.Equal(t, http.StatusOK, rr.Code)
+	var chResp map[string]string
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&chResp))
+	nonce := chResp["nonce"]
+
+	// Attacker submits a v1 (raw-nonce) signature but also flags the
+	// request as v2 by including audience+challengeVersion. The server
+	// MUST treat this strictly as v2 and reject, never relaxing into v1.
+	rr = postJSONWithHost(router, "/verify", host, models.VerifyRequest{
+		PublicKey:        pubBase64,
+		Nonce:            nonce,
+		Signature:        signNonce(nonce, priv),
+		ChallengeVersion: 2,
+		Audience:         audience,
+	})
+
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+}
+
+func TestVerify_UnknownChallengeVersion_Returns401(t *testing.T) {
+	router, pubBase64, priv, _ := newVerifyV2Router(t)
+	const host = "home.example.com"
+
+	rr := postJSONWithHost(router, "/challenge", host, models.ChallengeRequest{PublicKey: pubBase64})
+	require.Equal(t, http.StatusOK, rr.Code)
+	var chResp map[string]string
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&chResp))
+	nonce := chResp["nonce"]
+
+	// Unknown explicit versions must fail closed instead of falling back
+	// to the legacy raw-nonce verifier.
+	rr = postJSONWithHost(router, "/verify", host, models.VerifyRequest{
+		PublicKey:        pubBase64,
+		Nonce:            nonce,
+		Signature:        signNonce(nonce, priv),
+		ChallengeVersion: 99,
+	})
+
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+}
+
+func TestVerifyV2_RespectsXForwardedProto(t *testing.T) {
+	router, pubBase64, priv, _ := newVerifyV2Router(t)
+	const host = "chat.example.com"
+	audience := "https://" + host
+
+	// Issue a nonce against the same host so the in-memory store keys match.
+	rr := postJSONWithHost(router, "/challenge", host, models.ChallengeRequest{PublicKey: pubBase64})
+	require.Equal(t, http.StatusOK, rr.Code)
+	var chResp map[string]string
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&chResp))
+	nonce := chResp["nonce"]
+
+	b, _ := json.Marshal(models.VerifyRequest{
+		PublicKey:        pubBase64,
+		Nonce:            nonce,
+		Signature:        signChallengeV2(nonce, audience, priv),
+		ChallengeVersion: 2,
+		Audience:         audience,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/verify", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Forwarded-Proto", "https")
+	req.Host = host
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+}
+
+func TestVerifyV1_LegacyClient_StillSucceeds(t *testing.T) {
+	// Backward-compat: a request that omits both challengeVersion and
+	// audience is a pre-v2 client and continues to verify against the
+	// raw nonce. This branch will be retired once all clients update.
+	router, pubBase64, priv, _ := newVerifyV2Router(t)
+	const host = "chat.example.com"
+
+	rr := postJSONWithHost(router, "/challenge", host, models.ChallengeRequest{PublicKey: pubBase64})
+	require.Equal(t, http.StatusOK, rr.Code)
+	var chResp map[string]string
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&chResp))
+	nonce := chResp["nonce"]
+
+	rr = postJSONWithHost(router, "/verify", host, models.VerifyRequest{
+		PublicKey: pubBase64,
+		Nonce:     nonce,
+		Signature: signNonce(nonce, priv),
+	})
+
+	assert.Equal(t, http.StatusOK, rr.Code, "body=%s", rr.Body.String())
+}

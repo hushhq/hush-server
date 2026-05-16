@@ -96,3 +96,92 @@ func TestVerifySignature_BadNonceHex(t *testing.T) {
 	err = VerifySignature(pub, "not-valid-hex!!", sig)
 	require.Error(t, err)
 }
+
+// ----- v2 (audience-bound) signature payload -----
+
+func TestBuildChallengeV2Payload_StableFormat(t *testing.T) {
+	got := string(BuildChallengeV2Payload("deadbeef", "https://home.example"))
+	want := "HUSH-AUTH-CHALLENGE-V2\naudience=https://home.example\nnonce=deadbeef"
+	require.Equal(t, want, got, "v2 payload format must stay byte-identical to its spec")
+}
+
+func TestBuildChallengeV2Payload_DifferentAudience_DifferentBytes(t *testing.T) {
+	a := BuildChallengeV2Payload("deadbeef", "https://home.example")
+	b := BuildChallengeV2Payload("deadbeef", "https://evil.example")
+	require.NotEqual(t, a, b)
+}
+
+func TestVerifyChallengeV2Signature_Valid(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	nonce, err := GenerateNonce()
+	require.NoError(t, err)
+	audience := "https://home.example"
+
+	sig := ed25519.Sign(priv, BuildChallengeV2Payload(nonce, audience))
+
+	require.NoError(t, VerifyChallengeV2Signature(pub, nonce, audience, sig))
+}
+
+func TestVerifyChallengeV2Signature_WrongAudience_Rejects(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	nonce, err := GenerateNonce()
+	require.NoError(t, err)
+
+	// Signed for the evil instance, but the (legitimate) home instance
+	// will try to verify under its own audience. Replay must fail.
+	sig := ed25519.Sign(priv, BuildChallengeV2Payload(nonce, "https://evil.example"))
+	require.Error(t, VerifyChallengeV2Signature(pub, nonce, "https://home.example", sig))
+}
+
+func TestVerifyChallengeV2Signature_EmptyAudience_Rejects(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	nonce, err := GenerateNonce()
+	require.NoError(t, err)
+
+	sig := ed25519.Sign(priv, BuildChallengeV2Payload(nonce, ""))
+	require.Error(t, VerifyChallengeV2Signature(pub, nonce, "", sig))
+}
+
+func TestVerifyChallengeV2Signature_RawNonceSig_Rejects(t *testing.T) {
+	// A v1 (raw-nonce) signature must never satisfy the v2 verifier,
+	// even if the attacker also supplies a plausible audience string.
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	nonce, err := GenerateNonce()
+	require.NoError(t, err)
+	nonceBytes, err := hex.DecodeString(nonce)
+	require.NoError(t, err)
+
+	rawSig := ed25519.Sign(priv, nonceBytes)
+	require.Error(t, VerifyChallengeV2Signature(pub, nonce, "https://home.example", rawSig))
+}
+
+// ----- audience normalization -----
+
+func TestNormalizeAudience_Cases(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"https://Home.Example.com", "https://home.example.com"},
+		{"https://home.example.com/", "https://home.example.com"},
+		{"https://home.example.com/path/ignored?q=1#frag", "https://home.example.com"},
+		{"http://localhost:8080", "http://localhost:8080"},
+		{"https://home.example.com:443", "https://home.example.com"},
+		{"http://home.example.com:80", "http://home.example.com"},
+		{"  https://home.example.com  ", "https://home.example.com"},
+		{"", ""},
+		{"app://localhost", ""}, // non-http(s) schemes have no API origin meaning
+		{"not-a-url", ""},
+		{"https://", ""},
+	}
+	for _, tc := range cases {
+		require.Equal(t, tc.want, NormalizeAudience(tc.in), "input=%q", tc.in)
+	}
+}
