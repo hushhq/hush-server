@@ -81,11 +81,28 @@ type ChallengeRequest struct {
 
 // VerifyRequest is the body for POST /api/auth/verify.
 // The client signs the nonce received from /challenge and submits it here.
+//
+// Two challenge protocol versions are supported:
+//
+//   - v1 (legacy): ChallengeVersion is zero AND Audience is empty.
+//     Signature is an Ed25519 signature over the raw nonce bytes. This
+//     form is vulnerable to a cross-instance signing oracle: an attacker
+//     server can relay a victim's home-instance nonce to the victim and
+//     receive a signature it can redeem on the home instance. Retained
+//     only for old clients that have not yet upgraded.
+//
+//   - v2: ChallengeVersion == 2 AND/OR Audience is non-empty. Signature
+//     is an Ed25519 signature over auth.BuildChallengeV2Payload(Nonce,
+//     Audience). The server MUST refuse v2 requests whose declared
+//     Audience does not match the server's canonical public API origin,
+//     and MUST NOT fall back to v1 verification for v2 requests.
 type VerifyRequest struct {
-	PublicKey string `json:"publicKey"` // base64-encoded Ed25519 public key
-	Nonce     string `json:"nonce"`     // hex nonce from /challenge response
-	Signature string `json:"signature"` // base64-encoded Ed25519 signature over nonce bytes
-	DeviceID  string `json:"deviceId"`  // stable per-device identifier (UUID)
+	PublicKey        string `json:"publicKey"`                  // base64-encoded Ed25519 public key
+	Nonce            string `json:"nonce"`                      // hex nonce from /challenge response
+	Signature        string `json:"signature"`                  // base64-encoded Ed25519 signature
+	DeviceID         string `json:"deviceId"`                   // stable per-device identifier (UUID)
+	ChallengeVersion int    `json:"challengeVersion,omitempty"` // 2 = audience-bound payload; 0 = legacy nonce
+	Audience         string `json:"audience,omitempty"`         // canonical API origin the client signed for
 }
 
 // FederatedVerifyRequest is the body for POST /api/auth/federated-verify.

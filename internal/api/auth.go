@@ -420,9 +420,32 @@ func (h *authHandler) verify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := auth.VerifySignature(publicKeyBytes, req.Nonce, signatureBytes); err != nil {
+	// Challenge protocol selection — see models.VerifyRequest doc.
+	// A v2 request is any request that carries challengeVersion == 2 OR
+	// an explicit audience. The presence of either commits the request
+	// to v2 verification; we MUST NOT fall back to raw-nonce v1 verify
+	// when v2 fields are present, otherwise an attacker could downgrade
+	// by stripping one of them and reusing a raw-nonce-signed payload.
+	usesV2 := req.ChallengeVersion == 2 || strings.TrimSpace(req.Audience) != ""
+	if usesV2 {
+		expectedAudience := auth.NormalizeAudience(requestOrigin(r))
+		declaredAudience := auth.NormalizeAudience(req.Audience)
+		if expectedAudience == "" || declaredAudience == "" || declaredAudience != expectedAudience {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Authentication failed"})
+			return
+		}
+		if err := auth.VerifyChallengeV2Signature(publicKeyBytes, req.Nonce, declaredAudience, signatureBytes); err != nil {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Authentication failed"})
+			return
+		}
+	} else if req.ChallengeVersion != 0 {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Authentication failed"})
 		return
+	} else {
+		if err := auth.VerifySignature(publicKeyBytes, req.Nonce, signatureBytes); err != nil {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Authentication failed"})
+			return
+		}
 	}
 
 	user, err := h.store.GetUserByPublicKey(r.Context(), publicKeyBytes)
