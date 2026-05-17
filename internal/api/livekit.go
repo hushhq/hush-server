@@ -99,6 +99,21 @@ func (h *livekitHandler) token(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	userID := userIDFromContext(r.Context())
+	deviceID := strings.TrimSpace(deviceIDFromContext(r.Context()))
+	// A client that cannot prove a device id cannot participate in
+	// voice-MLS eviction: remote peers need a stable `userId:deviceId`
+	// MLS leaf identity to call `removeMembers` when this client
+	// disconnects. Without it the leaf would either linger in the
+	// group (security drift) or remote peers would remove the wrong
+	// leaf (UX corruption). Fail closed at token issuance rather than
+	// let an under-identified client into a voice room.
+	if deviceID == "" {
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error": "Device identity required to join voice. Sign in again on this device.",
+			"code":  "missing_device_id",
+		})
+		return
+	}
 
 	// Moderation gate: deny token issuance when an active ban or mute
 	// applies. Order matters: the instance ban is the broadest signal
@@ -148,7 +163,30 @@ func (h *livekitHandler) token(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	tokenString, err := livekit.GenerateToken(h.apiKey, h.apiSecret, userID, roomName, participantName, livekitTokenValidFor)
+	// Stamp device-scoped MLS identity into the LiveKit access token's
+	// metadata claim so remote participants can resolve the departed
+	// device's MLS leaf without trusting the bare LiveKit participant
+	// identity. Keep LiveKit `identity` as the user id so existing
+	// moderation paths (`RemoveParticipant(room, userID)`) and voice
+	// state snapshots remain unchanged.
+	metadataBytes, mdErr := json.Marshal(map[string]string{
+		"userId":      userID,
+		"deviceId":    deviceID,
+		"mlsIdentity": userID + ":" + deviceID,
+	})
+	if mdErr != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "token generation failed"})
+		return
+	}
+	tokenString, err := livekit.GenerateAccessToken(livekit.TokenOptions{
+		APIKey:          h.apiKey,
+		APISecret:       h.apiSecret,
+		Identity:        userID,
+		RoomName:        roomName,
+		ParticipantName: participantName,
+		Metadata:        string(metadataBytes),
+		ValidFor:        livekitTokenValidFor,
+	})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "token generation failed"})
 		return

@@ -2,11 +2,15 @@ package api
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
+	internalauth "github.com/hushhq/hush-server/internal/auth"
 	"github.com/hushhq/hush-server/internal/models"
 
 	"github.com/google/uuid"
@@ -303,3 +307,93 @@ var errNotFoundLikeMember = &mockNotFoundErr{msg: "not a member"}
 type mockNotFoundErr struct{ msg string }
 
 func (e *mockNotFoundErr) Error() string { return e.msg }
+
+// ---------- Device-scoped MLS metadata on LiveKit tokens ----------
+
+// decodeLivekitJWTClaims base64-decodes the payload segment of a JWT
+// and returns it as a generic map. We avoid going through the LiveKit
+// verifier so the test pins the claim shape directly rather than the
+// verifier's internal grant struct.
+func decodeLivekitJWTClaims(t *testing.T, token string) map[string]interface{} {
+	t.Helper()
+	parts := strings.Split(token, ".")
+	require.Len(t, parts, 3, "JWT must have 3 segments")
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	require.NoError(t, err)
+	var claims map[string]interface{}
+	require.NoError(t, json.Unmarshal(payload, &claims))
+	return claims
+}
+
+// signAuthJWTWithDevice mints a Hush auth JWT with the supplied
+// deviceID and registers the matching session on the mock store. It
+// lets tests exercise the LiveKit token handler with a chosen
+// deviceID (or with an empty one to prove the device-id gate).
+func signAuthJWTWithDevice(store *mockStore, userID, deviceID string) string {
+	sessionID := uuid.New().String()
+	token, err := internalauth.SignJWT(userID, sessionID, deviceID, testJWTSecret, time.Now().Add(time.Hour))
+	if err != nil {
+		panic(err)
+	}
+	hash := internalauth.TokenHash(token)
+	store.getSessionByTokenHashFn = func(_ context.Context, th string) (*models.Session, error) {
+		if th != hash {
+			return nil, nil
+		}
+		return &models.Session{ID: sessionID, UserID: userID, TokenHash: th, ExpiresAt: time.Now().Add(time.Hour)}, nil
+	}
+	return token
+}
+
+func TestLiveKitToken_EmbedsDeviceScopedMlsMetadata(t *testing.T) {
+	// Voice-MLS eviction depends on the participant metadata claim
+	// carrying `userId`, `deviceId`, and a `mlsIdentity` of
+	// `userId:deviceId`. Remote peers parse that to call
+	// `removeMembers` against the exact MLS leaf when this
+	// participant disconnects. Bare LiveKit `participant.identity`
+	// (which stays as the user id for moderation) is not sufficient.
+	userID := uuid.New().String()
+	store := &mockStore{}
+	jwt := signAuthJWTWithDevice(store, userID, "device-abc")
+
+	rr := postLiveKitToken(livekitRouter(store), "custom-room", "Alice", jwt)
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	var body map[string]string
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&body))
+	require.NotEmpty(t, body["token"])
+
+	claims := decodeLivekitJWTClaims(t, body["token"])
+	rawMetadata, _ := claims["metadata"].(string)
+	require.NotEmpty(t, rawMetadata, "LiveKit token must carry participant metadata")
+
+	var md map[string]string
+	require.NoError(t, json.Unmarshal([]byte(rawMetadata), &md))
+	assert.Equal(t, userID, md["userId"])
+	assert.Equal(t, "device-abc", md["deviceId"])
+	assert.Equal(t, userID+":device-abc", md["mlsIdentity"])
+
+	// Moderation regression: LiveKit `identity` (the JWT `sub`) MUST
+	// stay as the bare user id so RemoveParticipant(room, userID) and
+	// voice-state snapshots keep working unchanged.
+	assert.Equal(t, userID, claims["sub"])
+}
+
+func TestLiveKitToken_MissingDeviceID_Returns403AndDoesNotMintToken(t *testing.T) {
+	// A session JWT without a device id reaches the handler when an
+	// older client or a guest session hits /api/livekit/token. The
+	// handler must fail closed with a clear code, never mint a token,
+	// because the remote-eviction path has no usable MLS identity for
+	// such a participant.
+	userID := uuid.New().String()
+	store := &mockStore{}
+	jwt := signAuthJWTWithDevice(store, userID, "")
+
+	rr := postLiveKitToken(livekitRouter(store), "custom-room", "Alice", jwt)
+
+	require.Equal(t, http.StatusForbidden, rr.Code)
+	var body map[string]string
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&body))
+	assert.Equal(t, "missing_device_id", body["code"])
+	assert.Empty(t, body["token"], "no token may be issued when device id is missing")
+}
