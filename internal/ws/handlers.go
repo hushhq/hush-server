@@ -558,13 +558,24 @@ func (h *MessageHandler) handleMLSLeaveProposal(c *Client, raw []byte) {
 		return
 	}
 
-	// Broadcast mls.add_request to channel so an online member can commit the removal.
+	// Broadcast mls.add_request to channel so an online member can commit
+	// the removal. MLS leaf identity is device-scoped (`userId:deviceId`),
+	// so an online member that receives this frame needs the *exact*
+	// departed device id to call `removeMemberFromChannel` against the
+	// right leaf. Without it, the client can only fall back to catch-up
+	// and the departed device's leaf can linger in the group. Server
+	// uses the authenticated WebSocket client's `c.deviceID` — never a
+	// client-supplied value.
+	// When `c.deviceID` is empty (legacy / unauthenticated socket), the
+	// field is emitted as an empty string and the web client falls back
+	// to `catchupCommits` rather than removing a bare user id leaf.
 	out, _ := json.Marshal(map[string]interface{}{
-		"type":           "mls.add_request",
-		"channel_id":     payload.ChannelID,
-		"action":         "remove",
-		"proposal_bytes": payload.ProposalBytes,
-		"requester_id":   c.userID,
+		"type":                "mls.add_request",
+		"channel_id":          payload.ChannelID,
+		"action":              "remove",
+		"proposal_bytes":      payload.ProposalBytes,
+		"requester_id":        c.userID,
+		"requester_device_id": c.deviceID,
 	})
 	h.hub.Broadcast(payload.ChannelID, out, "")
 }
