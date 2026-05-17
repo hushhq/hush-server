@@ -958,16 +958,65 @@ func TestMessageHandler_HandleMLSLeaveProposal_BroadcastsAddRequest(t *testing.T
 	// receiver should get mls.add_request broadcast
 	msg := drainUntilType(t, recv, "mls.add_request", time.Second)
 	var out struct {
-		Type        string `json:"type"`
-		ChannelID   string `json:"channel_id"`
-		Action      string `json:"action"`
-		RequesterID string `json:"requester_id"`
+		Type              string `json:"type"`
+		ChannelID         string `json:"channel_id"`
+		Action            string `json:"action"`
+		RequesterID       string `json:"requester_id"`
+		RequesterDeviceID string `json:"requester_device_id"`
 	}
 	require.NoError(t, json.Unmarshal(msg, &out))
 	assert.Equal(t, "mls.add_request", out.Type)
 	assert.Equal(t, "ch1", out.ChannelID)
 	assert.Equal(t, "remove", out.Action)
 	assert.Equal(t, "user1", out.RequesterID)
+	// MLS leaves are identified by `userId:deviceId`. The server must
+	// stamp the authenticated WS client's device id onto the broadcast
+	// so online members remove the exact departed leaf, not the bare
+	// user id (which would silently catch up and leave the leaf in
+	// the group).
+	assert.Equal(t, "device-1", out.RequesterDeviceID)
+}
+
+func TestMessageHandler_HandleMLSLeaveProposal_EmptyDeviceIDStillBroadcasts(t *testing.T) {
+	// Legacy / unauthenticated WS clients have no device id. The
+	// server still relays the leave-proposal so the room hears about
+	// the departure, but it emits an empty `requester_device_id`. The
+	// web listener treats that as ambiguous and falls back to
+	// `catchupCommits` rather than removing a bare user id leaf.
+	hub := NewHub()
+	store := &messageStoreMock{
+		isChannelMemberFn: func(context.Context, string, string) (bool, error) { return true, nil },
+	}
+	h := NewMessageHandler(store, hub)
+	sender := NewClient(nil, hub, "user1", "", "", h)
+	hub.Register(sender)
+	recv := NewClient(nil, hub, "user2", "device-2", "", nil)
+	hub.Register(recv)
+	hub.Subscribe(sender, "ch1")
+	hub.Subscribe(recv, "ch1")
+	defer func() {
+		hub.Unregister(sender)
+		hub.Unregister(recv)
+		close(sender.send)
+		close(recv.send)
+	}()
+
+	raw, _ := json.Marshal(map[string]interface{}{
+		"channel_id":     "ch1",
+		"proposal_bytes": "cHJvcG9zYWw=",
+	})
+	h.Handle(sender, "mls.leave_proposal", raw)
+
+	msg := drainUntilType(t, recv, "mls.add_request", time.Second)
+	var out struct {
+		Type              string `json:"type"`
+		RequesterID       string `json:"requester_id"`
+		RequesterDeviceID string `json:"requester_device_id"`
+	}
+	require.NoError(t, json.Unmarshal(msg, &out))
+	assert.Equal(t, "mls.add_request", out.Type)
+	assert.Equal(t, "user1", out.RequesterID)
+	assert.Equal(t, "", out.RequesterDeviceID, "empty device id must not be replaced with a fake value")
 }
 
 func TestMessageSizeLimit_RejectsOver8KiB(t *testing.T) {
