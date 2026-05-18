@@ -14,12 +14,12 @@ import (
 // Returns (true, nil) when a row was inserted. Returns (false, nil) when
 // a row already existed (and was left untouched). Returns (false, err)
 // only on hard DB failures.
-func (p *Pool) BackfillRootDeviceKey(ctx context.Context, userID, deviceID string, devicePublicKey []byte) (bool, error) {
+func (p *Pool) BackfillRootDeviceKey(ctx context.Context, userID, deviceID, label string, devicePublicKey []byte) (bool, error) {
 	tag, err := p.Exec(ctx, `
 		INSERT INTO device_keys (user_id, device_id, device_public_key, certificate, label)
-		VALUES ($1, $2, $3, NULL, NULL)
+		VALUES ($1, $2, $3, NULL, NULLIF($4, ''))
 		ON CONFLICT (user_id, device_id) DO NOTHING`,
-		userID, deviceID, devicePublicKey,
+		userID, deviceID, devicePublicKey, label,
 	)
 	if err != nil {
 		return false, err

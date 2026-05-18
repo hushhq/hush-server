@@ -61,7 +61,7 @@ func (m *messageStoreMock) PurgeExpiredNonces(context.Context) (int64, error) { 
 func (m *messageStoreMock) InsertDeviceKey(context.Context, string, string, string, []byte, []byte) error {
 	return nil
 }
-func (m *messageStoreMock) BackfillRootDeviceKey(context.Context, string, string, []byte) (bool, error) {
+func (m *messageStoreMock) BackfillRootDeviceKey(context.Context, string, string, string, []byte) (bool, error) {
 	return true, nil
 }
 func (m *messageStoreMock) ListDeviceKeys(context.Context, string) ([]models.DeviceKey, error) {

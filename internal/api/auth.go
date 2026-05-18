@@ -136,12 +136,13 @@ type authHandler struct {
 // deviceIDs to overwrite already-certified rows. The operation is still
 // best-effort with respect to DB hiccups: authentication must not fail
 // just because auxiliary device metadata could not be upserted.
-func (h *authHandler) ensureVerifiedDeviceRegistered(ctx context.Context, userID, deviceID string, publicKey []byte) {
+func (h *authHandler) ensureVerifiedDeviceRegistered(ctx context.Context, userID, deviceID, label string, publicKey []byte) {
 	if strings.TrimSpace(deviceID) == "" {
 		return
 	}
+	label = strings.TrimSpace(label)
 
-	inserted, err := h.store.BackfillRootDeviceKey(ctx, userID, deviceID, publicKey)
+	inserted, err := h.store.BackfillRootDeviceKey(ctx, userID, deviceID, label, publicKey)
 	if err != nil {
 		slog.Warn("backfill device key on verify", "user_id", userID, "device_id", deviceID, "err", err)
 		return
@@ -153,7 +154,7 @@ func (h *authHandler) ensureVerifiedDeviceRegistered(ctx context.Context, userID
 		// label or pretend to refresh ownership.
 		return
 	}
-	if err := h.store.UpsertDevice(ctx, userID, deviceID, ""); err != nil {
+	if err := h.store.UpsertDevice(ctx, userID, deviceID, label); err != nil {
 		slog.Warn("backfill device row on verify", "user_id", userID, "device_id", deviceID, "err", err)
 	}
 }
@@ -465,7 +466,7 @@ func (h *authHandler) verify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.ensureVerifiedDeviceRegistered(r.Context(), user.ID, req.DeviceID, publicKeyBytes)
+	h.ensureVerifiedDeviceRegistered(r.Context(), user.ID, req.DeviceID, req.Label, publicKeyBytes)
 	h.sendAuthResponse(w, r, user, req.DeviceID)
 
 	// Fire-and-forget: update device last_seen. Prefer the caller-supplied

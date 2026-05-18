@@ -101,6 +101,7 @@ type VerifyRequest struct {
 	Nonce            string `json:"nonce"`                      // hex nonce from /challenge response
 	Signature        string `json:"signature"`                  // base64-encoded Ed25519 signature
 	DeviceID         string `json:"deviceId"`                   // stable per-device identifier (UUID)
+	Label            string `json:"label,omitempty"`            // client-reported human-readable device label
 	ChallengeVersion int    `json:"challengeVersion,omitempty"` // 2 = audience-bound payload; 0 = legacy nonce
 	Audience         string `json:"audience,omitempty"`         // canonical API origin the client signed for
 }

@@ -88,7 +88,7 @@ type Store interface {
 	// Used by the post-/verify backfill path so a root-key holder cannot
 	// rewrite an already-certified device's public key by replaying
 	// /verify with a chosen deviceID.
-	BackfillRootDeviceKey(ctx context.Context, userID, deviceID string, devicePublicKey []byte) (bool, error)
+	BackfillRootDeviceKey(ctx context.Context, userID, deviceID, label string, devicePublicKey []byte) (bool, error)
 	// ListDeviceKeys returns all device keys belonging to a user.
 	ListDeviceKeys(ctx context.Context, userID string) ([]models.DeviceKey, error)
 	// IsDeviceActive returns true iff a device key row still exists for

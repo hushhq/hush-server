@@ -591,10 +591,11 @@ func TestVerify_BackfillsDeviceKey_WhenDeviceIDProvided(t *testing.T) {
 		},
 		// ans23 / F5: /verify backfill now goes through
 		// BackfillRootDeviceKey, never the upsert-on-conflict path.
-		backfillRootDeviceKeyFn: func(_ context.Context, userID, deviceID string, devicePublicKey []byte) (bool, error) {
+		backfillRootDeviceKeyFn: func(_ context.Context, userID, deviceID, label string, devicePublicKey []byte) (bool, error) {
 			backfilledUserID = userID
 			backfilledDeviceID = deviceID
 			backfilledPublicKey = append([]byte(nil), devicePublicKey...)
+			require.Equal(t, "Chrome on macOS", label)
 			return true, nil
 		},
 		insertDeviceKeyFn: func(context.Context, string, string, string, []byte, []byte) error {
@@ -604,7 +605,7 @@ func TestVerify_BackfillsDeviceKey_WhenDeviceIDProvided(t *testing.T) {
 		upsertDeviceFn: func(_ context.Context, userID, deviceID, label string) error {
 			upsertedDeviceUserID = userID
 			upsertedDeviceID = deviceID
-			require.Empty(t, label)
+			require.Equal(t, "Chrome on macOS", label)
 			return nil
 		},
 	}
@@ -622,6 +623,7 @@ func TestVerify_BackfillsDeviceKey_WhenDeviceIDProvided(t *testing.T) {
 		Nonce:     nonce,
 		Signature: sig,
 		DeviceID:  "device-backfill-1",
+		Label:     "Chrome on macOS",
 	})
 
 	require.Equal(t, http.StatusOK, rr.Code)

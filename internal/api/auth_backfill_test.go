@@ -15,23 +15,24 @@ import (
 
 func TestEnsureVerifiedDeviceRegistered_MissingDevice_BackfillsAndUpserts(t *testing.T) {
 	var (
-		backfillCalled  bool
-		backfilledKey   []byte
-		upsertCalled    bool
+		backfillCalled bool
+		backfilledKey  []byte
+		upsertCalled   bool
 	)
 	store := &mockStore{
-		backfillRootDeviceKeyFn: func(_ context.Context, userID, deviceID string, key []byte) (bool, error) {
+		backfillRootDeviceKeyFn: func(_ context.Context, userID, deviceID, label string, key []byte) (bool, error) {
 			backfillCalled = true
 			backfilledKey = append(backfilledKey[:0], key...)
 			assert.Equal(t, "user-1", userID)
 			assert.Equal(t, "device-1", deviceID)
+			assert.Equal(t, "Chrome on macOS", label)
 			return true, nil
 		},
 		upsertDeviceFn: func(_ context.Context, userID, deviceID, label string) error {
 			upsertCalled = true
 			assert.Equal(t, "user-1", userID)
 			assert.Equal(t, "device-1", deviceID)
-			assert.Equal(t, "", label)
+			assert.Equal(t, "Chrome on macOS", label)
 			return nil
 		},
 		insertDeviceKeyFn: func(context.Context, string, string, string, []byte, []byte) error {
@@ -42,7 +43,7 @@ func TestEnsureVerifiedDeviceRegistered_MissingDevice_BackfillsAndUpserts(t *tes
 	h := &authHandler{store: store}
 
 	pub := []byte{1, 2, 3, 4, 5}
-	h.ensureVerifiedDeviceRegistered(context.Background(), "user-1", "device-1", pub)
+	h.ensureVerifiedDeviceRegistered(context.Background(), "user-1", "device-1", " Chrome on macOS ", pub)
 
 	assert.True(t, backfillCalled, "BackfillRootDeviceKey must be called")
 	assert.True(t, bytes.Equal(backfilledKey, pub), "the backfill must use the verified public key")
@@ -55,7 +56,7 @@ func TestEnsureVerifiedDeviceRegistered_ExistingDevice_DoesNotOverwrite(t *testi
 		upsertCalled   bool
 	)
 	store := &mockStore{
-		backfillRootDeviceKeyFn: func(_ context.Context, _, _ string, _ []byte) (bool, error) {
+		backfillRootDeviceKeyFn: func(_ context.Context, _, _, _ string, _ []byte) (bool, error) {
 			backfillCalled = true
 			return false, nil // row already existed
 		},
@@ -70,7 +71,7 @@ func TestEnsureVerifiedDeviceRegistered_ExistingDevice_DoesNotOverwrite(t *testi
 	}
 	h := &authHandler{store: store}
 
-	h.ensureVerifiedDeviceRegistered(context.Background(), "user-1", "device-1", []byte{9})
+	h.ensureVerifiedDeviceRegistered(context.Background(), "user-1", "device-1", "Chrome on macOS", []byte{9})
 
 	assert.True(t, backfillCalled, "BackfillRootDeviceKey must still be called")
 	assert.False(t, upsertCalled, "UpsertDevice must NOT run when the device row already exists")
@@ -78,12 +79,12 @@ func TestEnsureVerifiedDeviceRegistered_ExistingDevice_DoesNotOverwrite(t *testi
 
 func TestEnsureVerifiedDeviceRegistered_EmptyDeviceID_NoOp(t *testing.T) {
 	store := &mockStore{
-		backfillRootDeviceKeyFn: func(context.Context, string, string, []byte) (bool, error) {
+		backfillRootDeviceKeyFn: func(context.Context, string, string, string, []byte) (bool, error) {
 			t.Fatalf("BackfillRootDeviceKey must not be called when deviceID is empty")
 			return false, nil
 		},
 	}
 	h := &authHandler{store: store}
 
-	h.ensureVerifiedDeviceRegistered(context.Background(), "user-1", "  ", []byte{1})
+	h.ensureVerifiedDeviceRegistered(context.Background(), "user-1", "  ", "Chrome on macOS", []byte{1})
 }

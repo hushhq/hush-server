@@ -40,7 +40,7 @@ type mockStore struct {
 
 	// Device keys
 	insertDeviceKeyFn                    func(ctx context.Context, userID, deviceID, label string, devicePublicKey, certificate []byte) error
-	backfillRootDeviceKeyFn              func(ctx context.Context, userID, deviceID string, devicePublicKey []byte) (bool, error)
+	backfillRootDeviceKeyFn              func(ctx context.Context, userID, deviceID, label string, devicePublicKey []byte) (bool, error)
 	listDeviceKeysFn                     func(ctx context.Context, userID string) ([]models.DeviceKey, error)
 	revokeDeviceKeyFn                    func(ctx context.Context, userID, deviceID string) error
 	isDeviceActiveFn                     func(ctx context.Context, userID, deviceID string) (bool, error)
@@ -321,9 +321,9 @@ func (m *mockStore) InsertDeviceKey(ctx context.Context, userID, deviceID, label
 	return nil
 }
 
-func (m *mockStore) BackfillRootDeviceKey(ctx context.Context, userID, deviceID string, devicePublicKey []byte) (bool, error) {
+func (m *mockStore) BackfillRootDeviceKey(ctx context.Context, userID, deviceID, label string, devicePublicKey []byte) (bool, error) {
 	if m.backfillRootDeviceKeyFn != nil {
-		return m.backfillRootDeviceKeyFn(ctx, userID, deviceID, devicePublicKey)
+		return m.backfillRootDeviceKeyFn(ctx, userID, deviceID, label, devicePublicKey)
 	}
 	return true, nil
 }
