@@ -252,19 +252,28 @@ func TestAttachmentPresign_EnforcesGuildQuotaByTombstoningOldest(t *testing.T) {
 }
 
 func TestAttachmentPresign_RejectsDisallowedMime(t *testing.T) {
-	store := &mockStore{}
-	store.isChannelMemberFn = func(context.Context, string, string) (bool, error) { return true, nil }
-	channelID := uuid.NewString()
-	userID := uuid.NewString()
-	router := attachmentRouterForChannel(store, &fakeBackend{}, userID)
+	tests := []string{
+		"application/x-evil",
+		"image/svg+xml",
+		"text/html",
+	}
+	for _, contentType := range tests {
+		t.Run(contentType, func(t *testing.T) {
+			store := &mockStore{}
+			store.isChannelMemberFn = func(context.Context, string, string) (bool, error) { return true, nil }
+			channelID := uuid.NewString()
+			userID := uuid.NewString()
+			router := attachmentRouterForChannel(store, &fakeBackend{}, userID)
 
-	body := strings.NewReader(`{"size":1024,"contentType":"application/x-evil"}`)
-	req := httptest.NewRequest(http.MethodPost, "/"+channelID+"/attachments/presign", body)
-	req.Header.Set("Content-Type", "application/json")
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+			body := strings.NewReader(fmt.Sprintf(`{"size":1024,"contentType":%q}`, contentType))
+			req := httptest.NewRequest(http.MethodPost, "/"+channelID+"/attachments/presign", body)
+			req.Header.Set("Content-Type", "application/json")
+			rr := httptest.NewRecorder()
+			router.ServeHTTP(rr, req)
 
-	assert.Equal(t, http.StatusUnsupportedMediaType, rr.Code)
+			assert.Equal(t, http.StatusUnsupportedMediaType, rr.Code)
+		})
+	}
 }
 
 func TestAttachmentPresign_RejectsNonChannelMember(t *testing.T) {

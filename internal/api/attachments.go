@@ -30,17 +30,24 @@ const MaxAttachmentBytes = 25 * 1024 * 1024
 // it can be widely distributed; the client renews on-demand.
 const presignTTL = 5 * time.Minute
 
-// allowedAttachmentContentTypes is matched as a prefix-or-exact set.
-// `image/`, `audio/`, `video/`, `text/` accept any subtype; the others
-// are exact matches. This mirrors the client allowlist; both sides
-// must agree or sends silently fail at presign time.
-var allowedAttachmentContentTypes = []string{
-	"image/",
-	"audio/",
-	"video/mp4",
-	"video/webm",
-	"text/",
-	"application/pdf",
+// allowedAttachmentContentTypes is an exact MIME allowlist. Do not use
+// broad prefixes such as "image/" or "text/": they admit active
+// formats like SVG or HTML, which the client decoder refuses to render.
+var allowedAttachmentContentTypes = map[string]struct{}{
+	"image/gif":       {},
+	"image/heic":      {},
+	"image/jpeg":      {},
+	"image/png":       {},
+	"image/webp":      {},
+	"audio/mpeg":      {},
+	"audio/mp4":       {},
+	"audio/ogg":       {},
+	"audio/wav":       {},
+	"audio/webm":      {},
+	"video/mp4":       {},
+	"video/webm":      {},
+	"text/plain":      {},
+	"application/pdf": {},
 }
 
 func contentTypeAllowed(ct string) bool {
@@ -48,18 +55,8 @@ func contentTypeAllowed(ct string) bool {
 	if ct == "" {
 		return false
 	}
-	for _, prefix := range allowedAttachmentContentTypes {
-		if strings.HasSuffix(prefix, "/") {
-			if strings.HasPrefix(ct, prefix) {
-				return true
-			}
-			continue
-		}
-		if ct == prefix {
-			return true
-		}
-	}
-	return false
+	_, ok := allowedAttachmentContentTypes[ct]
+	return ok
 }
 
 // AttachmentBackendFactory constructs the storage Backend used for
