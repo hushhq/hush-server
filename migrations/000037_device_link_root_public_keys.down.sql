@@ -1,0 +1,5 @@
+-- Migration 000037 is a one-way data repair.
+--
+-- Previous linked-device rows may have stored ephemeral pairing keys that are
+-- not recoverable after this migration. Reverting would reintroduce broken
+-- multi-hop device approvals, so the down migration is intentionally empty.

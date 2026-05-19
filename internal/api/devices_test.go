@@ -497,7 +497,7 @@ func TestLinkVerify_ValidClaim_Returns201(t *testing.T) {
 		require.Equal(t, userID, uid)
 		insertedDeviceID = did
 		insertedLabel = label
-		assert.Equal(t, newDevicePub, pub)
+		assert.Equal(t, signingPub, pub)
 		assert.Equal(t, certificate, cert)
 		return nil
 	}

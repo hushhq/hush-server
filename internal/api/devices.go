@@ -554,6 +554,14 @@ func (h *deviceHandler) linkResolve(w http.ResponseWriter, r *http.Request) {
 //
 // The server consumes the claim, verifies the certificate, inserts the device
 // association, and stores the opaque relay payload for the new device to fetch.
+//
+// Device-link requests carry an ephemeral device public key from the new
+// device. That key is used only as the certification challenge committed in the
+// QR/fallback flow. The linked device ultimately receives the account root
+// private key in the encrypted transfer bundle, so its future approvals must be
+// verified against the same root public key as the approving device. Persisting
+// the ephemeral request key would make a linked device unable to approve another
+// device later.
 func (h *deviceHandler) linkVerify(w http.ResponseWriter, r *http.Request) {
 	userID := userIDFromContext(r.Context())
 	if userID == "" {
@@ -627,7 +635,7 @@ func (h *deviceHandler) linkVerify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	requestPayload.Label = strings.TrimSpace(requestPayload.Label)
-	if err := h.store.InsertDeviceKey(r.Context(), userID, requestPayload.DeviceID, requestPayload.Label, newDevicePubBytes, certBytes); err != nil {
+	if err := h.store.InsertDeviceKey(r.Context(), userID, requestPayload.DeviceID, requestPayload.Label, signingPub, certBytes); err != nil {
 		slog.Error("insert device key via link-verify", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not register device"})
 		return
