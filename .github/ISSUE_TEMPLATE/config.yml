@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a user-facing bug
+    url: https://github.com/hushhq/hush/issues/new/choose
+    about: Open product bugs and feature requests in the umbrella repo so maintainers can route them correctly.
+  - name: Ask a question or discuss a proposal
+    url: https://github.com/hushhq/hush/discussions
+    about: Use the umbrella repo discussions for questions, architecture proposals, and support threads.
