@@ -384,9 +384,26 @@ func (h *adminHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusNoContent)
 	if h.hub != nil {
+		// Broadcast every public instance_config field consumed by
+		// connected clients so they can live-apply admin changes
+		// (attachment limits, screen-share cap, registration mode,
+		// guild discovery, etc.) without a page refresh. Field names
+		// mirror the GET /api/handshake response so clients can merge
+		// the payload directly into their cached handshakeData
+		// without per-field translation.
 		payload := map[string]interface{}{"type": "instance_updated"}
 		if newCfg != nil {
 			payload["name"] = newCfg.Name
+			payload["iconUrl"] = newCfg.IconURL
+			payload["registrationMode"] = newCfg.RegistrationMode
+			payload["guild_discovery"] = newCfg.GuildDiscovery
+			payload["server_creation_policy"] = newCfg.ServerCreationPolicy
+			payload["screen_share_resolution_cap"] = newCfg.ScreenShareResolutionCap
+			payload["max_attachment_bytes"] = newCfg.MaxAttachmentBytes
+			payload["message_retention_days"] = newCfg.MessageRetentionDays
+			// Legacy snake_case aliases retained so older clients
+			// that read these keys do not regress while the full
+			// camelCase set is rolled out.
 			payload["icon_url"] = newCfg.IconURL
 			payload["registration_mode"] = newCfg.RegistrationMode
 		}

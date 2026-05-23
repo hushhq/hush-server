@@ -42,6 +42,40 @@ func adminRouterWithRoomService(store *mockStore, rs livekit.RoomService) http.H
 	)
 }
 
+// adminRouterWithHubAndCache wires AdminAPIRoutes with a recording
+// broadcaster and an InstanceCache so tests can assert
+// instance_updated broadcasts and cache refresh behaviour.
+func adminRouterWithHubAndCache(store *mockStore, hub GlobalBroadcaster, cache *InstanceCache) http.Handler {
+	return AdminAPIRoutes(
+		store,
+		testAdminBootstrapSecret,
+		24*time.Hour,
+		false,
+		"",
+		hub,
+		cache,
+		livekit.NoopRoomService{},
+		nil,
+		nil,
+		time.Time{},
+	)
+}
+
+// recordingHub implements GlobalBroadcaster and captures every
+// BroadcastToAll payload so updateConfig tests can assert the full
+// instance_updated frame is emitted.
+type recordingHub struct {
+	allFrames [][]byte
+}
+
+func (r *recordingHub) BroadcastToAll(msg []byte) {
+	r.allFrames = append(r.allFrames, append([]byte(nil), msg...))
+}
+func (r *recordingHub) BroadcastToServer(_ string, _ []byte) {}
+func (r *recordingHub) BroadcastToUser(_ string, _ []byte)   {}
+func (r *recordingHub) DisconnectUser(_ string)              {}
+func (r *recordingHub) DisconnectDevice(_, _ string)         {}
+
 func adminRequest(method, path string, body interface{}) *http.Request {
 	var payload []byte
 	if body != nil {
@@ -305,6 +339,63 @@ func TestAdminUpdateConfig_GuildDiscoveryReturns204(t *testing.T) {
 	assert.Equal(t, maxGuildAttachmentStorageBytes, *updatedMaxGuildAttachmentStorageBytes)
 	require.NotNil(t, updatedMessageRetentionDays)
 	assert.Equal(t, messageRetentionDays, *updatedMessageRetentionDays)
+}
+
+// HUSHHQ-14: admin config writes must broadcast the full set of
+// public instance_config fields so connected clients can refresh
+// attachment limits, screen-share caps, registration mode, guild
+// discovery, and creation policy without a page refresh.
+func TestAdminUpdateConfig_BroadcastsFullInstanceConfig(t *testing.T) {
+	screenShareCap := "720p"
+	maxAttachmentBytes := int64(15 * 1024 * 1024)
+	registrationMode := "invite_only"
+	req, store := authenticatedAdminRequest(http.MethodPut, "/config", adminUpdateConfigRequest{
+		ScreenShareResolutionCap: &screenShareCap,
+		MaxAttachmentBytes:       &maxAttachmentBytes,
+		RegistrationMode:         &registrationMode,
+	}, "owner")
+
+	store.updateInstanceConfigFn = func(_ context.Context, _, _, _, _, _ *string, _, _, _ *int, _ *string, _ *int64, _ *int64, _ *int) error {
+		return nil
+	}
+	store.getInstanceConfigFn = func(_ context.Context) (*models.InstanceConfig, error) {
+		return &models.InstanceConfig{
+			ID:                       "cfg-1",
+			Name:                     "Hush HQ",
+			RegistrationMode:         "invite_only",
+			GuildDiscovery:           "allowed",
+			ServerCreationPolicy:     "open",
+			ScreenShareResolutionCap: "720p",
+			MaxAttachmentBytes:       maxAttachmentBytes,
+			MessageRetentionDays:     90,
+		}, nil
+	}
+	store.getVoiceKeyRotationHoursFn = func(_ context.Context) (int, error) { return 2, nil }
+
+	hub := &recordingHub{}
+	router := adminRouterWithHubAndCache(store, hub, NewInstanceCache())
+
+	rr := doAdmin(router, req)
+	require.Equal(t, http.StatusNoContent, rr.Code)
+	require.Len(t, hub.allFrames, 1, "updateConfig must emit exactly one instance_updated broadcast")
+
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(hub.allFrames[0], &payload))
+
+	assert.Equal(t, "instance_updated", payload["type"])
+	assert.Equal(t, "Hush HQ", payload["name"])
+	assert.Equal(t, "invite_only", payload["registrationMode"])
+	assert.Equal(t, "allowed", payload["guild_discovery"])
+	assert.Equal(t, "open", payload["server_creation_policy"])
+	assert.Equal(t, "720p", payload["screen_share_resolution_cap"])
+	assert.Equal(t, float64(maxAttachmentBytes), payload["max_attachment_bytes"])
+	assert.Equal(t, float64(90), payload["message_retention_days"])
+	// Legacy snake_case aliases for older clients.
+	assert.Equal(t, "invite_only", payload["registration_mode"])
+	_, hasIconUrlCamel := payload["iconUrl"]
+	_, hasIconUrlSnake := payload["icon_url"]
+	assert.True(t, hasIconUrlCamel, "iconUrl key must be present (null when unset)")
+	assert.True(t, hasIconUrlSnake, "icon_url legacy alias must be present")
 }
 
 func TestAdminUpdateConfig_RejectsInvalidScreenShareResolutionCap(t *testing.T) {
