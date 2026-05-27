@@ -24,7 +24,10 @@ RUN CGO_ENABLED=0 go build \
     -o /hush ./cmd/hush
 
 # --- Stage 3: Runtime ---
-FROM alpine:3.19
+# HUSHHQ-85: bumped from alpine:3.19 to alpine:3.21 to clear CVE-2026-40200
+# (musl libc arbitrary-code-execution; fixed in 1.2.4_git20230717-r6 which
+# ships on 3.20+). 3.21 picked over 3.20 for the longer maintenance window.
+FROM alpine:3.21
 RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app
 COPY --from=builder /hush .
