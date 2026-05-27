@@ -118,7 +118,7 @@ jobs:
       # is deterministic and the supply-chain surface is bounded. Bump
       # this deliberately; SHA-pinning is a follow-up hygiene step.
       - name: Vulnerability scan (block on HIGH/CRITICAL)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: hush-server:scan
           severity: HIGH,CRITICAL
