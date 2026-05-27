@@ -35,6 +35,13 @@ set -eu
 # ---------------------------------------------------------------------------
 COMPOSE_BASE_FILE="docker-compose.prod.yml"
 COMPOSE_PROXY_FILE="docker-compose.caddy.yml"
+# HUSHHQ-82: overlay applied when `--from-image vX.Y.Z` is passed.
+# Empty by default so source-build flow stays unchanged.
+COMPOSE_IMAGE_FILE=""
+HUSH_SERVER_IMAGE="ghcr.io/hushhq/hush-server"
+HUSH_SERVER_IMAGE_TAG=""
+COSIGN_VERIFY_IDENTITY_REGEX='^https://github.com/hushhq/hush-server/\.github/workflows/ci\.yml@refs/tags/v.*'
+COSIGN_VERIFY_OIDC_ISSUER='https://token.actions.githubusercontent.com'
 CADDY_DOMAIN_TMPL="caddy/Caddyfile.self-hoster.tmpl"
 CADDY_IP_TMPL="caddy/Caddyfile.ip.tmpl"
 CADDY_OUT="caddy/Caddyfile.self-hoster"
@@ -66,7 +73,16 @@ derive_rtc_domain() {
 # profile is enabled iff the bundled MinIO is wired in. Until set it is
 # empty and compose_cmd behaves like before.
 COMPOSE_PROFILE_ARGS=""
-compose_cmd() { $DOCKER_COMPOSE -f "$COMPOSE_BASE_FILE" -f "$COMPOSE_PROXY_FILE" $COMPOSE_PROFILE_ARGS "$@"; }
+compose_cmd() {
+  # Order matters: image overlay must sit between base (prod.yml) and
+  # proxy (caddy.yml) so the `hush-api` service override clobbers the
+  # `build:` block before caddy adds its own depends_on layer.
+  if [ -n "$COMPOSE_IMAGE_FILE" ]; then
+    $DOCKER_COMPOSE -f "$COMPOSE_BASE_FILE" -f "$COMPOSE_IMAGE_FILE" -f "$COMPOSE_PROXY_FILE" $COMPOSE_PROFILE_ARGS "$@"
+  else
+    $DOCKER_COMPOSE -f "$COMPOSE_BASE_FILE" -f "$COMPOSE_PROXY_FILE" $COMPOSE_PROFILE_ARGS "$@"
+  fi
+}
 
 # ---------------------------------------------------------------------------
 # Parse arguments
@@ -76,6 +92,8 @@ rtc_domain=""
 ip_addr=""
 email=""
 force=0
+from_image_tag=""
+skip_verify=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -84,9 +102,42 @@ while [ $# -gt 0 ]; do
     --ip)         ip_addr="$2";    shift 2 ;;
     --email)      email="$2";      shift 2 ;;
     --force)      force=1;         shift   ;;
+    --from-image) from_image_tag="$2"; shift 2 ;;
+    --skip-verify) skip_verify=1; shift ;;
     *) die "Unknown flag: $1" 1 ;;
   esac
 done
+
+# HUSHHQ-82: --from-image switches to the published-image overlay. Only
+# fully-qualified vX.Y.Z tags are accepted; moving aliases (vX.Y, vX,
+# latest, nightly) are deferred to HUSHHQ-84 behind the HUSHHQ-83
+# compatibility gate. Reject anything that does not match a strict
+# SemVer tag pattern so self-hosters cannot accidentally pin to a
+# moving alias.
+if [ -n "$from_image_tag" ]; then
+  case "$from_image_tag" in
+    v[0-9]*.[0-9]*.[0-9]*)
+      # Further restrict to digits-only segments (the case glob above
+      # would also match e.g. `v1.2.x`).
+      if printf '%s' "$from_image_tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+        :
+      else
+        die "--from-image expects a fully-qualified release tag (e.g. v0.1.38). Got: $from_image_tag" 1
+      fi
+      ;;
+    *)
+      die "--from-image expects a fully-qualified release tag (e.g. v0.1.38). Got: $from_image_tag" 1
+      ;;
+  esac
+  COMPOSE_IMAGE_FILE="docker-compose.selfhost.yml"
+  HUSH_SERVER_IMAGE_TAG="$from_image_tag"
+  export HUSH_SERVER_IMAGE_TAG
+fi
+
+if [ "$skip_verify" -eq 1 ] && [ -z "$from_image_tag" ]; then
+  log "--skip-verify is only meaningful with --from-image; ignoring."
+  skip_verify=0
+fi
 
 # --domain and --ip are mutually exclusive
 if [ -n "$domain" ] && [ -n "$ip_addr" ]; then
@@ -148,7 +199,45 @@ if ! command -v openssl >/dev/null 2>&1; then
   die "openssl is required. Install via your package manager (e.g. apt install openssl)" 1
 fi
 
+# HUSHHQ-82: when running in image-overlay mode, enforce Compose v2.20+
+# because docker-compose.selfhost.yml relies on the `!reset` long-form
+# override (introduced in 2.20) to drop the inherited `build:` block.
+if [ -n "$COMPOSE_IMAGE_FILE" ]; then
+  if [ "$DOCKER_COMPOSE" = "docker compose" ]; then
+    _compose_version=$(docker compose version --short 2>/dev/null || printf '0.0.0')
+  else
+    _compose_version=$(docker-compose version --short 2>/dev/null || printf '0.0.0')
+  fi
+  _compose_major=$(printf '%s' "$_compose_version" | cut -d. -f1)
+  _compose_minor=$(printf '%s' "$_compose_version" | cut -d. -f2)
+  if [ "${_compose_major:-0}" -lt 2 ] || { [ "${_compose_major:-0}" -eq 2 ] && [ "${_compose_minor:-0}" -lt 20 ]; }; then
+    die "--from-image requires Docker Compose v2.20+ for the !reset override semantics; detected ${_compose_version}." 1
+  fi
+fi
+
 log "Dependencies OK."
+
+# HUSHHQ-82: verify the published image signature before pulling. Strict
+# (hard-fail) when cosign is present; warn-and-continue when missing so
+# the install flow is not gated on the operator having installed cosign.
+# `--skip-verify` opt-out is honored regardless.
+if [ -n "$COMPOSE_IMAGE_FILE" ]; then
+  if [ "$skip_verify" -eq 1 ]; then
+    log "Skipping cosign verification of ${HUSH_SERVER_IMAGE}:${HUSH_SERVER_IMAGE_TAG} (--skip-verify)."
+  elif command -v cosign >/dev/null 2>&1; then
+    log "Verifying cosign signature on ${HUSH_SERVER_IMAGE}:${HUSH_SERVER_IMAGE_TAG}..."
+    if ! cosign verify "${HUSH_SERVER_IMAGE}:${HUSH_SERVER_IMAGE_TAG}" \
+      --certificate-identity-regexp "${COSIGN_VERIFY_IDENTITY_REGEX}" \
+      --certificate-oidc-issuer "${COSIGN_VERIFY_OIDC_ISSUER}" >/dev/null; then
+      die "cosign signature verification failed for ${HUSH_SERVER_IMAGE}:${HUSH_SERVER_IMAGE_TAG}. Aborting." 1
+    fi
+    log "Signature OK."
+  else
+    log "WARNING: cosign is not installed; cannot verify ${HUSH_SERVER_IMAGE}:${HUSH_SERVER_IMAGE_TAG}."
+    log "         Install from https://docs.sigstore.dev/cosign/installation/ and re-run for strict verification,"
+    log "         or pass --skip-verify to acknowledge the gap explicitly. Continuing without verification."
+  fi
+fi
 
 # ---------------------------------------------------------------------------
 # Step 2: Overwrite guard
@@ -538,9 +627,14 @@ fi
 # ---------------------------------------------------------------------------
 # Step 9: Build and pull Docker images
 # ---------------------------------------------------------------------------
-log "Building hush-api and pulling runtime dependencies (this may take several minutes on first run)..."
-compose_cmd build hush-api
-compose_cmd pull --ignore-buildable
+if [ -n "$COMPOSE_IMAGE_FILE" ]; then
+  log "Pulling ${HUSH_SERVER_IMAGE}:${HUSH_SERVER_IMAGE_TAG} and runtime dependencies..."
+  compose_cmd pull
+else
+  log "Building hush-api and pulling runtime dependencies (this may take several minutes on first run)..."
+  compose_cmd build hush-api
+  compose_cmd pull --ignore-buildable
+fi
 
 # ---------------------------------------------------------------------------
 # Step 9: Start stack

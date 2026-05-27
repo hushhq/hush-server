@@ -1,0 +1,23 @@
+# Trivy configuration for HUSHHQ-82 release-tag scans.
+#
+# CI gates publication on HIGH/CRITICAL findings (exit-code 1) and
+# instructs trivy to ignore unfixed CVEs (advisories with no upstream
+# patch yet); a finding is only blocking when there is a fix available
+# that we could ship.
+#
+# Per-CVE exceptions go in `.github/.trivyignore` (plain-text, one CVE
+# id per line). Each entry there must include a comment with:
+#   - the reason for the exception,
+#   - an expiry date (YYYY-MM-DD) by which the exception must be revisited.
+#
+# Each exception is reviewed in the PR that adds it.
+
+vulnerability:
+  type:
+    - os
+    - library
+  ignore-unfixed: true
+
+severity:
+  - HIGH
+  - CRITICAL

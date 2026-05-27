@@ -2,7 +2,14 @@ name: CI
 on:
   push:
     branches: [main]
-    tags: ['v*']
+    # HUSHHQ-82: publish only stable `vX.Y.Z` release tags. Pre-release
+    # tags (e.g. `v0.1.38-rc1`) are excluded — the consumer side
+    # (`setup.sh --from-image`, `verify-release.sh`) enforces a strict
+    # `^v[0-9]+\.[0-9]+\.[0-9]+$` regex, and publishing prereleases would
+    # produce images that the documented self-host flow cannot install.
+    tags:
+      - 'v*'
+      - '!v*-*'
   pull_request:
 
 jobs:
@@ -39,6 +46,10 @@ jobs:
       - run: go vet ./...
       - run: go test ./...
 
+  # HUSHHQ-82: multi-arch publish on every `v*` tag with cosign signature,
+  # SPDX SBOM attestation, and pre-push audit gate (trivy + private-path
+  # find). Only `vX.Y.Z` is published — moving aliases (`vX.Y`, `vX`,
+  # `latest`, `nightly`) are deferred to HUSHHQ-84.
   docker:
     needs: test
     runs-on: ubuntu-latest
@@ -46,16 +57,150 @@ jobs:
     permissions:
       contents: read
       packages: write
+      # Required for cosign keyless OIDC signing.
+      id-token: write
+    env:
+      # Resolve the build version from the tag ref once, here, so every
+      # downstream step receives it as a plain env variable rather than
+      # interpolating `${{ github.ref_name }}` inside a run: block.
+      BUILD_VERSION: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@v4
+
+      # Namespace the published image under the repo owner so the
+      # workflow works on both `hushhq/hush-server` (production) and
+      # forks (release-pipeline validation). On a fork the GITHUB_TOKEN
+      # can only push to its own GHCR namespace, so a hardcoded
+      # `hushhq/hush-server` would 403 on every fork build.
+      #
+      # The owner is lowercased because cosign's OCI reference parser
+      # (and the OCI distribution spec) rejects mixed-case path
+      # components, even though GHCR's upload endpoint normalises
+      # silently. Without this, signing fails with "could not parse
+      # reference".
+      - name: Compute image namespace
+        id: img
+        env:
+          REPO_OWNER: ${{ github.repository_owner }}
+        run: |
+          owner_lc=$(printf '%s' "$REPO_OWNER" | tr '[:upper:]' '[:lower:]')
+          echo "image=ghcr.io/${owner_lc}/hush-server" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
+
+      # Emit exactly one image tag for HUSHHQ-82: `vX.Y.Z`. No moving
+      # aliases. `flavor: latest=false` explicitly suppresses the default
+      # `latest` that docker/metadata-action would otherwise add.
+      #
+      # `pattern=v{{version}}` preserves the leading `v` from the git
+      # tag — `{{version}}` alone would strip it and emit `0.1.38`,
+      # which would not match the `vX.Y.Z` contract enforced by
+      # `setup.sh --from-image` and `scripts/verify-release.sh`.
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.img.outputs.image }}
+          flavor: |
+            latest=false
+          tags: |
+            type=semver,pattern=v{{version}}
+
+      # Scan stage: build a single-arch local image so trivy + the
+      # private-path audit can inspect it BEFORE we push anything.
+      # cache-from/cache-to is reused by the publish stage below.
+      - id: build-scan
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          platforms: linux/amd64
+          tags: hush-server:scan
+          build-args: |
+            BUILD_VERSION=${{ env.BUILD_VERSION }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Pinned to a released tag (not @master) so the release pipeline
+      # is deterministic and the supply-chain surface is bounded. Bump
+      # this deliberately; SHA-pinning is a follow-up hygiene step.
+      - name: Vulnerability scan (block on HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: hush-server:scan
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          ignore-unfixed: true
+          trivy-config: .github/trivy.yaml
+
+      # Public/Private boundary gate per CLAUDE.md: the published image
+      # must never contain private ops directories. This step fails the
+      # build if any of those names appear anywhere in the image fs.
+      - name: Audit image for private ops paths
+        run: |
+          set -euo pipefail
+          leaked=$(docker run --rm --entrypoint sh hush-server:scan -c \
+            'find / -type d \( -name "hush-ops" -o -name ".private" -o -name "internal-ops" \) 2>/dev/null' \
+            || true)
+          if [ -n "$leaked" ]; then
+            echo "::error::private namespace directories leaked into image:"
+            printf '%s\n' "$leaked"
+            exit 1
+          fi
+
+      # Publish stage: multi-arch push using the same GHA cache. The
+      # digest output is what we sign with cosign — signing by tag would
+      # be racy.
+      - id: build-push
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          tags: ghcr.io/hushhq/hush-server:${{ github.ref_name }}
-          build-args: BUILD_VERSION=${{ github.ref_name }}
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BUILD_VERSION=${{ env.BUILD_VERSION }}
+          provenance: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Cosign keyless OIDC signing. The certificate identity recorded
+      # by the transparency log is the workflow path + tag ref, which
+      # `scripts/verify-release.sh` checks against on the self-hoster
+      # side.
+      - uses: sigstore/cosign-installer@v3
+
+      - name: Sign image
+        env:
+          IMAGE: ${{ steps.img.outputs.image }}
+          DIGEST: ${{ steps.build-push.outputs.digest }}
+        run: |
+          cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      # SPDX SBOM attached as an OCI attestation. Self-hosters retrieve
+      # it via `cosign download attestation` if they want to inspect the
+      # software bill of materials before deploying.
+      - id: sbom
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ steps.img.outputs.image }}@${{ steps.build-push.outputs.digest }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+          upload-artifact: false
+
+      - name: Attest SBOM
+        env:
+          IMAGE: ${{ steps.img.outputs.image }}
+          DIGEST: ${{ steps.build-push.outputs.digest }}
+        run: |
+          cosign attest --yes \
+            --predicate sbom.spdx.json \
+            --type spdx \
+            "${IMAGE}@${DIGEST}"
