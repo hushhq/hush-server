@@ -2,7 +2,14 @@ name: CI
 on:
   push:
     branches: [main]
-    tags: ['v*']
+    # HUSHHQ-82: publish only stable `vX.Y.Z` release tags. Pre-release
+    # tags (e.g. `v0.1.38-rc1`) are excluded — the consumer side
+    # (`setup.sh --from-image`, `verify-release.sh`) enforces a strict
+    # `^v[0-9]+\.[0-9]+\.[0-9]+$` regex, and publishing prereleases would
+    # produce images that the documented self-host flow cannot install.
+    tags:
+      - 'v*'
+      - '!v*-*'
   pull_request:
 
 jobs:
@@ -73,6 +80,11 @@ jobs:
       # Emit exactly one image tag for HUSHHQ-82: `vX.Y.Z`. No moving
       # aliases. `flavor: latest=false` explicitly suppresses the default
       # `latest` that docker/metadata-action would otherwise add.
+      #
+      # `pattern=v{{version}}` preserves the leading `v` from the git
+      # tag — `{{version}}` alone would strip it and emit `0.1.38`,
+      # which would not match the `vX.Y.Z` contract enforced by
+      # `setup.sh --from-image` and `scripts/verify-release.sh`.
       - id: meta
         uses: docker/metadata-action@v5
         with:
@@ -80,7 +92,7 @@ jobs:
           flavor: |
             latest=false
           tags: |
-            type=semver,pattern={{version}}
+            type=semver,pattern=v{{version}}
 
       # Scan stage: build a single-arch local image so trivy + the
       # private-path audit can inspect it BEFORE we push anything.
@@ -97,8 +109,11 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # Pinned to a released tag (not @master) so the release pipeline
+      # is deterministic and the supply-chain surface is bounded. Bump
+      # this deliberately; SHA-pinning is a follow-up hygiene step.
       - name: Vulnerability scan (block on HIGH/CRITICAL)
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           image-ref: hush-server:scan
           severity: HIGH,CRITICAL
