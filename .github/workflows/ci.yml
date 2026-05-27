@@ -138,7 +138,6 @@ jobs:
           exit-code: '1'
           ignore-unfixed: true
           trivy-config: .github/trivy.yaml
-          trivyignores: .github/.trivyignore
 
       # Public/Private boundary gate per CLAUDE.md: the published image
       # must never contain private ops directories. This step fails the
