@@ -60,18 +60,31 @@ jobs:
       # Required for cosign keyless OIDC signing.
       id-token: write
     env:
-      # Namespace the published image under the repo owner so the
-      # workflow works on both `hushhq/hush-server` (production) and
-      # forks (release-pipeline validation). On a fork the GITHUB_TOKEN
-      # can only push to its own GHCR namespace, so a hardcoded
-      # `hushhq/hush-server` would 403 on every fork build.
-      IMAGE: ghcr.io/${{ github.repository_owner }}/hush-server
       # Resolve the build version from the tag ref once, here, so every
       # downstream step receives it as a plain env variable rather than
       # interpolating `${{ github.ref_name }}` inside a run: block.
       BUILD_VERSION: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@v4
+
+      # Namespace the published image under the repo owner so the
+      # workflow works on both `hushhq/hush-server` (production) and
+      # forks (release-pipeline validation). On a fork the GITHUB_TOKEN
+      # can only push to its own GHCR namespace, so a hardcoded
+      # `hushhq/hush-server` would 403 on every fork build.
+      #
+      # The owner is lowercased because cosign's OCI reference parser
+      # (and the OCI distribution spec) rejects mixed-case path
+      # components, even though GHCR's upload endpoint normalises
+      # silently. Without this, signing fails with "could not parse
+      # reference".
+      - name: Compute image namespace
+        id: img
+        env:
+          REPO_OWNER: ${{ github.repository_owner }}
+        run: |
+          owner_lc=$(printf '%s' "$REPO_OWNER" | tr '[:upper:]' '[:lower:]')
+          echo "image=ghcr.io/${owner_lc}/hush-server" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
@@ -93,7 +106,7 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.IMAGE }}
+          images: ${{ steps.img.outputs.image }}
           flavor: |
             latest=false
           tags: |
@@ -167,6 +180,7 @@ jobs:
 
       - name: Sign image
         env:
+          IMAGE: ${{ steps.img.outputs.image }}
           DIGEST: ${{ steps.build-push.outputs.digest }}
         run: |
           cosign sign --yes "${IMAGE}@${DIGEST}"
@@ -177,13 +191,14 @@ jobs:
       - id: sbom
         uses: anchore/sbom-action@v0
         with:
-          image: ${{ env.IMAGE }}@${{ steps.build-push.outputs.digest }}
+          image: ${{ steps.img.outputs.image }}@${{ steps.build-push.outputs.digest }}
           format: spdx-json
           output-file: sbom.spdx.json
           upload-artifact: false
 
       - name: Attest SBOM
         env:
+          IMAGE: ${{ steps.img.outputs.image }}
           DIGEST: ${{ steps.build-push.outputs.digest }}
         run: |
           cosign attest --yes \
