@@ -1,0 +1,9 @@
+# HUSHHQ-82 fork-only validation allow-list. REMOVE BEFORE MERGE.
+# These 5 CVEs were detected on the v0.99.0 fork validation build.
+# Real remediation = follow-up dependency-bump ticket. This file must
+# not ship to hushhq/hush-server main.
+CVE-2026-40200
+CVE-2026-34986
+CVE-2026-33816
+CVE-2026-29181
+CVE-2026-33186
