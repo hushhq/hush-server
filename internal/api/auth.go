@@ -80,6 +80,7 @@ func AuthRoutes(store db.Store, jwtSecret string, jwtExpiry time.Duration, trans
 		r.Use(RequireAuth(jwtSecret, store))
 		r.Post("/logout", h.logout)
 		r.Get("/me", h.me)
+		r.Patch("/me", h.updateMe)
 	})
 
 	// Device management and multi-device linking (require auth - mounted inline).
@@ -552,6 +553,59 @@ func (h *authHandler) me(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, user)
 }
 
+// updateMe handles PATCH /api/auth/me.
+//
+// Request body (all fields optional; only present fields are updated):
+//
+//	{
+//	  "displayName": "<string - trimmed; empty clears the value>"
+//	}
+//
+// Username is NOT editable through this endpoint: usernames are part of
+// the cryptographic identity established at registration (BIP39 root key)
+// and may only change through the re-registration ceremony.
+//
+// Returns the full updated user on success so the caller can refresh
+// caches without a separate GET /me round-trip.
+func (h *authHandler) updateMe(w http.ResponseWriter, r *http.Request) {
+	userID := userIDFromContext(r.Context())
+	if userID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+
+	// Pointer fields so we can distinguish "field omitted" (leave untouched)
+	// from "field present with empty string" (intentional clear).
+	var req struct {
+		DisplayName *string `json:"displayName"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+
+	if req.DisplayName != nil {
+		trimmed := strings.TrimSpace(*req.DisplayName)
+		if err := validateDisplayName(trimmed); err != nil {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+			return
+		}
+		if err := h.store.UpdateUserDisplayName(r.Context(), userID, trimmed); err != nil {
+			slog.Error("update display name", "err", err, "user_id", userID)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not update profile"})
+			return
+		}
+	}
+
+	user, err := h.store.GetUserByID(r.Context(), userID)
+	if err != nil || user == nil {
+		slog.Error("reload user after profile update", "err", err, "user_id", userID)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not reload profile"})
+		return
+	}
+	writeJSON(w, http.StatusOK, user)
+}
+
 // checkUsername handles GET /api/auth/check-username/{username}.
 // Returns {"available": true/false}. Public endpoint - no auth required.
 func (h *authHandler) checkUsername(w http.ResponseWriter, r *http.Request) {
@@ -586,6 +640,25 @@ func validateUsername(s string) error {
 	}
 	if !usernameRE.MatchString(s) {
 		return errors.New("username may only contain letters, numbers, dots, underscores, and hyphens")
+	}
+	return nil
+}
+
+// validateDisplayName accepts trimmed display-name input. Empty is allowed
+// (the API uses empty string to mean "clear the name back to the default").
+// Length cap matches the registration path's `maxDisplayLen` so the edit
+// surface cannot accept values registration would have rejected. Control
+// characters are forbidden — display names render across many surfaces
+// (chat rosters, voice tiles, system logs) and embedded control codes
+// break terminal/screen-reader output.
+func validateDisplayName(s string) error {
+	if len(s) > maxDisplayLen {
+		return errors.New("display name too long")
+	}
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f {
+			return errors.New("display name must not contain control characters")
+		}
 	}
 	return nil
 }

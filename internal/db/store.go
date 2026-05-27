@@ -24,6 +24,10 @@ type Store interface {
 	GetUserByPublicKey(ctx context.Context, publicKey []byte) (*models.User, error)
 	GetUserByUsername(ctx context.Context, username string) (*models.User, error)
 	GetUserByID(ctx context.Context, id string) (*models.User, error)
+	// UpdateUserDisplayName sets the display_name column for the given user.
+	// Empty string is allowed and clears the value to the schema default.
+	// Username is not editable through this path (cryptographic identity).
+	UpdateUserDisplayName(ctx context.Context, userID, displayName string) error
 
 	// Federated identity methods
 

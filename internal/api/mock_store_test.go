@@ -90,9 +90,10 @@ type mockStore struct {
 	// Instance
 	getInstanceConfigFn    func(ctx context.Context) (*models.InstanceConfig, error)
 	updateInstanceConfigFn func(ctx context.Context, name *string, iconURL *string, registrationMode *string, guildDiscovery *string, serverCreationPolicy *string, maxServersPerUser *int, maxMembersPerServer *int, maxRegisteredUsers *int, screenShareResolutionCap *string, maxAttachmentBytes *int64, maxGuildAttachmentStorageBytes *int64, messageRetentionDays *int) error
-	getUserRoleFn          func(ctx context.Context, userID string) (string, error)
-	updateUserRoleFn       func(ctx context.Context, userID, role string) error
-	listMembersFn          func(ctx context.Context) ([]models.Member, error)
+	getUserRoleFn             func(ctx context.Context, userID string) (string, error)
+	updateUserRoleFn          func(ctx context.Context, userID, role string) error
+	updateUserDisplayNameFn   func(ctx context.Context, userID, displayName string) error
+	listMembersFn             func(ctx context.Context) ([]models.Member, error)
 
 	// Channels (guild-scoped - serverID param)
 	createChannelFn               func(ctx context.Context, serverID string, encryptedMetadata []byte, channelType string, parentID *string, position int) (*models.Channel, error)
@@ -668,6 +669,13 @@ func (m *mockStore) GetUserRole(ctx context.Context, userID string) (string, err
 func (m *mockStore) UpdateUserRole(ctx context.Context, userID, role string) error {
 	if m.updateUserRoleFn != nil {
 		return m.updateUserRoleFn(ctx, userID, role)
+	}
+	return nil
+}
+
+func (m *mockStore) UpdateUserDisplayName(ctx context.Context, userID, displayName string) error {
+	if m.updateUserDisplayNameFn != nil {
+		return m.updateUserDisplayNameFn(ctx, userID, displayName)
 	}
 	return nil
 }

@@ -97,3 +97,14 @@ func scanUser(row pgx.Row) (*models.User, error) {
 	}
 	return &u, nil
 }
+
+// UpdateUserDisplayName sets the display_name column for the given user.
+// Empty string is allowed and clears the value back to the schema default
+// (display_name has DEFAULT '' since migration 000001). The username column
+// is intentionally not updatable here — username is part of the cryptographic
+// identity derived at registration and may only change through the BIP39
+// re-registration ceremony.
+func (p *Pool) UpdateUserDisplayName(ctx context.Context, userID, displayName string) error {
+	_, err := p.Exec(ctx, `UPDATE users SET display_name = $1 WHERE id = $2`, displayName, userID)
+	return err
+}
