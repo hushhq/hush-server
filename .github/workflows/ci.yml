@@ -60,7 +60,12 @@ jobs:
       # Required for cosign keyless OIDC signing.
       id-token: write
     env:
-      IMAGE: ghcr.io/hushhq/hush-server
+      # Namespace the published image under the repo owner so the
+      # workflow works on both `hushhq/hush-server` (production) and
+      # forks (release-pipeline validation). On a fork the GITHUB_TOKEN
+      # can only push to its own GHCR namespace, so a hardcoded
+      # `hushhq/hush-server` would 403 on every fork build.
+      IMAGE: ghcr.io/${{ github.repository_owner }}/hush-server
       # Resolve the build version from the tag ref once, here, so every
       # downstream step receives it as a plain env variable rather than
       # interpolating `${{ github.ref_name }}` inside a run: block.
