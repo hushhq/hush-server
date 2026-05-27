@@ -1,0 +1,25 @@
+# HUSHHQ-82: self-hoster overlay that swaps the locally-built
+# `hush-api:local` image for the published `ghcr.io/hushhq/hush-server`
+# release tag. Layered between `docker-compose.prod.yml` and
+# `docker-compose.caddy.yml`:
+#
+#   docker compose \
+#     -f docker-compose.prod.yml \
+#     -f docker-compose.selfhost.yml \
+#     -f docker-compose.caddy.yml \
+#     up -d
+#
+# `scripts/setup.sh --from-image vX.Y.Z [--skip-verify]` handles the
+# compose chain, env wiring, and optional cosign verification.
+#
+# Requires Docker Compose v2.20+ for the `!reset` long-form override
+# semantics. The setup script preflight enforces this.
+#
+# Only `vX.Y.Z` immutable tags are accepted in this phase. Moving
+# aliases (`vX.Y`, `vX`, `latest`, `nightly`) are deferred to HUSHHQ-84
+# behind the HUSHHQ-83 compatibility gate.
+
+services:
+  hush-api:
+    build: !reset null
+    image: ghcr.io/hushhq/hush-server:${HUSH_SERVER_IMAGE_TAG:?set HUSH_SERVER_IMAGE_TAG=vX.Y.Z}

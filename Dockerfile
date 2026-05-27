@@ -9,8 +9,15 @@ COPY admin/ .
 RUN npm run build
 
 # --- Stage 2: Build Go binary ---
-FROM golang:1.25-alpine AS builder
+# Run the Go toolchain natively on the build host and cross-compile to the
+# target platform via TARGETOS/TARGETARCH. Pure-Go binary (CGO_ENABLED=0)
+# so no QEMU emulation is needed during the build itself — buildx still
+# emulates the runtime stage but the slow part (Go compile) stays native.
+# Required for HUSHHQ-82 multi-arch publish without ~20 min arm64 runs.
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
 ARG BUILD_VERSION=dev
+ARG TARGETOS
+ARG TARGETARCH
 WORKDIR /build
 
 COPY go.mod go.sum ./
@@ -19,7 +26,7 @@ RUN go mod download
 COPY . .
 # Replace dev placeholder with real admin build output
 COPY --from=admin-builder /admin/dist ./admin/dist
-RUN CGO_ENABLED=0 go build \
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
     -ldflags "-X github.com/hushhq/hush-server/internal/version.ServerVersion=${BUILD_VERSION}" \
     -o /hush ./cmd/hush
 
