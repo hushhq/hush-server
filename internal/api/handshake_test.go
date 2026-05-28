@@ -336,3 +336,92 @@ func TestHandshake_ServerCreationPolicy_DefaultIsOpen(t *testing.T) {
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&body))
 	assert.Equal(t, "open", body["server_creation_policy"], "default server_creation_policy must be 'open'")
 }
+
+// ---------- HUSHHQ-83 phase 1: compat envelope ----------
+
+// TestHandshake_MinCompatibleClientVersion_MirrorsLegacyField verifies that the
+// canonical min_compatible_client_version field carries the same value as the
+// legacy min_client_version field. The two are kept in parallel during the
+// transition period so already-deployed clients reading the legacy name keep
+// working while new clients adopt the canonical name.
+func TestHandshake_MinCompatibleClientVersion_MirrorsLegacyField(t *testing.T) {
+	cache := NewInstanceCache()
+	handler := HandshakeHandler(cache, true)
+	req := httptest.NewRequest(http.MethodGet, "/api/handshake", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	var body map[string]interface{}
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&body))
+	require.Contains(t, body, "min_compatible_client_version")
+	require.Contains(t, body, "min_client_version")
+	assert.Equal(t, body["min_client_version"], body["min_compatible_client_version"],
+		"min_compatible_client_version must mirror min_client_version during the transition")
+	assert.Equal(t, version.MinClientVersion, body["min_compatible_client_version"])
+}
+
+// TestHandshake_CurrentDBSchemaVersion_MatchesConstant verifies the handshake
+// advertises the binary's compiled-in current_db_schema_version. The phase 2
+// boot-time guardrail and self-host upgrade tooling both rely on this value.
+func TestHandshake_CurrentDBSchemaVersion_MatchesConstant(t *testing.T) {
+	cache := NewInstanceCache()
+	handler := HandshakeHandler(cache, true)
+	req := httptest.NewRequest(http.MethodGet, "/api/handshake", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	var resp handshakeResponse
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.Equal(t, version.CurrentDBSchemaVersion, resp.CurrentDBSchemaVersion,
+		"current_db_schema_version must match version.CurrentDBSchemaVersion")
+	assert.Greater(t, resp.CurrentDBSchemaVersion, 0,
+		"current_db_schema_version must be a positive integer")
+}
+
+// TestHandshake_MinCompatibleDBSchemaVersion_MatchesConstant verifies the
+// handshake advertises the lowest schema version this binary can operate
+// against safely. Today equal to current_db_schema_version because no
+// rolling-back compat window has been declared yet.
+func TestHandshake_MinCompatibleDBSchemaVersion_MatchesConstant(t *testing.T) {
+	cache := NewInstanceCache()
+	handler := HandshakeHandler(cache, true)
+	req := httptest.NewRequest(http.MethodGet, "/api/handshake", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	var resp handshakeResponse
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.Equal(t, version.MinCompatibleDBSchemaVersion, resp.MinCompatibleDBSchemaVersion,
+		"min_compatible_db_schema_version must match version.MinCompatibleDBSchemaVersion")
+	assert.LessOrEqual(t, resp.MinCompatibleDBSchemaVersion, resp.CurrentDBSchemaVersion,
+		"min_compatible_db_schema_version must never exceed current_db_schema_version")
+}
+
+// TestHandshake_CryptoCompatRanges_IncludesHushCrypto verifies the handshake
+// advertises the server-authoritative crypto package compatibility envelope.
+// The phase 4 client gate consumes this map to refuse traffic when its WASM
+// crypto build is incompatible.
+func TestHandshake_CryptoCompatRanges_IncludesHushCrypto(t *testing.T) {
+	cache := NewInstanceCache()
+	handler := HandshakeHandler(cache, true)
+	req := httptest.NewRequest(http.MethodGet, "/api/handshake", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	var resp handshakeResponse
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	require.NotNil(t, resp.CryptoCompatRanges,
+		"crypto_compat_ranges must be present in the handshake response")
+	require.Contains(t, resp.CryptoCompatRanges, "@gethush/hush-crypto",
+		"crypto_compat_ranges must declare a constraint for @gethush/hush-crypto")
+	assert.NotEmpty(t, resp.CryptoCompatRanges["@gethush/hush-crypto"],
+		"@gethush/hush-crypto constraint must be a non-empty version string")
+}

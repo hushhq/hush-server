@@ -17,7 +17,52 @@ var APIVersion = "v1"
 
 // MinClientVersion is the minimum client version required to connect. Defaults to "0.0.0".
 // Override via: -ldflags "-X github.com/hushhq/hush-server/internal/version.MinClientVersion=x.y.z"
+//
+// NOTE (HUSHHQ-83 phase 1): JSON consumers should prefer the canonical
+// `min_compatible_client_version` field on the handshake response. The
+// `min_client_version` field is kept in parallel for backward compatibility
+// with already-deployed clients and will be removed once all surfaces have
+// migrated to the canonical name.
 var MinClientVersion = "0.0.0"
+
+// CurrentDBSchemaVersion is the highest schema_migrations.version number this
+// binary has been compiled with. The boot-time DB schema guardrail (HUSHHQ-83
+// phase 2) refuses to start if the live database has been migrated past this
+// point by a newer server, so that the binary never runs against rows whose
+// columns or constraints it cannot reason about.
+//
+// Bumping this constant in a release is deliberate. The CI lint introduced in
+// HUSHHQ-83 phase 3 enforces that it equals the highest migration file number
+// present in the migrations/ directory.
+const CurrentDBSchemaVersion = 37
+
+// MinCompatibleDBSchemaVersion is the lowest schema_migrations.version this
+// binary can operate against safely. Today it equals CurrentDBSchemaVersion
+// because no rolling-back compat window has been declared yet.
+//
+// A release that ships a destructive or non-reversible migration MUST bump
+// MinCompatibleDBSchemaVersion to the new schema version to mark every prior
+// schema unsupported by this binary. The HUSHHQ-83 phase 3 migration metadata
+// (`compat_break: true`) is what drives this bump in practice.
+const MinCompatibleDBSchemaVersion = 37
+
+// CryptoCompatRanges is the server-authoritative compatibility envelope for
+// client-side cryptographic packages. Keys are package names (matching the
+// shape of hush-web/compatibility.json); values are version constraints the
+// server expects the client to satisfy.
+//
+// The server does not consume these packages itself; the field tells the
+// client which `@gethush/hush-crypto` (and any future crypto dep) build is
+// safe to talk to this server. The MLS ciphersuite check on the same handshake
+// response (`current_mls_ciphersuite`) covers the protocol-level guarantee;
+// CryptoCompatRanges is a defensive belt against subtle API drift in the WASM
+// crypto bindings.
+//
+// Today the only entry is `@gethush/hush-crypto` pinned to the version listed
+// in hush-web/compatibility.json. Phase 4 wires the client-side check.
+var CryptoCompatRanges = map[string]string{
+	"@gethush/hush-crypto": "0.2.2",
+}
 
 // KeyPackageLowThreshold is the minimum number of unused MLS KeyPackages the server
 // should maintain per device. When the count drops below this value, the server emits
