@@ -303,7 +303,7 @@ func main() {
 		// Storage backend for attachment presign URLs. Lazy-built per
 		// request via the closure so a transient backend outage does not
 		// require a server restart. Returns nil when the attachment
-		// storage config resolves to postgres_bytea — attachments require
+		// storage config resolves to postgres_bytea, since attachments require
 		// an S3-compatible backend to produce native presigned URLs.
 		attachmentBackend := func() (storage.Backend, error) {
 			cfg, err := storage.LoadAttachmentConfig()
@@ -376,7 +376,15 @@ func main() {
 		r.Post("/api/livekit/webhook", api.LiveKitWebhookHandlerWithState(wsHub, pool, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret, voiceState))
 	}
 
-	// Admin dashboard SPA — embedded static files served at /admin/.
+	// Invite landing pages for browser visits to /invite/{code} and
+	// /join/{host}/{code}. Mounted unconditionally and DB-free so a
+	// self-hosted backend (which serves no web client at its origin)
+	// shows join instructions instead of the raw reverse-proxy fallback.
+	inviteLanding := api.NewInviteLandingHandler(os.Getenv("HUSH_WEB_CLIENT_URL"))
+	r.Get("/invite/{code}", inviteLanding.ServeInvite)
+	r.Get("/join/{host}/{code}", inviteLanding.ServeJoin)
+
+	// Admin dashboard SPA: embedded static files served at /admin/.
 	// Mounted unconditionally so the bootstrap screen is accessible on
 	// a fresh instance before the database is configured.
 	adminDist, err := fs.Sub(adminui.DistFS, "dist")

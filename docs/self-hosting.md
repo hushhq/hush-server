@@ -29,6 +29,13 @@ instance picker — the web client is instance-agnostic. We do not
 publish a containerised `hush-web` for self-hosters at this point in
 the roadmap.
 
+Because the instance domain serves the backend only, opening an invite
+link (`https://your.instance/invite/<code>`) directly in a browser does
+not render a chat UI. The backend instead serves a small landing page
+with the invite code and instructions to join from a Hush client. Set
+`HUSH_WEB_CLIENT_URL` to advertise a specific web client on that page
+(defaults to `https://app.gethush.live`).
+
 ## Prerequisites
 
 - Docker Engine 24+.
