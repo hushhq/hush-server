@@ -19,6 +19,7 @@ import (
 	"github.com/hushhq/hush-server/internal/api"
 	"github.com/hushhq/hush-server/internal/config"
 	"github.com/hushhq/hush-server/internal/db"
+	"github.com/hushhq/hush-server/internal/dbcompat"
 	"github.com/hushhq/hush-server/internal/livekit"
 	"github.com/hushhq/hush-server/internal/models"
 	"github.com/hushhq/hush-server/internal/storage"
@@ -105,6 +106,16 @@ func main() {
 			os.Exit(1)
 		}
 		defer m.Close()
+		// HUSHHQ-83 phase 2: refuse to start when the live DB has been
+		// migrated past this binary's compiled-in schema ceiling. The
+		// check runs after migrate.New() (so we have a handle to read
+		// schema_migrations) and before m.Up() (so we never silently
+		// no-op on a rollback scenario and continue running the older
+		// code against the newer schema).
+		if err := dbcompat.CheckSchemaCompatibility(context.Background(), m); err != nil {
+			slog.Error("db schema compatibility check failed", "err", err)
+			os.Exit(1)
+		}
 		if err := m.Up(); err != nil && err != migrate.ErrNoChange {
 			slog.Error("migrate up failed", "err", err)
 			os.Exit(1)
