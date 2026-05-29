@@ -18,11 +18,16 @@ var APIVersion = "v1"
 // MinClientVersion is the minimum client version required to connect. Defaults to "0.0.0".
 // Override via: -ldflags "-X github.com/hushhq/hush-server/internal/version.MinClientVersion=x.y.z"
 //
-// NOTE (HUSHHQ-83 phase 1): JSON consumers should prefer the canonical
+// DEPRECATED (HUSHHQ-83 phase 1): JSON consumers should read the canonical
 // `min_compatible_client_version` field on the handshake response. The
-// `min_client_version` field is kept in parallel for backward compatibility
-// with already-deployed clients and will be removed once all surfaces have
-// migrated to the canonical name.
+// `min_client_version` field is kept in parallel only for backward
+// compatibility with already-deployed clients.
+//
+// Sunset plan: HUSHHQ-83 phase 4 wires the client to read the canonical
+// field. One minor server release after that lands, the legacy
+// `min_client_version` JSON field is dropped from the handshake response
+// (this Go variable can stay because it still backs the canonical field;
+// only the duplicated JSON output goes away).
 var MinClientVersion = "0.0.0"
 
 // CurrentDBSchemaVersion is the highest schema_migrations.version number this
@@ -31,9 +36,12 @@ var MinClientVersion = "0.0.0"
 // point by a newer server, so that the binary never runs against rows whose
 // columns or constraints it cannot reason about.
 //
-// Bumping this constant in a release is deliberate. The CI lint introduced in
-// HUSHHQ-83 phase 3 enforces that it equals the highest migration file number
-// present in the migrations/ directory.
+// HACK(HUSHHQ-83, 2026-05-29): until phase 3 ships, this constant must be
+// bumped manually whenever a new `NNNNNN_*.up.sql` lands in migrations/.
+// A drift between this value and the highest migration file is silent
+// until a self-host upgrade flow goes through the handshake. Phase 3
+// introduces a CI lint that fails the build on drift; remove this HACK
+// note when that lint is wired up.
 const CurrentDBSchemaVersion = 37
 
 // MinCompatibleDBSchemaVersion is the lowest schema_migrations.version this
@@ -58,8 +66,15 @@ const MinCompatibleDBSchemaVersion = 37
 // CryptoCompatRanges is a defensive belt against subtle API drift in the WASM
 // crypto bindings.
 //
-// Today the only entry is `@gethush/hush-crypto` pinned to the version listed
-// in hush-web/compatibility.json. Phase 4 wires the client-side check.
+// Today the only entry is `@gethush/hush-crypto`, pinned to the version
+// listed in hush-web/compatibility.json. Phase 4 wires the client-side
+// check.
+//
+// The map is owned by this package and treated as read-only at runtime.
+// Callers must not mutate the returned value. `internal/version/version_test.go`
+// holds the drift check against `hush-web/compatibility.json` for monorepo
+// dev environments; CI-only builds where hush-web is not on disk skip the
+// check with a logged note instead of failing.
 var CryptoCompatRanges = map[string]string{
 	"@gethush/hush-crypto": "0.2.2",
 }

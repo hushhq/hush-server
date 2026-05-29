@@ -404,8 +404,9 @@ func TestHandshake_MinCompatibleDBSchemaVersion_MatchesConstant(t *testing.T) {
 }
 
 // TestHandshake_CryptoCompatRanges_IncludesHushCrypto verifies the handshake
-// advertises the server-authoritative crypto package compatibility envelope.
-// The phase 4 client gate consumes this map to refuse traffic when its WASM
+// advertises the server-authoritative crypto package compatibility envelope
+// and that it is a faithful copy of the in-process source of truth. The
+// phase 4 client gate consumes this map to refuse traffic when its WASM
 // crypto build is incompatible.
 func TestHandshake_CryptoCompatRanges_IncludesHushCrypto(t *testing.T) {
 	cache := NewInstanceCache()
@@ -424,4 +425,10 @@ func TestHandshake_CryptoCompatRanges_IncludesHushCrypto(t *testing.T) {
 		"crypto_compat_ranges must declare a constraint for @gethush/hush-crypto")
 	assert.NotEmpty(t, resp.CryptoCompatRanges["@gethush/hush-crypto"],
 		"@gethush/hush-crypto constraint must be a non-empty version string")
+	// Faithful copy: every (package, version) pair declared in the in-process
+	// source of truth must round-trip through JSON. Tautological today (one
+	// entry) but catches a future regression where a handler refactor strips
+	// or rewrites entries before serialization.
+	assert.Equal(t, version.CryptoCompatRanges, resp.CryptoCompatRanges,
+		"handshake response crypto_compat_ranges must equal version.CryptoCompatRanges")
 }
