@@ -124,7 +124,7 @@ Backs up the database, pulls the latest code, rebuilds images, and restarts.
 ./scripts/backup.sh
 ```
 
-Creates a timestamped snapshot in `backups/`. The database backup is incomplete without a matching `.env` — back up `.env` separately to a secure location.
+Creates a timestamped snapshot in `backups/`. The database backup is incomplete without a matching `.env`, back up `.env` separately to a secure location.
 
 ### Restore and rollback
 
@@ -181,6 +181,7 @@ The server reads configuration from environment variables (or `.env` in the proj
 | `RTC_DOMAIN` | Public LiveKit signaling hostname |
 | `CORS_ORIGIN` | Allowed frontend origin. For backend-only self-hosting with the official client, use `https://app.gethush.live`. Do not use `*` in production. |
 | `WS_ALLOWED_ORIGINS` | Optional comma-separated extra WebSocket origins for trusted desktop shells, for example `app://localhost`. |
+| `HUSH_WEB_CLIENT_URL` | Optional web-client URL shown on the `/invite` and `/join` browser landing pages. Defaults to `https://app.gethush.live`. Point it at any instance-agnostic Hush web client you prefer. |
 | `SERVICE_IDENTITY_MASTER_KEY` | 32-byte hex/base64 key used to wrap the instance service identity private key at rest |
 | `LIVEKIT_API_KEY` | LiveKit API key |
 | `LIVEKIT_API_SECRET` | LiveKit API secret |

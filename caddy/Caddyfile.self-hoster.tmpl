@@ -40,6 +40,17 @@ __DOMAIN__ {
     reverse_proxy hush-api:8080
   }
 
+  # Invite/join landing pages (rendered by the Go binary). Browser visits
+  # to invite links resolve here to join instructions instead of the
+  # informational fallback below.
+  handle /invite* {
+    reverse_proxy hush-api:8080
+  }
+
+  handle /join* {
+    reverse_proxy hush-api:8080
+  }
+
   # Informational fallback for browser visits.
   handle {
     header X-Content-Type-Options "nosniff"
