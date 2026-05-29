@@ -168,11 +168,33 @@ func (c *InstanceCache) snapshot() (
 
 // handshakeResponse is the JSON shape returned by GET /api/handshake.
 type handshakeResponse struct {
-	ServerVersion          string `json:"server_version"`
-	APIVersion             string `json:"api_version"`
-	MinClientVersion       string `json:"min_client_version"`
-	KeyPackageLowThreshold int    `json:"key_package_low_threshold"`
-	GuildDiscovery         string `json:"guild_discovery"`
+	ServerVersion string `json:"server_version"`
+	APIVersion    string `json:"api_version"`
+	// MinClientVersion is the legacy field name. Kept in the response for
+	// backward compatibility with already-deployed clients. New consumers
+	// should read MinCompatibleClientVersion instead. Both fields carry the
+	// same value (HUSHHQ-83 phase 1).
+	MinClientVersion string `json:"min_client_version"`
+	// MinCompatibleClientVersion is the canonical name for the minimum client
+	// version this server will talk to. Clients below this version must surface
+	// an "update required" flow and refuse normal API/MLS traffic.
+	MinCompatibleClientVersion string `json:"min_compatible_client_version"`
+	// CurrentDBSchemaVersion is the schema_migrations.version this binary
+	// expects in the live database. Self-host upgrade tooling can compare it
+	// against the running instance to detect a binary lag after a rollback.
+	CurrentDBSchemaVersion int `json:"current_db_schema_version"`
+	// MinCompatibleDBSchemaVersion is the lowest schema version this binary
+	// can safely operate against. A live database below this version requires
+	// a forward migration before the binary can serve requests.
+	MinCompatibleDBSchemaVersion int `json:"min_compatible_db_schema_version"`
+	// CryptoCompatRanges advertises the client-side crypto package versions
+	// this server expects clients to be on. Mirrors the shape of
+	// hush-web/compatibility.json (`{package: versionConstraint}`), server-
+	// authoritative. Clients use it as a defensive check above the MLS
+	// ciphersuite contract.
+	CryptoCompatRanges     map[string]string `json:"crypto_compat_ranges"`
+	KeyPackageLowThreshold int               `json:"key_package_low_threshold"`
+	GuildDiscovery         string            `json:"guild_discovery"`
 	// ServerCreationPolicy controls whether authenticated users may create guilds.
 	// Values: "open" (default), "paid" (subscription required), "disabled" (no new guilds).
 	ServerCreationPolicy     string          `json:"server_creation_policy"`
@@ -205,14 +227,18 @@ func HandshakeHandler(cache *InstanceCache, voiceEnabled bool) http.HandlerFunc 
 		name, iconURL, regMode, guildDiscovery, voiceKeyRotationHours, transparencyURL, logPublicKey, serverCreationPolicy, screenShareResolutionCap, maxAttachmentBytes := cache.snapshot()
 
 		resp := handshakeResponse{
-			ServerVersion:            version.ServerVersion,
-			APIVersion:               version.APIVersion,
-			MinClientVersion:         version.MinClientVersion,
-			KeyPackageLowThreshold:   version.KeyPackageLowThreshold,
-			GuildDiscovery:           guildDiscovery,
-			ServerCreationPolicy:     serverCreationPolicy,
-			ScreenShareResolutionCap: screenShareResolutionCap,
-			MaxAttachmentBytes:       maxAttachmentBytes,
+			ServerVersion:                version.ServerVersion,
+			APIVersion:                   version.APIVersion,
+			MinClientVersion:             version.MinClientVersion,
+			MinCompatibleClientVersion:   version.MinClientVersion,
+			CurrentDBSchemaVersion:       version.CurrentDBSchemaVersion,
+			MinCompatibleDBSchemaVersion: version.MinCompatibleDBSchemaVersion,
+			CryptoCompatRanges:           version.CryptoCompatRanges,
+			KeyPackageLowThreshold:       version.KeyPackageLowThreshold,
+			GuildDiscovery:               guildDiscovery,
+			ServerCreationPolicy:         serverCreationPolicy,
+			ScreenShareResolutionCap:     screenShareResolutionCap,
+			MaxAttachmentBytes:           maxAttachmentBytes,
 			Capabilities: map[string]bool{
 				"e2ee.chat":      true,
 				"e2ee.media":     true,
