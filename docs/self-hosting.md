@@ -10,8 +10,8 @@ the source-build path see [README.md → Quick Start (Self-Hosting)](../README.m
   cloud VM with `docker compose`. Comfortable with Linux + DNS +
   reverse-proxy basics.
 - **Non-goals.** Multi-node HA, Kubernetes, autoscaling, web-client
-  hosting. Multi-instance federation is on the roadmap but not shipped
-  — instances are closed networks today.
+  hosting. Multi-instance federation is on the roadmap but not shipped.
+  Instances are closed networks today.
 
 ## What you actually deploy
 
@@ -25,7 +25,7 @@ Three artifacts make up a Hush deployment:
 
 If a user only has a browser, they can still reach your instance by
 visiting `https://app.gethush.live` and adding your domain in the
-instance picker — the web client is instance-agnostic. We do not
+instance picker, the web client is instance-agnostic. We do not
 publish a containerised `hush-web` for self-hosters at this point in
 the roadmap.
 
@@ -83,7 +83,7 @@ cosign verify ghcr.io/hushhq/hush-server:$RELEASE \
 ```
 
 Expected output ends with `OK: signature valid for ...`. A failure
-means **do not deploy** — the image was either not signed by our CI
+means **do not deploy**, the image was either not signed by our CI
 or someone is tampering with the registry response.
 
 To inspect the SBOM (Software Bill of Materials):
@@ -113,16 +113,16 @@ not:
 - Enforces Docker Compose v2.20+ for the `!reset` override.
 - Runs `cosign verify` if cosign is on `PATH`; hard-fails on bad
   signature.
-- If cosign is **not** installed, prints a loud warning and continues
-  — install cosign for strict supply-chain verification, or pass
+- If cosign is **not** installed, prints a loud warning and continues.
+  Install cosign for strict supply-chain verification, or pass
   `--skip-verify` to acknowledge the gap explicitly.
 - Layers `docker-compose.prod.yml` + `docker-compose.selfhost.yml` +
   `docker-compose.caddy.yml` (override order matters).
 - Replaces the `compose_cmd build hush-api` step with a `compose pull`,
   so no Go toolchain or Node toolchain is required on the host.
 
-The rest of the setup flow — secrets generation, Caddyfile template
-substitution, MinIO bootstrap, health checks — is identical to the
+The rest of the setup flow, secrets generation, Caddyfile template
+substitution, MinIO bootstrap, health checks, is identical to the
 source-build flow documented in [README.md → Quick Start](../README.md#quick-start-self-hosting).
 
 ### IP-only mode
@@ -149,11 +149,16 @@ health checks run.
 
 **Always back up before upgrading.** See [RUNBOOK.md → Backup and
 restore](RUNBOOK.md#backup-and-restore) for the canonical procedure.
-Rollback is supported per [RUNBOOK.md → Rollback paths](RUNBOOK.md#rollback-paths)
-— you can `--from-image` an older release as long as no DB migration
-has rolled forward irreversibly. The HUSHHQ-83 compatibility gate
-(future work) will make this safer; until then, treat every server
-version bump as potentially DB-forward-only.
+Rollback is supported per [RUNBOOK.md → Rollback paths](RUNBOOK.md#rollback-paths).
+You can `--from-image` an older release as long as no DB migration
+has rolled forward irreversibly. As of `v0.2.0` the binary enforces a
+schema compatibility gate at boot: if the live database has been
+migrated past the binary's compiled-in schema version, the server
+refuses to start with an actionable error instead of running old code
+against a newer schema. This converts a silent-corruption rollback into
+a fail-safe stop. It does not make migrations reversible. Rolling back
+across a forward migration still requires restoring the database from a
+pre-upgrade backup. Always back up before upgrading.
 
 ## Storage backends
 
@@ -174,20 +179,20 @@ Self-hosters touch the same code paths as the hosted instance. The
 document spells out the rules a deployment must not break. The
 sections most relevant to a self-hoster:
 
-- **Authentication, Vault, and Device Identity** — device revocation
+- **Authentication, Vault, and Device Identity**, device revocation
   must invalidate the local vault path. Do not patch the server to
   loosen this.
-- **MLS, Messages, and Realtime Catch-up** — MLS ciphersuite and
+- **MLS, Messages, and Realtime Catch-up**, MLS ciphersuite and
   epoch handling are protocol invariants. Server upgrades that change
   these will be flagged in release notes as `BREAKING` once
   HUSHHQ-84 ships.
-- **Voice Rooms and LiveKit** — the RTC subdomain (`rtc.example.com`)
+- **Voice Rooms and LiveKit**, the RTC subdomain (`rtc.example.com`)
   must be a separate origin from the API domain for the
   Safari/iCloud Private Relay path. `setup.sh` enforces this.
-- **Federation, Instance Routing, and Credential Boundaries** —
+- **Federation, Instance Routing, and Credential Boundaries**:
   instances are closed networks today; federation is planned. A
   self-hosted instance does not accept logins from other instances.
-- **Build, Release, and Hosted Deploy** — no public repo
+- **Build, Release, and Hosted Deploy**, no public repo
   documentation that depends on non-public operational paths. The
   published image is audited at CI time to guarantee this.
 
@@ -214,7 +219,7 @@ causes are:
 
 | Symptom | Likely cause |
 |-|-|
-| `getsockopt: connection refused` on `/api/health` | `hush-api` crashed — check `docker compose logs hush-api`. Usually a missing required env var. |
+| `getsockopt: connection refused` on `/api/health` | `hush-api` crashed, check `docker compose logs hush-api`. Usually a missing required env var. |
 | TLS handshake errors after `setup.sh` completes | DNS not yet pointing at the host, or Caddy hit ACME rate limit. |
 | LiveKit clients fail to connect | RTC subdomain not pointing at the host, or 7881/tcp blocked at firewall. |
 | `manifest unknown` on `compose pull` | Wrong tag. Confirm at <https://github.com/hushhq/hush-server/pkgs/container/hush-server>. |
