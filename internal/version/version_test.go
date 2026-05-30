@@ -13,8 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
-	"strings"
 	"testing"
 )
 
@@ -94,49 +92,10 @@ func TestDBSchemaVersionBounds(t *testing.T) {
 	}
 }
 
-// TestCurrentDBSchemaVersion_MatchesHighestMigration is the HACK note's
-// safety net inside this repo. It walks the migrations/ directory and
-// asserts CurrentDBSchemaVersion equals the highest NNNNNN_*.up.sql
-// file number present. Phase 3 lifts this from a Go test into a build-
-// time CI lint that also enforces the metadata sidecar.
-func TestCurrentDBSchemaVersion_MatchesHighestMigration(t *testing.T) {
-	migrationsDir := findMigrationsDir(t)
-	if migrationsDir == "" {
-		t.Skipf("migrations/ directory not on disk; skipping highest-migration check")
-		return
-	}
-	entries, err := os.ReadDir(migrationsDir)
-	if err != nil {
-		t.Fatalf("read migrations dir %s: %v", migrationsDir, err)
-	}
-	highest := 0
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		name := e.Name()
-		if !strings.HasSuffix(name, ".up.sql") {
-			continue
-		}
-		idx := strings.IndexByte(name, '_')
-		if idx <= 0 {
-			continue
-		}
-		n, err := strconv.Atoi(strings.TrimLeft(name[:idx], "0"))
-		if err != nil {
-			continue
-		}
-		if n > highest {
-			highest = n
-		}
-	}
-	if highest == 0 {
-		t.Fatalf("migrations dir %s contains no NNNNNN_*.up.sql files", migrationsDir)
-	}
-	if highest != CurrentDBSchemaVersion {
-		t.Errorf("CurrentDBSchemaVersion (%d) does not match highest migration file (%d) in %s. Bump the constant to keep the boot-time guardrail honest.", CurrentDBSchemaVersion, highest, migrationsDir)
-	}
-}
+// The CurrentDBSchemaVersion-equals-highest-migration invariant moved to the
+// HUSHHQ-83 phase 3 lint in internal/migrationmeta
+// (TestHighestVersion_MatchesCurrentDBSchemaVersion), which also validates the
+// per-migration metadata sidecars. It is intentionally not duplicated here.
 
 // findHushWebCompatibilityJSON locates hush-web/compatibility.json relative
 // to this file's source location, walking up from internal/version/ until
@@ -161,35 +120,6 @@ func findHushWebCompatibilityJSON(t *testing.T) string {
 			return abs
 		} else if !errors.Is(err, fs.ErrNotExist) {
 			return ""
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return ""
-		}
-		dir = parent
-	}
-	return ""
-}
-
-// findMigrationsDir returns the absolute path to hush-server/migrations.
-// Mirrors findHushWebCompatibilityJSON's traversal strategy so the test
-// works whether `go test` is invoked from the package directory or the
-// repo root.
-func findMigrationsDir(t *testing.T) string {
-	t.Helper()
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		return ""
-	}
-	dir := filepath.Dir(thisFile)
-	for i := 0; i < 6; i++ {
-		candidate := filepath.Join(dir, "migrations")
-		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-			abs, err := filepath.Abs(candidate)
-			if err != nil {
-				return candidate
-			}
-			return abs
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {

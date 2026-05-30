@@ -1,0 +1,7 @@
+{
+  "version": 20,
+  "summary": "server creation policy",
+  "min_prior_server_version": "0.0.0",
+  "compat_break": false,
+  "supports_rollback": true
+}

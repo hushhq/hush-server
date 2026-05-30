@@ -36,12 +36,10 @@ var MinClientVersion = "0.0.0"
 // point by a newer server, so that the binary never runs against rows whose
 // columns or constraints it cannot reason about.
 //
-// HACK(HUSHHQ-83, 2026-05-29): until phase 3 ships, this constant must be
-// bumped manually whenever a new `NNNNNN_*.up.sql` lands in migrations/.
-// A drift between this value and the highest migration file is silent
-// until a self-host upgrade flow goes through the handshake. Phase 3
-// introduces a CI lint that fails the build on drift; remove this HACK
-// note when that lint is wired up.
+// This constant must be bumped whenever a new `NNNNNN_*.up.sql` lands in
+// migrations/. The drift is no longer silent: the HUSHHQ-83 phase 3 lint
+// (internal/migrationmeta TestHighestVersion_MatchesCurrentDBSchemaVersion)
+// fails the build when this value does not equal the highest migration file.
 const CurrentDBSchemaVersion = 37
 
 // MinCompatibleDBSchemaVersion is the lowest schema_migrations.version this

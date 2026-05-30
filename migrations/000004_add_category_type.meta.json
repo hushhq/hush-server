@@ -1,0 +1,7 @@
+{
+  "version": 4,
+  "summary": "add category type",
+  "min_prior_server_version": "0.0.0",
+  "compat_break": false,
+  "supports_rollback": true
+}
