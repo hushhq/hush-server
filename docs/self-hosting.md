@@ -135,6 +135,37 @@ Caddy serves a self-signed cert from its internal CA. Browser shows a
 TLS warning; E2EE is unaffected. Useful for evaluation, not for
 production.
 
+## Host ports
+
+The default stack publishes a deliberately small set of host ports. The
+API is not one of them: the bundled Caddy reaches `hush-api` over the
+compose network, so nothing binds 8080 on your host (a common source of
+conflicts).
+
+| Port | Service | Why it is on the host | Override |
+|-|-|-|-|
+| 80, 443 | Caddy | Public HTTP/HTTPS entry for the reverse proxy. | Free them, or front Hush with your own proxy and run without the Caddy overlay. |
+| 7880 | LiveKit | WebRTC signaling. Must be publicly reachable. | `LIVEKIT_RTC_HOST_PORT` in `.env`. |
+| 7881 | LiveKit | WebRTC TCP fallback. Must be publicly reachable. | `LIVEKIT_TCP_HOST_PORT` in `.env`. |
+| 50020-50100/udp | LiveKit | WebRTC media. Must be publicly reachable. | Fixed; changing it also requires editing `livekit/livekit.yaml`. |
+
+`setup.sh` runs a port preflight and fails early with an actionable
+message if any of these is already in use, instead of a raw Docker bind
+error.
+
+### Fronting the API with your own host-level proxy
+
+If you do not use the bundled Caddy and instead put your own host-level
+reverse proxy (nginx, an existing Caddy, a load balancer) in front of the
+API, layer the optional `docker-compose.hostport.yml` overlay to publish
+`hush-api` on a host port (bound to `127.0.0.1`):
+
+```sh
+docker compose -f docker-compose.prod.yml -f docker-compose.hostport.yml up -d
+# override the port if 8080 is taken:
+HUSH_API_HOST_PORT=8088 docker compose -f docker-compose.prod.yml -f docker-compose.hostport.yml up -d
+```
+
 ## Upgrade path
 
 ```sh

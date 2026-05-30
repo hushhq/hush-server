@@ -46,8 +46,11 @@ CADDY_DOMAIN_TMPL="caddy/Caddyfile.self-hoster.tmpl"
 CADDY_IP_TMPL="caddy/Caddyfile.ip.tmpl"
 CADDY_OUT="caddy/Caddyfile.self-hoster"
 LIVEKIT_TMPL="livekit/livekit.yaml"
-HEALTH_URL="http://localhost:8080/api/health"
-HANDSHAKE_URL="http://localhost:8080/api/handshake"
+# Health checks run inside the hush-api container against its own localhost,
+# not against a host port. The default stack no longer publishes hush-api on
+# a host port (HUSHHQ-94), so a host-side curl would have nothing to hit.
+HEALTH_PATH="http://localhost:8080/api/health"
+HANDSHAKE_PATH="http://localhost:8080/api/handshake"
 LOG_PREFIX="[hush]"
 
 # ---------------------------------------------------------------------------
@@ -637,13 +640,64 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Step 9: Start stack
+# Step 10: Preflight host-port conflicts
+# ---------------------------------------------------------------------------
+# Fail with an actionable message before `up -d` hits a raw Docker bind
+# error. Only the ports the default stack actually publishes are checked:
+# Caddy 80/443 and the LiveKit TCP signaling ports. hush-api is not on a
+# host port anymore (HUSHHQ-94), so 8080 is no longer a conflict source.
+_port_in_use() {
+  # $1 = TCP port. Prints nothing. Returns 0 if a process LISTENs on it,
+  # 1 if free, 2 if we cannot determine (no ss/lsof).
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltnH 2>/dev/null | awk '{print $4}' | grep -qE "[:.]$1\$" && return 0
+    return 1
+  elif command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1 && return 0
+    return 1
+  fi
+  return 2
+}
+
+preflight_ports() {
+  _lk_rtc="${LIVEKIT_RTC_HOST_PORT:-7880}"
+  _lk_tcp="${LIVEKIT_TCP_HOST_PORT:-7881}"
+  _conflicts=""
+  _undetermined=0
+  for _p in 80 443 "$_lk_rtc" "$_lk_tcp"; do
+    _port_in_use "$_p"
+    case $? in
+      0) _conflicts="$_conflicts $_p" ;;
+      2) _undetermined=1 ;;
+    esac
+  done
+
+  if [ "$_undetermined" -eq 1 ]; then
+    log "Port preflight skipped (neither ss nor lsof found). Docker will surface any bind conflict."
+    return 0
+  fi
+
+  if [ -n "$_conflicts" ]; then
+    err "Host port conflict on:$_conflicts"
+    err "  80/443  : required by the bundled reverse proxy. Free them, or front"
+    err "            Hush with your own proxy and run without the Caddy overlay."
+    err "  7880/7881 (LiveKit): set LIVEKIT_RTC_HOST_PORT / LIVEKIT_TCP_HOST_PORT"
+    err "            in .env to free ports, then re-run."
+    die "Free the conflicting ports (or override them) and re-run setup." 2
+  fi
+  log "Port preflight OK (80, 443, $_lk_rtc, $_lk_tcp free)."
+}
+
+preflight_ports
+
+# ---------------------------------------------------------------------------
+# Step 11: Start stack
 # ---------------------------------------------------------------------------
 log "Starting Hush stack..."
 compose_cmd up -d
 
 # ---------------------------------------------------------------------------
-# Step 10: Health check with retry
+# Step 12: Health check with retry
 # ---------------------------------------------------------------------------
 wait_for_health() {
   _attempt=1
@@ -656,11 +710,13 @@ wait_for_health() {
     log "Health check attempt $_attempt of $_max (waiting ${_delay}s)..."
     sleep "$_delay"
 
-    if curl -sf "$HEALTH_URL" >/dev/null 2>&1; then
+    # Probe from inside the container (the API is not on a host port). wget
+    # ships in the hush-api image and is what the compose healthcheck uses.
+    if compose_cmd exec -T hush-api wget -qO- "$HEALTH_PATH" >/dev/null 2>&1; then
       log "API is healthy."
 
       # Verify handshake endpoint returns valid JSON
-      _handshake="$(curl -sf "$HANDSHAKE_URL" 2>/dev/null || true)"
+      _handshake="$(compose_cmd exec -T hush-api wget -qO- "$HANDSHAKE_PATH" 2>/dev/null || true)"
       if [ -z "$_handshake" ]; then
         err "Handshake endpoint returned empty response."
       else
@@ -683,7 +739,7 @@ if ! wait_for_health; then
 fi
 
 # ---------------------------------------------------------------------------
-# Step 11: Success message
+# Step 13: Success message
 # ---------------------------------------------------------------------------
 printf '\n'
 log "================================================================"

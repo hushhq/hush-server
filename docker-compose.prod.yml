@@ -189,8 +189,15 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    ports:
-      - "127.0.0.1:8080:8080"
+    # No host port is published for hush-api. The bundled Caddy (and the
+    # IP-mode proxy) reach it over the compose network at `hush-api:8080`,
+    # so a host binding would only collide with whatever else the operator
+    # runs on 8080. Operators fronting the API with their own host-level
+    # reverse proxy add the binding by layering `docker-compose.hostport.yml`
+    # (configurable via HUSH_API_HOST_PORT). HUSHHQ-94.
+    #
+    # The healthcheck below runs inside the container against the container's
+    # own localhost, so it does not need a host port.
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/health || exit 1"]
       interval: 15s
@@ -219,9 +226,14 @@ services:
       - NODE_IP=${NODE_IP:-}
     volumes:
       - ./livekit/livekit.yaml:/etc/livekit.yaml.tmpl:ro
+    # LiveKit must be reachable from the public internet for WebRTC, so these
+    # cannot be localhost-only. The TCP signaling ports are overridable for
+    # operators who already use 7880/7881. The UDP media range is fixed here;
+    # changing it also requires editing livekit/livekit.yaml (port_range_*),
+    # so it is left as a documented constant. HUSHHQ-94.
     ports:
-      - "7880:7880"
-      - "7881:7881"
+      - "${LIVEKIT_RTC_HOST_PORT:-7880}:7880"
+      - "${LIVEKIT_TCP_HOST_PORT:-7881}:7881"
       - "50020-50100:50020-50100/udp"
     restart: unless-stopped
     networks:

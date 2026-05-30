@@ -196,8 +196,8 @@ docker compose -f docker-compose.prod.yml -f docker-compose.caddy.yml exec postg
 docker compose -f docker-compose.prod.yml -f docker-compose.caddy.yml up -d
 
 # Verify health
-curl http://localhost:8080/api/health
-curl http://localhost:8080/api/handshake
+docker compose exec hush-api wget -qO- http://localhost:8080/api/health
+docker compose exec hush-api wget -qO- http://localhost:8080/api/handshake
 ```
 
 ### Redis after restore
@@ -257,8 +257,8 @@ docker compose -f docker-compose.prod.yml -f docker-compose.caddy.yml build hush
 docker compose -f docker-compose.prod.yml -f docker-compose.caddy.yml up -d
 
 # Step 4: Verify
-curl http://localhost:8080/api/health
-curl http://localhost:8080/api/handshake
+docker compose exec hush-api wget -qO- http://localhost:8080/api/health
+docker compose exec hush-api wget -qO- http://localhost:8080/api/handshake
 ```
 
 ### Path B: Pre-built GHCR image rollback
@@ -285,8 +285,8 @@ docker compose -f docker-compose.prod.yml -f docker-compose.caddy.yml \
   -f docker-compose.override.yml up -d
 
 # Step 5: Verify
-curl http://localhost:8080/api/health
-curl http://localhost:8080/api/handshake
+docker compose exec hush-api wget -qO- http://localhost:8080/api/health
+docker compose exec hush-api wget -qO- http://localhost:8080/api/handshake
 ```
 
 ### Rollback checklist

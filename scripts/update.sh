@@ -22,8 +22,10 @@ set -eu
 # ---------------------------------------------------------------------------
 COMPOSE_BASE_FILE="docker-compose.prod.yml"
 COMPOSE_PROXY_FILE="docker-compose.caddy.yml"
-HEALTH_URL="http://localhost:8080/api/health"
-HANDSHAKE_URL="http://localhost:8080/api/handshake"
+# Probed from inside the hush-api container, not a host port: the default
+# self-host stack does not publish hush-api on a host port (HUSHHQ-94).
+HEALTH_PATH="http://localhost:8080/api/health"
+HANDSHAKE_PATH="http://localhost:8080/api/handshake"
 LOG_PREFIX="[hush]"
 
 # ---------------------------------------------------------------------------
@@ -199,10 +201,10 @@ wait_for_health() {
     log "Health check attempt $_attempt of $_max (waiting ${_delay}s)..."
     sleep "$_delay"
 
-    if curl -sf "$HEALTH_URL" >/dev/null 2>&1; then
+    if compose_cmd exec -T hush-api wget -qO- "$HEALTH_PATH" >/dev/null 2>&1; then
       log "API is healthy."
 
-      _handshake="$(curl -sf "$HANDSHAKE_URL" 2>/dev/null || true)"
+      _handshake="$(compose_cmd exec -T hush-api wget -qO- "$HANDSHAKE_PATH" 2>/dev/null || true)"
       if [ -z "$_handshake" ]; then
         err "Handshake endpoint returned empty response."
       else
