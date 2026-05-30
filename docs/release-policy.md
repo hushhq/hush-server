@@ -82,6 +82,44 @@ lint fails the build if a migration is missing its sidecar or if the
 declared facts disagree with the on-disk files. See
 [migrations/README.md](../migrations/README.md).
 
+## Release notes contract
+
+Every published release carries a GitHub Release with a structured body.
+The shape is fixed so a self-hoster (and the `/releases` page on the
+landing site) can read the same facts every time, and so CI can fail a
+release whose notes are missing a required section. The required sections:
+
+- **Highlights**: user-facing bullets of what changed.
+- **Migration required?**: `Yes` or `No`. If `Yes`, the steps, and whether
+  the schema version advances.
+- **Minimum client version**: the value the server advertises as
+  `min_compatible_client_version`. Clients below it are gated at handshake.
+- **BREAKING**: present only when the release ships a `compat_break`
+  migration or otherwise breaks a client/server/DB contract (see the
+  compatibility-break definition above). A `BREAKING` release does not
+  advance the `latest` moving tag.
+- **Verification**: the image reference, its multi-arch index digest, and
+  the `cosign verify` command (or a pointer to `scripts/verify-release.sh`)
+  so a self-hoster can confirm the artifact before deploying.
+
+A minimal template:
+
+```markdown
+## Highlights
+- ...
+
+## Migration required?
+No. Schema version unchanged at N.
+
+## Minimum client version
+0.0.0
+
+## Verification
+Image: ghcr.io/hushhq/hush-server:vX.Y.Z
+Digest: sha256:...
+./scripts/verify-release.sh vX.Y.Z
+```
+
 ## Backups are mandatory before upgrading
 
 Always take a backup before any upgrade. See
