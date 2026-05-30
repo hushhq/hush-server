@@ -1,0 +1,28 @@
+# Optional overlay: publish hush-api on a host port.
+#
+# The default self-host stack does NOT bind hush-api to a host port. The
+# bundled Caddy (and the IP-mode proxy) reach it over the compose network at
+# `hush-api:8080`, so no host binding is needed and 8080 stays free on the
+# host (HUSHHQ-94).
+#
+# Layer this file ONLY when you front the API with your own host-level
+# reverse proxy (nginx, an existing Caddy, a load balancer) that lives
+# outside the compose network and therefore needs a host port to reach the
+# API:
+#
+#   docker compose \
+#     -f docker-compose.prod.yml \
+#     -f docker-compose.hostport.yml \
+#     up -d
+#
+# The host port defaults to 8080 and is overridable so it does not collide
+# with whatever else you run:
+#
+#   HUSH_API_HOST_PORT=8088 docker compose -f docker-compose.prod.yml -f docker-compose.hostport.yml up -d
+#
+# Bound to 127.0.0.1 so the API is reachable only from the host's own
+# reverse proxy, never directly from the public internet.
+services:
+  hush-api:
+    ports:
+      - "127.0.0.1:${HUSH_API_HOST_PORT:-8080}:8080"
