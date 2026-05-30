@@ -6,9 +6,9 @@ tool expects.
 
 ## Every migration needs a metadata sidecar
 
-As of HUSHHQ-83 phase 3, each `NNNNNN_slug.up.sql` must ship a sibling
-`NNNNNN_slug.meta.json`. The sidecar declares the compatibility facts the
-release and upgrade pipeline needs but cannot infer from the SQL:
+Each `NNNNNN_slug.up.sql` must ship a sibling `NNNNNN_slug.meta.json`. The
+sidecar declares the compatibility facts the release and upgrade pipeline
+needs but cannot infer from the SQL:
 
 ```json
 {

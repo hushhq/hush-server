@@ -160,6 +160,28 @@ a fail-safe stop. It does not make migrations reversible. Rolling back
 across a forward migration still requires restoring the database from a
 pre-upgrade backup. Always back up before upgrading.
 
+### Auto-updaters (Watchtower and friends)
+
+Auto-updaters are best-effort, not turnkey, and there is nothing for them
+to auto-update to today. Only immutable `vX.Y.Z` tags are published; there
+is no `latest` or `nightly` moving tag (see
+[release-policy.md](release-policy.md)). A Watchtower watching a fixed
+`vX.Y.Z` is a no-op: the digest never changes.
+
+When moving tags arrive in a future release, two protections still apply,
+and you should understand them before pointing any auto-updater at Hush:
+
+- The server **refuses to start** if an auto-pulled image is older than the
+  schema the live database is already on (the boot gate above). An updater
+  that rolls you backwards across a migration produces a stopped container
+  with an actionable error, not silent corruption.
+- Clients **refuse to talk** to a server whose `min_compatible_client_version`
+  they predate, and surface an update prompt. An auto-updated server that
+  outpaces your clients breaks login/handshake until the clients update.
+
+If you cannot keep clients current, do not run an auto-updater on a moving
+tag. Pin an exact `vX.Y.Z` and upgrade deliberately, with a backup first.
+
 ## Storage backends
 
 Three options, fully documented in [RUNBOOK.md → Storage backends](RUNBOOK.md#storage-backends):
@@ -184,8 +206,8 @@ sections most relevant to a self-hoster:
   loosen this.
 - **MLS, Messages, and Realtime Catch-up**, MLS ciphersuite and
   epoch handling are protocol invariants. Server upgrades that change
-  these will be flagged in release notes as `BREAKING` once
-  HUSHHQ-84 ships.
+  these are flagged in release notes as `BREAKING` (see
+  [release-policy.md](release-policy.md)).
 - **Voice Rooms and LiveKit**, the RTC subdomain (`rtc.example.com`)
   must be a separate origin from the API domain for the
   Safari/iCloud Private Relay path. `setup.sh` enforces this.
