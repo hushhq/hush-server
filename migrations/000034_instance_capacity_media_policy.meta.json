@@ -1,0 +1,7 @@
+{
+  "version": 34,
+  "summary": "instance capacity media policy",
+  "min_prior_server_version": "0.0.0",
+  "compat_break": false,
+  "supports_rollback": true
+}
