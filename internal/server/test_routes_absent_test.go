@@ -52,3 +52,17 @@ func TestBuildServer_TestSessionReturns404InProdBuild(t *testing.T) {
 		t.Fatalf("POST /api/test/session = %d, want 404 (test routes must be absent in prod build)", rec.Code)
 	}
 }
+
+// TestTestSeedRoute_AbsentInProdBuild asserts that POST /api/test/seed returns
+// 404 in a production (untagged) build, where registerTestRoutes is the no-op
+// from test_routes_prod.go. DB-free; runs on every PR.
+func TestTestSeedRoute_AbsentInProdBuild(t *testing.T) {
+	r := chi.NewRouter()
+	registerTestRoutes(r, nil, "test-secret") // prod no-op; args ignored by stub
+	req := httptest.NewRequest(http.MethodPost, "/api/test/seed", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for /api/test/seed in prod build, got %d", rec.Code)
+	}
+}

@@ -29,6 +29,7 @@ func registerTestRoutes(r chi.Router, pool *db.Pool, jwtSecret string) {
 	}
 	h := &testHandler{pool: pool, jwtSecret: jwtSecret}
 	r.Post("/api/test/session", h.createSession)
+	r.Post("/api/test/seed", h.createSeed)
 }
 
 type testHandler struct {
@@ -92,6 +93,48 @@ func (h *testHandler) createSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeTestJSON(w, http.StatusCreated, testSessionResponse{Token: token, UserID: user.ID, DeviceID: deviceID})
+}
+
+type testSeedRequest struct {
+	UserIDs []string `json:"userIds"`
+}
+
+type testSeedResponse struct {
+	ServerID  string `json:"serverId"`
+	ChannelID string `json:"channelId"`
+}
+
+// createSeed provisions one server, one voice channel, and a membership row per
+// userId, mirroring the direct-DB seeding the headless Go harness performs. E2E
+// only: compiled in solely under -tags e2e_test.
+func (h *testHandler) createSeed(w http.ResponseWriter, r *http.Request) {
+	var req testSeedRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeTestJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+	if len(req.UserIDs) == 0 {
+		writeTestJSON(w, http.StatusBadRequest, map[string]string{"error": "userIds required"})
+		return
+	}
+	ctx := r.Context()
+	srv, err := h.pool.CreateServer(ctx, []byte("e2e"))
+	if err != nil {
+		writeTestJSON(w, http.StatusInternalServerError, map[string]string{"error": "create server: " + err.Error()})
+		return
+	}
+	ch, err := h.pool.CreateChannel(ctx, srv.ID, []byte("e2e"), "voice", nil, 0)
+	if err != nil {
+		writeTestJSON(w, http.StatusInternalServerError, map[string]string{"error": "create channel: " + err.Error()})
+		return
+	}
+	for _, uid := range req.UserIDs {
+		if err := h.pool.AddServerMember(ctx, srv.ID, uid, 0); err != nil {
+			writeTestJSON(w, http.StatusInternalServerError, map[string]string{"error": "add member " + uid + ": " + err.Error()})
+			return
+		}
+	}
+	writeTestJSON(w, http.StatusCreated, testSeedResponse{ServerID: srv.ID, ChannelID: ch.ID})
 }
 
 func writeTestJSON(w http.ResponseWriter, status int, body any) {
