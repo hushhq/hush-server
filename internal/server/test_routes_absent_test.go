@@ -73,3 +73,24 @@ func TestBuildServer_TestSeedReturns404InProdBuild(t *testing.T) {
 		t.Fatalf("POST /api/test/seed = %d, want 404 (test routes must be absent in prod build)", rec.Code)
 	}
 }
+
+// TestBuildServer_TestOpenRegistrationReturns404InProdBuild asserts the
+// observable: in a prod build, POST /api/test/open-registration is 404 through
+// the real BuildServer router. The endpoint mutates the instance registration
+// policy without auth, so it must never reach a shipped binary.
+func TestBuildServer_TestOpenRegistrationReturns404InProdBuild(t *testing.T) {
+	handler, _ := BuildServer(Deps{
+		Cfg:            config.Config{JWTSecret: "test-secret"},
+		HandshakeCache: api.NewInstanceCache(),
+		HTTPMetrics:    api.NewHTTPMetrics(),
+		StartedAt:      time.Now(),
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/test/open-registration", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("POST /api/test/open-registration = %d, want 404 (test routes must be absent in prod build)", rec.Code)
+	}
+}

@@ -111,6 +111,55 @@ func TestSeedEndpoint_RejectsEmptyUserIDs(t *testing.T) {
 	}
 }
 
+// TestOpenRegistrationEndpoint_FlipsInstanceModeToOpen exercises the build-tagged
+// POST /api/test/open-registration. A fresh DB defaults registration_mode to
+// "invite_only"; the Playwright media suite needs it "open" so each client can
+// drive the real register flow. Asserts the OUTCOME via db.GetInstanceConfig.
+func TestOpenRegistrationEndpoint_FlipsInstanceModeToOpen(t *testing.T) {
+	dbURL := testDBURL()
+	if dbURL == "" {
+		t.Skip("TEST_DATABASE_URL/DATABASE_URL not set; skipping open-registration e2e")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	migrateUp(t, dbURL)
+	pool, err := db.Open(ctx, dbURL)
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	defer pool.Close()
+
+	ts := httptest.NewServer(buildTestHandler(t, pool))
+	defer ts.Close()
+
+	before, err := pool.GetInstanceConfig(ctx)
+	if err != nil {
+		t.Fatalf("GetInstanceConfig (before): %v", err)
+	}
+	if before.RegistrationMode != "invite_only" {
+		t.Logf("note: fresh registration_mode = %q (expected invite_only default)", before.RegistrationMode)
+	}
+
+	res, err := http.Post(ts.URL+"/api/test/open-registration", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST /api/test/open-registration: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("open-registration: want 200, got %d", res.StatusCode)
+	}
+
+	after, err := pool.GetInstanceConfig(ctx)
+	if err != nil {
+		t.Fatalf("GetInstanceConfig (after): %v", err)
+	}
+	if after.RegistrationMode != "open" {
+		t.Fatalf("registration_mode after open-registration = %q, want open", after.RegistrationMode)
+	}
+}
+
 // seedTestUser provisions one user row with a fresh random Ed25519 public key
 // (users.root_public_key is UNIQUE) and returns its id. The seed endpoint only
 // needs an existing userId to attach a membership; the full session/JWT flow is

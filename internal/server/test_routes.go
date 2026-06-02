@@ -30,6 +30,7 @@ func registerTestRoutes(r chi.Router, pool *db.Pool, jwtSecret string) {
 	h := &testHandler{pool: pool, jwtSecret: jwtSecret}
 	r.Post("/api/test/session", h.createSession)
 	r.Post("/api/test/seed", h.createSeed)
+	r.Post("/api/test/open-registration", h.openRegistration)
 }
 
 type testHandler struct {
@@ -133,6 +134,21 @@ func (h *testHandler) createSeed(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeTestJSON(w, http.StatusCreated, testSeedResponse{ServerID: srv.ID, ChannelID: ch.ID})
+}
+
+// openRegistration flips the instance registration_mode to "open" so the
+// Playwright media suite can drive the REAL register flow (each browser client
+// generates a BIP39 identity and registers a fresh account, which is the only
+// way to obtain a usable client-side vault + MLS identity). A fresh DB defaults
+// to "invite_only", which would 403 the register call. E2E only: compiled in
+// solely under -tags e2e_test.
+func (h *testHandler) openRegistration(w http.ResponseWriter, r *http.Request) {
+	open := "open"
+	if err := h.pool.UpdateInstanceConfig(r.Context(), nil, nil, &open, nil, nil, nil, nil, nil, nil, nil, nil, nil); err != nil {
+		writeTestJSON(w, http.StatusInternalServerError, map[string]string{"error": "open registration: " + err.Error()})
+		return
+	}
+	writeTestJSON(w, http.StatusOK, map[string]string{"registrationMode": open})
 }
 
 func writeTestJSON(w http.ResponseWriter, status int, body any) {
