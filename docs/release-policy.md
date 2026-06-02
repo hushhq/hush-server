@@ -89,7 +89,9 @@ The shape is fixed so a self-hoster (and the `/releases` page on the
 landing site) can read the same facts every time, and so CI can fail a
 release whose notes are missing a required section. The required sections:
 
-- **Highlights**: user-facing bullets of what changed.
+- **Highlights**: user-facing bullets of what changed, copied from the matching
+  `## [version]` section of `CHANGELOG.md` (the single source of truth for the
+  per-version change list).
 - **Migration required?**: `Yes` or `No`. If `Yes`, the steps, and whether
   the schema version advances.
 - **Minimum client version**: the value the server advertises as
