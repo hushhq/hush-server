@@ -26,7 +26,11 @@ services:
       - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./scripts/init-hush-db.sql:/docker-entrypoint-initdb.d/02-hush.sql:ro
+      # The hush role + database are provisioned by the postgres image from the
+      # POSTGRES_USER/POSTGRES_PASSWORD/POSTGRES_DB vars above (same as prod).
+      # Do NOT also mount an init script that re-creates them: the duplicate
+      # CREATE USER aborts initdb under ON_ERROR_STOP and the container never
+      # becomes healthy.
     # port 5432 not exposed to host - host postgres already uses it
     # use `docker exec -it hush-postgres psql` for direct access
     healthcheck:
@@ -55,8 +59,8 @@ services:
       - CORS_ORIGIN=${CORS_ORIGIN:-*}
       - SERVICE_IDENTITY_MASTER_KEY=${SERVICE_IDENTITY_MASTER_KEY:-}
       - TRANSPARENCY_LOG_PRIVATE_KEY=${TRANSPARENCY_LOG_PRIVATE_KEY:-}
-      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
-      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY:-devkey}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:-dev-livekit-secret-change-in-production}
       - LIVEKIT_URL=${LIVEKIT_URL:-ws://livekit:7880}
       - GIPHY_API_KEY=${GIPHY_API_KEY:-}
     depends_on:
@@ -96,9 +100,9 @@ services:
             /etc/livekit.yaml.tmpl > /tmp/livekit.yaml
         exec /livekit-server --config /tmp/livekit.yaml
     environment:
-      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
-      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
-      - NODE_IP=${NODE_IP}
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY:-devkey}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:-dev-livekit-secret-change-in-production}
+      - NODE_IP=${NODE_IP:-127.0.0.1}
     volumes:
       - ./livekit/livekit.yaml:/etc/livekit.yaml.tmpl:ro
     ports:
