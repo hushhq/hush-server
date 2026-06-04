@@ -187,6 +187,9 @@ func (m *messageStoreMock) UpdateInstanceConfig(context.Context, *string, *strin
 }
 func (m *messageStoreMock) GetUserRole(context.Context, string) (string, error)  { return "member", nil }
 func (m *messageStoreMock) UpdateUserRole(context.Context, string, string) error { return nil }
+func (m *messageStoreMock) UpdateUserDisplayName(context.Context, string, string) error {
+	return nil
+}
 func (m *messageStoreMock) ListMembers(context.Context) ([]models.Member, error) { return nil, nil }
 
 // Channel stubs (guild-scoped - serverID param).
